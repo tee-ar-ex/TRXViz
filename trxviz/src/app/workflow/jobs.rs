@@ -12,6 +12,7 @@ use trxviz_core::renderer::glyph_renderer::GlyphResources;
 use trxviz_core::renderer::mesh_renderer::MeshResources;
 use trxviz_core::renderer::slice_renderer::AllSliceResources;
 use trxviz_core::renderer::streamline_renderer::{AllStreamlineResources, StreamlineResources};
+use trxviz_core::scene::direct_streamline_import_warnings;
 
 use super::*;
 
@@ -675,10 +676,7 @@ impl crate::app::TrxVizApp {
             {
                 all.entries.clear();
             }
-            if let Some(all) = renderer
-                .callback_resources
-                .get_mut::<AllSliceResources>()
-            {
+            if let Some(all) = renderer.callback_resources.get_mut::<AllSliceResources>() {
                 all.entries.clear();
             }
             if let Some(mesh_resources) = renderer.callback_resources.get_mut::<MeshResources>() {
@@ -735,7 +733,11 @@ impl crate::app::TrxVizApp {
             return;
         };
 
-        match gui_save_project(&self.workflow.document, &self.workflow.workspace, &target_path) {
+        match gui_save_project(
+            &self.workflow.document,
+            &self.workflow.workspace,
+            &target_path,
+        ) {
             Ok(()) => {
                 self.workflow.project_path = Some(target_path.clone());
                 self.status_msg = Some(format!(
@@ -800,6 +802,14 @@ impl crate::app::TrxVizApp {
                                     .map(|data| crate::app::state::LoadedStreamlineSource {
                                         data,
                                         backing: StreamlineBacking::Imported(Arc::new(tractogram)),
+                                        warnings: direct_streamline_import_warnings(
+                                            &asset_path,
+                                            &ConversionOptions {
+                                                vtk_coordinate_mode:
+                                                    trx_rs::VtkCoordinateMode::HeaderOrWarn,
+                                                ..Default::default()
+                                            },
+                                        ),
                                     })
                             })
                             .map(|source| {
@@ -820,6 +830,7 @@ impl crate::app::TrxVizApp {
                                     .map(|data| crate::app::state::LoadedStreamlineSource {
                                         data,
                                         backing: StreamlineBacking::Native(Arc::new(any)),
+                                        warnings: Vec::new(),
                                     })
                             })
                             .map(|source| {
@@ -865,22 +876,19 @@ impl crate::app::TrxVizApp {
                     id,
                     path: asset_path,
                     label_table_path,
-                } => ParcellationVolume::load(
-                    &asset_path,
-                    label_table_path.as_deref(),
-                )
-                .map_err(|err| err.to_string())
-                .map(|data| {
-                    self.apply_loaded_parcellation_with_options(
-                        asset_path,
-                        crate::app::state::LoadedParcellationSource {
-                            data,
-                            label_table_path,
-                        },
-                        Some(id),
-                        false,
-                    );
-                }),
+                } => ParcellationVolume::load(&asset_path, label_table_path.as_deref())
+                    .map_err(|err| err.to_string())
+                    .map(|data| {
+                        self.apply_loaded_parcellation_with_options(
+                            asset_path,
+                            crate::app::state::LoadedParcellationSource {
+                                data,
+                                label_table_path,
+                            },
+                            Some(id),
+                            false,
+                        );
+                    }),
             };
 
             if let Err(err) = load_result {

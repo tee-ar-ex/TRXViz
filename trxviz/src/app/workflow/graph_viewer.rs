@@ -65,10 +65,7 @@ pub fn snarl_from_graph(graph: &WorkflowGraph) -> Snarl<WorkflowNode> {
 /// This assigns fresh UUIDs to any nodes that were added via the Snarl context
 /// menu (they start with `WorkflowNodeUuid(0)`), rewrites the canonical
 /// `WorkflowGraph` in-place, and updates `document.next_node_uuid`.
-pub fn sync_graph_from_snarl(
-    snarl: &mut Snarl<WorkflowNode>,
-    document: &mut WorkflowDocument,
-) {
+pub fn sync_graph_from_snarl(snarl: &mut Snarl<WorkflowNode>, document: &mut WorkflowDocument) {
     // Pass 1: assign UUIDs to any newly added (uuid == 0) nodes.
     let mut next = document.next_node_uuid.max(1);
     let node_ids: Vec<NodeId> = snarl.node_ids().map(|(id, _)| id).collect();
@@ -240,7 +237,6 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
             };
             ui.colored_label(color, execution.label());
         }
-
     }
 
     fn connect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<WorkflowNode>) {
@@ -282,7 +278,9 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
         let screen_rect = to_global * rect;
         if ui.input(|i| {
             i.pointer.primary_clicked()
-                && i.pointer.interact_pos().map_or(false, |p| screen_rect.contains(p))
+                && i.pointer
+                    .interact_pos()
+                    .map_or(false, |p| screen_rect.contains(p))
         }) {
             *self.selected = Some(WorkflowSelection::Node(snarl[node].uuid));
         }

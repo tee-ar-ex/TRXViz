@@ -126,12 +126,9 @@ pub fn show_menu_bar(ctx: &egui::Context, ui_mode: UiMode) -> MenuAction {
             });
             ui.separator();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let advanced = ui.selectable_label(
-                    ui_mode == UiMode::Advanced,
-                    UiMode::Advanced.label(),
-                );
-                let simple =
-                    ui.selectable_label(ui_mode == UiMode::Simple, UiMode::Simple.label());
+                let advanced =
+                    ui.selectable_label(ui_mode == UiMode::Advanced, UiMode::Advanced.label());
+                let simple = ui.selectable_label(ui_mode == UiMode::Simple, UiMode::Simple.label());
                 if advanced.clicked() {
                     action.switch_mode = Some(UiMode::Advanced);
                 } else if simple.clicked() {

@@ -21,6 +21,7 @@ pub struct LoadedTrx {
     pub path: PathBuf,
     pub data: Arc<TrxGpuData>,
     pub backing: Option<StreamlineBacking>,
+    pub import_warnings: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

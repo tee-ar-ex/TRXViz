@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
 use crate::data::gifti_data::GiftiSurfaceData;
 use glam::Vec3;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use trx_rs::{
     AnyTrxFile, DataArray, StreamlineAabb, Tractogram, build_streamline_aabbs_from_slices,
 };

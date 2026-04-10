@@ -288,7 +288,12 @@ impl MeshResources {
         }
     }
 
-    pub fn add_surface(&mut self, surface_id: usize, device: &wgpu::Device, surface: &GiftiSurfaceData) {
+    pub fn add_surface(
+        &mut self,
+        surface_id: usize,
+        device: &wgpu::Device,
+        surface: &GiftiSurfaceData,
+    ) {
         let vertices: Vec<MeshVertex> = surface
             .vertices
             .iter()
@@ -361,15 +366,18 @@ impl MeshResources {
             })
         });
 
-        self.surfaces.insert(surface_id, GpuSurface {
-            vertex_buffer,
-            scalar_buffer,
-            index_buffer,
-            transparent_index_buffers,
-            num_indices: surface.indices.len() as u32,
-            uniform_buffers,
-            bind_groups,
-        });
+        self.surfaces.insert(
+            surface_id,
+            GpuSurface {
+                vertex_buffer,
+                scalar_buffer,
+                index_buffer,
+                transparent_index_buffers,
+                num_indices: surface.indices.len() as u32,
+                uniform_buffers,
+                bind_groups,
+            },
+        );
     }
 
     pub fn update_surface_uniforms(

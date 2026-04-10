@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use trx_rs::Format;
+use trx_rs::{Format, VtkCoordinateMode};
 
 use crate::app::state::ImportDialogState;
 
@@ -42,7 +42,7 @@ pub fn show_import_dialog(
                 ui.monospace(source_label);
                 if ui.button("Browse...").clicked()
                     && let Some(path) = rfd::FileDialog::new()
-                        .add_filter("Streamline files", &["tck", "vtk", "tt", "gz"])
+                        .add_filter("Streamline files", &["trk", "tck", "vtk", "tt", "gz"])
                         .pick_file()
                 {
                     state.source_path = Some(path.clone());
@@ -57,7 +57,7 @@ pub fn show_import_dialog(
             } else if state.source_path.is_some() {
                 ui.colored_label(egui::Color32::YELLOW, "Unsupported or unrecognized streamline format.");
             } else {
-                ui.label("Choose a `.tck`, `.tck.gz`, `.vtk`, or `.tt.gz` file.");
+                ui.label("Choose a `.trk`, `.trk.gz`, `.tck`, `.tck.gz`, `.vtk`, or `.tt.gz` file.");
             }
 
             if matches!(format, Some(Format::Tck | Format::Vtk)) {
@@ -82,6 +82,34 @@ pub fn show_import_dialog(
                         state.reference_path = None;
                     }
                 });
+            }
+
+            if matches!(format, Some(Format::Vtk)) {
+                ui.separator();
+                ui.label("VTK coordinate system");
+                egui::ComboBox::from_id_salt("vtk_coordinate_mode")
+                    .selected_text(vtk_coordinate_mode_label(state.vtk_coordinate_mode))
+                    .show_ui(ui, |ui| {
+                        for mode in [
+                            VtkCoordinateMode::HeaderOrWarn,
+                            VtkCoordinateMode::AssumeRas,
+                            VtkCoordinateMode::AssumeLps,
+                        ] {
+                            ui.selectable_value(
+                                &mut state.vtk_coordinate_mode,
+                                mode,
+                                vtk_coordinate_mode_label(mode),
+                            );
+                        }
+                    });
+                ui.small(vtk_coordinate_mode_description(state.vtk_coordinate_mode));
+                if let Some(path) = &state.source_path
+                    && let Ok(warnings) = trx_rs::vtk_import_warnings(path, state.vtk_coordinate_mode)
+                {
+                    for warning in warnings {
+                        ui.colored_label(egui::Color32::YELLOW, warning);
+                    }
+                }
             }
 
             ui.separator();
@@ -112,7 +140,7 @@ pub fn show_import_dialog(
                 }
                 let can_import = matches!(
                     state.detected_format,
-                    Some(Format::Tck | Format::Vtk | Format::TinyTrack)
+                    Some(Format::Trk | Format::Tck | Format::Vtk | Format::TinyTrack)
                 );
                 if ui
                     .add_enabled(can_import, egui::Button::new("Import"))
@@ -132,6 +160,9 @@ pub fn show_import_dialog(
 
 fn format_summary(format: Format) -> &'static str {
     match format {
+        Format::Trk => {
+            "TrackVis TRK import. Direct viewing is intentionally second-class; convert to `.trx` first if you care about full handling."
+        }
         Format::Tck => "MRtrix TCK import. Gzipped `.tck.gz` is supported.",
         Format::Vtk => "VTK PolyData streamline import.",
         Format::TinyTrack => {
@@ -141,9 +172,49 @@ fn format_summary(format: Format) -> &'static str {
     }
 }
 
+fn vtk_coordinate_mode_label(mode: VtkCoordinateMode) -> &'static str {
+    match mode {
+        VtkCoordinateMode::HeaderOrWarn => "Use header, else warn + assume LPS",
+        VtkCoordinateMode::AssumeRas => "Force RAS",
+        VtkCoordinateMode::AssumeLps => "Force LPS",
+    }
+}
+
+fn vtk_coordinate_mode_description(mode: VtkCoordinateMode) -> &'static str {
+    match mode {
+        VtkCoordinateMode::HeaderOrWarn => {
+            "Reads `SPACE=RAS` or `SPACE=LPS` when present. If the file is silent, trx-rs warns and assumes LPS."
+        }
+        VtkCoordinateMode::AssumeRas => "Treat the stored VTK coordinates as already being in RAS.",
+        VtkCoordinateMode::AssumeLps => {
+            "Treat the stored VTK coordinates as LPS and flip them into RAS."
+        }
+    }
+}
+
 #[allow(dead_code)]
 fn _display_path(path: &Option<PathBuf>) -> String {
     path.as_ref()
         .map(|value| value.display().to_string())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_summary, vtk_coordinate_mode_description, vtk_coordinate_mode_label};
+    use trx_rs::{Format, VtkCoordinateMode};
+
+    #[test]
+    fn trk_summary_recommends_trx_conversion() {
+        let summary = format_summary(Format::Trk);
+        assert!(summary.contains("TrackVis"));
+        assert!(summary.contains("convert"));
+        assert!(summary.contains(".trx"));
+    }
+
+    #[test]
+    fn vtk_mode_labels_are_stable() {
+        assert!(vtk_coordinate_mode_label(VtkCoordinateMode::HeaderOrWarn).contains("assume LPS"));
+        assert!(vtk_coordinate_mode_description(VtkCoordinateMode::AssumeRas).contains("RAS"));
+    }
 }

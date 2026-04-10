@@ -46,28 +46,40 @@ impl super::super::TrxVizApp {
 
                     for asset in assets {
                         match (&editability, asset) {
-                            (WorkflowEditability::Simple(bindings), WorkflowAssetDocument::Streamlines { id, .. }) => {
+                            (
+                                WorkflowEditability::Simple(bindings),
+                                WorkflowAssetDocument::Streamlines { id, .. },
+                            ) => {
                                 if let Some(binding) = bindings.streamline.get(&id).copied() {
                                     self.show_simple_streamline_asset(ui, id, binding, false);
                                 } else {
                                     self.show_simple_streamline_summary(ui, id);
                                 }
                             }
-                            (WorkflowEditability::Simple(bindings), WorkflowAssetDocument::Volume { id, .. }) => {
+                            (
+                                WorkflowEditability::Simple(bindings),
+                                WorkflowAssetDocument::Volume { id, .. },
+                            ) => {
                                 if let Some(binding) = bindings.volume.get(&id).copied() {
                                     self.show_simple_volume_asset(ui, id, binding, false);
                                 } else {
                                     self.show_simple_volume_summary(ui, id);
                                 }
                             }
-                            (WorkflowEditability::Simple(bindings), WorkflowAssetDocument::Surface { id, .. }) => {
+                            (
+                                WorkflowEditability::Simple(bindings),
+                                WorkflowAssetDocument::Surface { id, .. },
+                            ) => {
                                 if let Some(binding) = bindings.surface.get(&id).copied() {
                                     self.show_simple_surface_asset(ui, id, binding, false);
                                 } else {
                                     self.show_simple_surface_summary(ui, id);
                                 }
                             }
-                            (WorkflowEditability::Simple(bindings), WorkflowAssetDocument::Parcellation { id, .. }) => {
+                            (
+                                WorkflowEditability::Simple(bindings),
+                                WorkflowAssetDocument::Parcellation { id, .. },
+                            ) => {
                                 if let Some(binding) = bindings.parcellation.get(&id).copied() {
                                     self.show_simple_parcellation_asset(ui, id, binding, false);
                                 } else {
@@ -116,7 +128,7 @@ impl super::super::TrxVizApp {
                 ui.centered_and_justified(|ui| {
                     ui.vertical(|ui| {
                         ui.heading("Drop files to start");
-                        ui.small("TRX, TCK, VTK, TinyTrack, NIfTI, GIFTI, and parcellations are supported.");
+                        ui.small("TRX, TRK, TCK, VTK, TinyTrack, NIfTI, GIFTI, and parcellations are supported.");
                         ui.add_space(12.0);
                         if ui.button("Open Files...").clicked() {
                             open_files_requested = true;
@@ -141,6 +153,31 @@ impl super::super::TrxVizApp {
                         self.status_msg = None;
                     }
                 });
+            });
+            ui.add_space(8.0);
+        }
+        if !self
+            .scene
+            .trx_files
+            .iter()
+            .all(|trx| trx.import_warnings.is_empty())
+        {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 214, 102),
+                    "Imported streamline warnings",
+                );
+                for trx in self
+                    .scene
+                    .trx_files
+                    .iter()
+                    .filter(|trx| !trx.import_warnings.is_empty())
+                {
+                    ui.small(format!("{}:", trx.name));
+                    for warning in &trx.import_warnings {
+                        ui.label(warning);
+                    }
+                }
             });
             ui.add_space(8.0);
         }
@@ -172,6 +209,7 @@ impl super::super::TrxVizApp {
         let nb_streamlines = trx.data.nb_streamlines;
         let nb_vertices = trx.data.nb_vertices;
         let group_count = trx.data.groups.len();
+        let import_warnings = trx.import_warnings.clone();
         let available_groups = self
             .workflow
             .runtime
@@ -187,6 +225,9 @@ impl super::super::TrxVizApp {
                 ui.small(format!(
                     "{nb_streamlines} streamlines, {nb_vertices} vertices, {group_count} groups"
                 ));
+                for warning in &import_warnings {
+                    ui.colored_label(egui::Color32::from_rgb(255, 214, 102), warning);
+                }
                 if read_only {
                     ui.small("Switch to Advanced mode to edit this workflow.");
                     return;
@@ -207,9 +248,7 @@ impl super::super::TrxVizApp {
                 if let Some(WorkflowNodeKind::LimitStreamlines { limit, .. }) =
                     self.workflow_node_kind_mut(binding.limit)
                 {
-                    ui.add(
-                        egui::Slider::new(limit, 1..=nb_streamlines.max(1)).text("Limit"),
-                    );
+                    ui.add(egui::Slider::new(limit, 1..=nb_streamlines.max(1)).text("Limit"));
                 }
 
                 if let Some(kind) = self.workflow_node_kind_mut(binding.color) {
@@ -289,7 +328,12 @@ impl super::super::TrxVizApp {
         binding: SimpleDisplayBinding,
         read_only: bool,
     ) {
-        let Some(surface) = self.scene.gifti_surfaces.iter().find(|asset| asset.id == id) else {
+        let Some(surface) = self
+            .scene
+            .gifti_surfaces
+            .iter()
+            .find(|asset| asset.id == id)
+        else {
             return;
         };
         let name = truncate_simple_label(&surface.name, 36);
@@ -300,7 +344,9 @@ impl super::super::TrxVizApp {
             .default_open(false)
             .show(ui, |ui| {
                 ui.small(path.clone());
-                ui.small(format!("{vertex_count} vertices, {triangle_count} triangles"));
+                ui.small(format!(
+                    "{vertex_count} vertices, {triangle_count} triangles"
+                ));
                 if read_only {
                     ui.small("Switch to Advanced mode to edit this workflow.");
                     return;
@@ -323,7 +369,12 @@ impl super::super::TrxVizApp {
         binding: SimpleDisplayBinding,
         read_only: bool,
     ) {
-        let Some(parcel) = self.scene.parcellations.iter().find(|asset| asset.asset.id == id) else {
+        let Some(parcel) = self
+            .scene
+            .parcellations
+            .iter()
+            .find(|asset| asset.asset.id == id)
+        else {
             return;
         };
         let name = truncate_simple_label(&parcel.asset.name, 36);
@@ -368,13 +419,23 @@ impl super::super::TrxVizApp {
     }
 
     fn show_simple_surface_summary(&self, ui: &mut egui::Ui, id: usize) {
-        if let Some(surface) = self.scene.gifti_surfaces.iter().find(|asset| asset.id == id) {
+        if let Some(surface) = self
+            .scene
+            .gifti_surfaces
+            .iter()
+            .find(|asset| asset.id == id)
+        {
             ui.label(truncate_simple_label(&surface.name, 36));
         }
     }
 
     fn show_simple_parcellation_summary(&self, ui: &mut egui::Ui, id: usize) {
-        if let Some(parcel) = self.scene.parcellations.iter().find(|asset| asset.asset.id == id) {
+        if let Some(parcel) = self
+            .scene
+            .parcellations
+            .iter()
+            .find(|asset| asset.asset.id == id)
+        {
             ui.label(truncate_simple_label(&parcel.asset.name, 36));
         }
     }
@@ -398,7 +459,9 @@ impl super::super::TrxVizApp {
     }
 
     fn fallback_display_binding(&self, _id: usize) -> SimpleDisplayBinding {
-        SimpleDisplayBinding { display: WorkflowNodeUuid(0) }
+        SimpleDisplayBinding {
+            display: WorkflowNodeUuid(0),
+        }
     }
 }
 
@@ -475,11 +538,7 @@ fn render_style_label(style: RenderStyle) -> &'static str {
 fn opacity_checkbox(ui: &mut egui::Ui, opacity: &mut f32, label: &str) {
     let mut visible = *opacity > 0.0;
     if ui.checkbox(&mut visible, label).changed() {
-        *opacity = if visible {
-            (*opacity).max(0.75)
-        } else {
-            0.0
-        };
+        *opacity = if visible { (*opacity).max(0.75) } else { 0.0 };
     }
 }
 

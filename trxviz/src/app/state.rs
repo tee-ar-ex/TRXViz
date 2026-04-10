@@ -9,9 +9,9 @@ use trxviz_core::data::gifti_data::GiftiSurfaceData;
 use trxviz_core::data::loaded_files::{FileId, LoadedNifti};
 use trxviz_core::data::nifti_data::NiftiVolume;
 use trxviz_core::data::orientation_field::BoundaryContactField;
+pub use trxviz_core::lighting::SceneLightingParams;
 use trxviz_core::renderer::camera::{OrbitCamera, OrthoSliceCamera};
 use trxviz_core::renderer::slice_renderer::SliceAxis;
-pub use trxviz_core::lighting::SceneLightingParams;
 pub use trxviz_core::scene::{
     HeadlessScene as SceneState, LoadedGiftiSurface, LoadedParcellationSource,
     LoadedStreamlineSource,
@@ -23,7 +23,7 @@ use crate::app::workflow::{
     default_document, default_workspace_tree,
 };
 use egui_tiles::Tree;
-use trx_rs::Format;
+use trx_rs::{Format, VtkCoordinateMode};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UiMode {
@@ -156,13 +156,27 @@ pub struct PendingFileLoad {
     pub label: String,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ImportDialogState {
     pub open: bool,
     pub source_path: Option<PathBuf>,
     pub detected_format: Option<Format>,
     pub reference_path: Option<PathBuf>,
+    pub vtk_coordinate_mode: VtkCoordinateMode,
     pub error_msg: Option<String>,
+}
+
+impl Default for ImportDialogState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            source_path: None,
+            detected_format: None,
+            reference_path: None,
+            vtk_coordinate_mode: VtkCoordinateMode::HeaderOrWarn,
+            error_msg: None,
+        }
+    }
 }
 
 impl ImportDialogState {
@@ -171,6 +185,7 @@ impl ImportDialogState {
         self.source_path = path;
         self.detected_format = format;
         self.reference_path = None;
+        self.vtk_coordinate_mode = VtkCoordinateMode::HeaderOrWarn;
         self.error_msg = None;
     }
 
@@ -180,12 +195,25 @@ impl ImportDialogState {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct MergeStreamlineRowState {
     pub source_path: Option<PathBuf>,
     pub detected_format: Option<Format>,
     pub reference_path: Option<PathBuf>,
+    pub vtk_coordinate_mode: VtkCoordinateMode,
     pub group_name: String,
+}
+
+impl Default for MergeStreamlineRowState {
+    fn default() -> Self {
+        Self {
+            source_path: None,
+            detected_format: None,
+            reference_path: None,
+            vtk_coordinate_mode: VtkCoordinateMode::HeaderOrWarn,
+            group_name: String::new(),
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -502,6 +530,7 @@ mod tests {
         assert_eq!(state.source_path.as_deref(), Some(path.as_path()));
         assert_eq!(state.detected_format, Some(Format::Tck));
         assert!(state.reference_path.is_none());
+        assert_eq!(state.vtk_coordinate_mode, VtkCoordinateMode::HeaderOrWarn);
         assert!(state.error_msg.is_none());
     }
 

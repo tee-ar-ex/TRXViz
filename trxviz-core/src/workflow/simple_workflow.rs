@@ -51,8 +51,14 @@ pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEdi
     }
 
     for wire in document.graph.wires() {
-        outgoing.entry(wire.from.node).or_default().push(wire.to.node);
-        incoming.entry(wire.to.node).or_default().push(wire.from.node);
+        outgoing
+            .entry(wire.from.node)
+            .or_default()
+            .push(wire.to.node);
+        incoming
+            .entry(wire.to.node)
+            .or_default()
+            .push(wire.from.node);
     }
 
     let mut bindings = SimpleWorkflowBindings::default();
@@ -61,11 +67,7 @@ pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEdi
     for asset in &document.assets {
         let result = match asset {
             WorkflowAssetDocument::Streamlines { id, .. } => match_streamline_asset(
-                *id,
-                &kinds,
-                &incoming,
-                &outgoing,
-                &mut used,
+                *id, &kinds, &incoming, &outgoing, &mut used,
             )
             .map(|binding| {
                 bindings.streamline.insert(*id, binding);

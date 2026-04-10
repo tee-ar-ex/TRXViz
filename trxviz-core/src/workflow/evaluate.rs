@@ -1477,6 +1477,7 @@ pub fn save_streamline_plan(plan: &SaveStreamlinePlan) -> Result<(), String> {
         &ConversionOptions {
             header,
             trx_positions_dtype,
+            ..Default::default()
         },
     )
     .map_err(|err| err.to_string())

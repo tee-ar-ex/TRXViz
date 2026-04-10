@@ -10,7 +10,9 @@ use pollster::block_on;
 use trx_rs::{AnyTrxFile, ConversionOptions};
 
 use crate::data::gifti_data::GiftiSurfaceData;
-use crate::data::loaded_files::{FileId, LoadedNifti, LoadedTrx, StreamlineBacking, VolumeColormap};
+use crate::data::loaded_files::{
+    FileId, LoadedNifti, LoadedTrx, StreamlineBacking, VolumeColormap,
+};
 use crate::data::nifti_data::NiftiVolume;
 use crate::data::orientation_field::BoundaryGlyphColorMode;
 use crate::data::parcellation_data::{ParcellationVolume, guess_label_table_path};
@@ -21,18 +23,20 @@ use crate::renderer::glyph_renderer::GlyphResources;
 use crate::renderer::mesh_renderer::{MeshDrawStyle, MeshResources};
 use crate::renderer::slice_renderer::{AllSliceResources, SliceAxis, SliceResources};
 use crate::renderer::streamline_renderer::{AllStreamlineResources, StreamlineResources};
-use crate::scene::{HeadlessScene, HeadlessWorkflowState, LoadedGiftiSurface, LoadedParcellationSource, LoadedStreamlineSource};
+use crate::scene::{
+    HeadlessScene, HeadlessWorkflowState, LoadedGiftiSurface, LoadedParcellationSource,
+    LoadedStreamlineSource, direct_streamline_import_warnings,
+};
 use crate::workflow::{
     BundleSurfacePlan, CachedBoundaryField, CachedBundleSurfaceMeshes, CachedDerivedStreamline,
     CachedSurfaceQuery, CachedSurfaceStreamlineMap, CachedTubeGeometry, LoadedParcellation,
     ParcellationAsset, WorkflowAssetDocument, WorkflowJobOutput, WorkflowJobPayload,
     WorkflowNodeUuid, add_default_nodes_for_asset, ensure_node_uuids, evaluate_scene_plan,
     load_workflow_project_from_path, mark_expensive_success, resolve_document_asset_paths,
-    run_workflow_job, save_streamline_plan,
-    workflow_boundary_plan_fingerprint, workflow_bundle_display_fingerprint,
-    workflow_bundle_plan_fingerprint, workflow_reactive_streamline_fingerprint,
-    workflow_streamline_fingerprint, workflow_surface_projection_fingerprint,
-    workflow_surface_query_fingerprint,
+    run_workflow_job, save_streamline_plan, workflow_boundary_plan_fingerprint,
+    workflow_bundle_display_fingerprint, workflow_bundle_plan_fingerprint,
+    workflow_reactive_streamline_fingerprint, workflow_streamline_fingerprint,
+    workflow_surface_projection_fingerprint, workflow_surface_query_fingerprint,
 };
 
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -139,10 +143,14 @@ fn render_loaded_scene(
 ) -> anyhow::Result<()> {
     execute_workflow_to_completion(&scene, &mut workflow)?;
     let gpu = create_gpu_context()?;
-    let mut resources =
-        build_gpu_resources(&gpu.device, &gpu.queue, &scene, &workflow).context("building GPU resources")?;
+    let mut resources = build_gpu_resources(&gpu.device, &gpu.queue, &scene, &workflow)
+        .context("building GPU resources")?;
     let render_data = build_render_data(&scene, &workflow);
-    let camera = build_camera(&resources.bounds, options, options.width as f32 / options.height as f32);
+    let camera = build_camera(
+        &resources.bounds,
+        options,
+        options.width as f32 / options.height as f32,
+    );
     if render_data.glyph_visible {
         scene.boundary_field = workflow
             .runtime
@@ -150,7 +158,12 @@ fn render_loaded_scene(
             .boundary_glyph_draws
             .iter()
             .find(|draw| draw.visible)
-            .and_then(|draw| workflow.execution_cache.boundary_field_cache.get(&draw.build_node_uuid))
+            .and_then(|draw| {
+                workflow
+                    .execution_cache
+                    .boundary_field_cache
+                    .get(&draw.build_node_uuid)
+            })
             .map(|cache| cache.field.clone());
     }
     render_scene3d_to_png(
@@ -166,9 +179,10 @@ fn render_loaded_scene(
     )
 }
 
-fn load_project_state(project_path: &Path) -> anyhow::Result<(HeadlessScene, HeadlessWorkflowState)> {
-    let mut project =
-        load_workflow_project_from_path(project_path).map_err(|err| anyhow!(err))?;
+fn load_project_state(
+    project_path: &Path,
+) -> anyhow::Result<(HeadlessScene, HeadlessWorkflowState)> {
+    let mut project = load_workflow_project_from_path(project_path).map_err(|err| anyhow!(err))?;
     resolve_document_asset_paths(&mut project.document, project_path);
 
     let mut scene = HeadlessScene::default();
@@ -182,6 +196,13 @@ fn load_project_state(project_path: &Path) -> anyhow::Result<(HeadlessScene, Hea
                         data: TrxGpuData::from_tractogram(&tractogram)
                             .map_err(|err| anyhow!(err.to_string()))?,
                         backing: StreamlineBacking::Imported(Arc::new(tractogram)),
+                        warnings: direct_streamline_import_warnings(
+                            &path,
+                            &ConversionOptions {
+                                vtk_coordinate_mode: trx_rs::VtkCoordinateMode::HeaderOrWarn,
+                                ..Default::default()
+                            },
+                        ),
                     }
                 } else {
                     let any = AnyTrxFile::load(&path).map_err(|err| anyhow!(err.to_string()))?;
@@ -222,7 +243,9 @@ fn load_project_state(project_path: &Path) -> anyhow::Result<(HeadlessScene, Hea
     Ok((scene, workflow))
 }
 
-fn load_asset_args_state(args: &AssetArgs) -> anyhow::Result<(HeadlessScene, HeadlessWorkflowState)> {
+fn load_asset_args_state(
+    args: &AssetArgs,
+) -> anyhow::Result<(HeadlessScene, HeadlessWorkflowState)> {
     let mut scene = HeadlessScene::default();
     let mut workflow = HeadlessWorkflowState::default();
 
@@ -238,7 +261,8 @@ fn load_asset_args_state(args: &AssetArgs) -> anyhow::Result<(HeadlessScene, Hea
                 imported: false,
             },
             Some(
-                scene.trx_files
+                scene
+                    .trx_files
                     .iter()
                     .find(|asset| asset.id == id)
                     .map(|asset| asset.data.nb_streamlines.min(30_000))
@@ -315,6 +339,7 @@ fn load_streamline_source_from_any(any: AnyTrxFile) -> anyhow::Result<LoadedStre
         .map(|data| LoadedStreamlineSource {
             data,
             backing: StreamlineBacking::Native(Arc::new(any)),
+            warnings: Vec::new(),
         })
         .map_err(|err| anyhow!(err.to_string()))
 }
@@ -336,14 +361,22 @@ fn apply_loaded_trx(
     source: LoadedStreamlineSource,
     explicit_id: Option<FileId>,
 ) -> FileId {
-    let LoadedStreamlineSource { data, backing } = source;
+    let LoadedStreamlineSource {
+        data,
+        backing,
+        warnings,
+    } = source;
     let is_first = scene.trx_files.is_empty()
         && scene.nifti_files.is_empty()
         && scene.gifti_surfaces.is_empty();
     scene.volume_center = data.center();
     scene.volume_extent = data.extent();
     if is_first {
-        scene.slice_world_offsets = [scene.volume_center.z, scene.volume_center.y, scene.volume_center.x];
+        scene.slice_world_offsets = [
+            scene.volume_center.z,
+            scene.volume_center.y,
+            scene.volume_center.x,
+        ];
     }
     let id = allocate_file_id(scene, explicit_id);
     let data = Arc::new(data);
@@ -357,6 +390,7 @@ fn apply_loaded_trx(
         path,
         data,
         backing: Some(backing),
+        import_warnings: warnings,
     });
     id
 }
@@ -403,7 +437,11 @@ fn apply_loaded_nifti(
     });
     if first_nifti {
         scene.slice_indices = slice_indices;
-        scene.slice_world_offsets = [scene.volume_center.z, scene.volume_center.y, scene.volume_center.x];
+        scene.slice_world_offsets = [
+            scene.volume_center.z,
+            scene.volume_center.y,
+            scene.volume_center.x,
+        ];
     }
     id
 }
@@ -508,9 +546,18 @@ fn execute_workflow_to_completion(
 
         let mut ran_job = false;
 
-        for plan in workflow.runtime.scene_plan.reactive_streamline_plans.clone() {
+        for plan in workflow
+            .runtime
+            .scene_plan
+            .reactive_streamline_plans
+            .clone()
+        {
             let fingerprint = workflow_reactive_streamline_fingerprint(&plan);
-            let record = workflow.execution_cache.node_runs.entry(plan.node_uuid).or_default();
+            let record = workflow
+                .execution_cache
+                .node_runs
+                .entry(plan.node_uuid)
+                .or_default();
             if record.last_success_fingerprint == Some(fingerprint) {
                 continue;
             }
@@ -527,7 +574,11 @@ fn execute_workflow_to_completion(
         for plan in workflow.runtime.scene_plan.surface_query_plans.clone() {
             let fingerprint =
                 workflow_surface_query_fingerprint(&plan.flow, plan.surface_id, plan.depth_mm);
-            let record = workflow.execution_cache.node_runs.entry(plan.node_uuid).or_default();
+            let record = workflow
+                .execution_cache
+                .node_runs
+                .entry(plan.node_uuid)
+                .or_default();
             if record.last_success_fingerprint == Some(fingerprint) {
                 continue;
             }
@@ -548,7 +599,11 @@ fn execute_workflow_to_completion(
                 plan.depth_mm,
                 plan.dps_field.as_deref(),
             );
-            let record = workflow.execution_cache.node_runs.entry(plan.node_uuid).or_default();
+            let record = workflow
+                .execution_cache
+                .node_runs
+                .entry(plan.node_uuid)
+                .or_default();
             if record.last_success_fingerprint == Some(fingerprint) {
                 continue;
             }
@@ -567,7 +622,11 @@ fn execute_workflow_to_completion(
                 continue;
             }
             let fingerprint = workflow_streamline_fingerprint(&draw);
-            let record = workflow.execution_cache.node_runs.entry(draw.node_uuid).or_default();
+            let record = workflow
+                .execution_cache
+                .node_runs
+                .entry(draw.node_uuid)
+                .or_default();
             if record.last_success_fingerprint == Some(fingerprint) {
                 continue;
             }
@@ -641,7 +700,11 @@ fn execute_workflow_to_completion(
                         .map(|cache| cache.fingerprint)
                 }),
             );
-            let record = workflow.execution_cache.node_runs.entry(draw.node_uuid).or_default();
+            let record = workflow
+                .execution_cache
+                .node_runs
+                .entry(draw.node_uuid)
+                .or_default();
             if record.last_success_fingerprint == Some(fingerprint) {
                 continue;
             }
@@ -694,20 +757,21 @@ fn apply_job_result(
     let record = cache.node_runs.entry(node_uuid).or_default();
     match output {
         WorkflowJobOutput::ReactiveStreamline(flow) => {
-            cache.derived_streamline_cache
+            cache
+                .derived_streamline_cache
                 .insert(node_uuid, CachedDerivedStreamline { flow });
             mark_expensive_success(record, fingerprint, "reactive streamlines".to_string());
         }
         WorkflowJobOutput::SurfaceQuery(flow) => {
-            cache.surface_query_cache
+            cache
+                .surface_query_cache
                 .insert(node_uuid, CachedSurfaceQuery { flow });
             mark_expensive_success(record, fingerprint, "surface query".to_string());
         }
         WorkflowJobOutput::SurfaceMap(map) => {
-            cache.surface_streamline_map_cache.insert(
-                node_uuid,
-                CachedSurfaceStreamlineMap { map },
-            );
+            cache
+                .surface_streamline_map_cache
+                .insert(node_uuid, CachedSurfaceStreamlineMap { map });
             mark_expensive_success(record, fingerprint, "surface map".to_string());
         }
         WorkflowJobOutput::TubeGeometry { vertices, indices } => {
@@ -729,7 +793,10 @@ fn apply_job_result(
             };
             cache.bundle_surface_mesh_cache.insert(
                 node_uuid,
-                CachedBundleSurfaceMeshes { fingerprint, meshes },
+                CachedBundleSurfaceMeshes {
+                    fingerprint,
+                    meshes,
+                },
             );
             mark_expensive_success(record, fingerprint, summary);
         }
@@ -739,10 +806,9 @@ fn apply_job_result(
                 .map(|_| "Boundary field".to_string())
                 .unwrap_or_else(|| "No boundary field".to_string());
             if let Some(field) = field {
-                cache.boundary_field_cache.insert(
-                    node_uuid,
-                    CachedBoundaryField { fingerprint, field },
-                );
+                cache
+                    .boundary_field_cache
+                    .insert(node_uuid, CachedBoundaryField { fingerprint, field });
             } else {
                 cache.boundary_field_cache.remove(&node_uuid);
             }
@@ -794,12 +860,29 @@ fn build_gpu_resources(
         bounds_max = bounds_max.max(point);
     };
 
-    let mut slices = AllSliceResources { entries: Vec::new() };
+    let mut slices = AllSliceResources {
+        entries: Vec::new(),
+    };
     for nifti in &scene.nifti_files {
         let slice_resources = SliceResources::new(device, queue, TARGET_FORMAT, &nifti.volume);
-        slice_resources.update_slice(queue, SliceAxis::Axial, scene.slice_indices[0], &nifti.volume);
-        slice_resources.update_slice(queue, SliceAxis::Coronal, scene.slice_indices[1], &nifti.volume);
-        slice_resources.update_slice(queue, SliceAxis::Sagittal, scene.slice_indices[2], &nifti.volume);
+        slice_resources.update_slice(
+            queue,
+            SliceAxis::Axial,
+            scene.slice_indices[0],
+            &nifti.volume,
+        );
+        slice_resources.update_slice(
+            queue,
+            SliceAxis::Coronal,
+            scene.slice_indices[1],
+            &nifti.volume,
+        );
+        slice_resources.update_slice(
+            queue,
+            SliceAxis::Sagittal,
+            scene.slice_indices[2],
+            &nifti.volume,
+        );
         slices.entries.push((nifti.id, slice_resources));
 
         for x in [0.0, nifti.volume.dims[0] as f32] {
@@ -823,7 +906,9 @@ fn build_gpu_resources(
         }
     }
 
-    let mut streamlines = AllStreamlineResources { entries: Vec::new() };
+    let mut streamlines = AllStreamlineResources {
+        entries: Vec::new(),
+    };
     for draw in &workflow.runtime.scene_plan.streamline_draws {
         let fingerprint = workflow_streamline_fingerprint(draw);
         let subset = crate::workflow::materialize_flow_gpu(draw.flow.clone());
@@ -878,7 +963,11 @@ fn build_gpu_resources(
         .find(|draw| draw.visible)
         .or_else(|| workflow.runtime.scene_plan.boundary_glyph_draws.first())
     {
-        if let Some(cache) = workflow.execution_cache.boundary_field_cache.get(&draw.build_node_uuid) {
+        if let Some(cache) = workflow
+            .execution_cache
+            .boundary_field_cache
+            .get(&draw.build_node_uuid)
+        {
             glyphs.set_field(device, cache.field.clone(), draw.scale, draw.min_contacts);
             let origin = cache.field.grid.origin_ras;
             let size = Vec3::new(
@@ -908,7 +997,10 @@ fn build_gpu_resources(
     })
 }
 
-fn build_render_data(_scene: &HeadlessScene, workflow: &HeadlessWorkflowState) -> HeadlessRenderData {
+fn build_render_data(
+    _scene: &HeadlessScene,
+    workflow: &HeadlessWorkflowState,
+) -> HeadlessRenderData {
     let surface_draws = workflow
         .runtime
         .scene_plan
@@ -978,7 +1070,8 @@ fn build_render_data(_scene: &HeadlessScene, workflow: &HeadlessWorkflowState) -
         volume_draws,
         streamline_draws,
         bundle_draws,
-        glyph_visible: glyph_draw.is_some() && !workflow.execution_cache.boundary_field_cache.is_empty(),
+        glyph_visible: glyph_draw.is_some()
+            && !workflow.execution_cache.boundary_field_cache.is_empty(),
         glyph_color_mode: glyph_draw
             .map(|draw| draw.color_mode)
             .unwrap_or(BoundaryGlyphColorMode::DirectionRgb),
@@ -992,14 +1085,8 @@ fn build_camera(bounds: &SceneBounds, options: &HeadlessRenderOptions, aspect: f
     let center = options.target.unwrap_or((bounds.min + bounds.max) * 0.5);
     let radius = ((bounds.max - bounds.min) * 0.5).length().max(1.0);
     let mut camera = OrbitCamera::new(center, fit_distance(radius, aspect));
-    camera.yaw = options
-        .azimuth_deg
-        .unwrap_or(45.0)
-        .to_radians();
-    camera.pitch = options
-        .elevation_deg
-        .unwrap_or(25.0)
-        .to_radians();
+    camera.yaw = options.azimuth_deg.unwrap_or(45.0).to_radians();
+    camera.pitch = options.elevation_deg.unwrap_or(25.0).to_radians();
     if let Some(distance) = options.distance {
         camera.distance = distance.max(0.1);
     }
@@ -1063,7 +1150,12 @@ fn render_scene3d_to_png(
     let lighting = SceneLightingParams::default();
 
     for volume in &render_data.volume_draws {
-        if let Some((_, slice)) = resources.slices.entries.iter().find(|(id, _)| *id == volume.file_id) {
+        if let Some((_, slice)) = resources
+            .slices
+            .entries
+            .iter()
+            .find(|(id, _)| *id == volume.file_id)
+        {
             slice.update_uniforms(
                 queue,
                 0,
@@ -1139,8 +1231,9 @@ fn render_scene3d_to_png(
         );
     }
 
-    let mut encoder =
-        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("trxviz_headless_encoder") });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("trxviz_headless_encoder"),
+    });
     {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("trxviz_headless_pass"),
@@ -1175,10 +1268,16 @@ fn render_scene3d_to_png(
         render_pass.set_viewport(0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
 
         for volume in &render_data.volume_draws {
-            if let Some((_, slice)) = resources.slices.entries.iter().find(|(id, _)| *id == volume.file_id) {
+            if let Some((_, slice)) = resources
+                .slices
+                .entries
+                .iter()
+                .find(|(id, _)| *id == volume.file_id)
+            {
                 render_pass.set_pipeline(&slice.pipeline);
                 render_pass.set_bind_group(0, &slice.bind_groups[0], &[]);
-                render_pass.set_index_buffer(slice.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass
+                    .set_index_buffer(slice.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 for i in 0..3 {
                     if !slice_visible[i] {
                         continue;
@@ -1207,7 +1306,8 @@ fn render_scene3d_to_png(
                         {
                             render_pass.set_pipeline(&resource.tube_pipeline);
                             render_pass.set_vertex_buffer(0, vertices.slice(..));
-                            render_pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                            render_pass
+                                .set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
                             render_pass.draw_indexed(0..resource.num_tube_indices, 0, 0..1);
                         }
                     } else {
@@ -1215,7 +1315,10 @@ fn render_scene3d_to_png(
                         render_pass.set_vertex_buffer(0, resource.position_buffer.slice(..));
                         render_pass.set_vertex_buffer(1, resource.color_buffer.slice(..));
                         render_pass.set_vertex_buffer(2, resource.tangent_buffer.slice(..));
-                        render_pass.set_index_buffer(resource.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        render_pass.set_index_buffer(
+                            resource.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
                         render_pass.draw_indexed(0..resource.num_indices, 0, 0..1);
                     }
                 }
@@ -1223,7 +1326,9 @@ fn render_scene3d_to_png(
         }
 
         if !render_data.surface_draws.is_empty() {
-            resources.meshes.paint_opaque(render_pass, 0, &render_data.surface_draws);
+            resources
+                .meshes
+                .paint_opaque(render_pass, 0, &render_data.surface_draws);
         }
         if !render_data.bundle_draws.is_empty() {
             let bundle_draws = render_data
@@ -1231,24 +1336,29 @@ fn render_scene3d_to_png(
                 .iter()
                 .map(|draw| (draw.file_id, draw.opacity))
                 .collect::<Vec<_>>();
-            resources.meshes.paint_bundle_opaque(render_pass, &bundle_draws);
+            resources
+                .meshes
+                .paint_bundle_opaque(render_pass, &bundle_draws);
             resources
                 .meshes
                 .paint_bundle_transparent(render_pass, &bundle_draws, camera_dir);
         }
         if !render_data.surface_draws.is_empty() {
-            resources
-                .meshes
-                .paint_transparent(render_pass, 0, &render_data.surface_draws, camera_dir);
+            resources.meshes.paint_transparent(
+                render_pass,
+                0,
+                &render_data.surface_draws,
+                camera_dir,
+            );
         }
         if render_data.glyph_visible {
             resources.glyphs.paint(render_pass, 0, false);
         }
     }
 
-    let padded_bytes_per_row =
-        ((width * 4 + wgpu::COPY_BYTES_PER_ROW_ALIGNMENT - 1) / wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
-            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded_bytes_per_row = ((width * 4 + wgpu::COPY_BYTES_PER_ROW_ALIGNMENT - 1)
+        / wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+        * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("trxviz_headless_readback"),
         size: padded_bytes_per_row as u64 * height as u64,

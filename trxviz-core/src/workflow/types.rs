@@ -14,16 +14,7 @@ use crate::data::trx_data::{ColorMode, RenderStyle, TrxGpuData};
 use crate::renderer::mesh_renderer::SurfaceColormap;
 
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub struct WorkflowNodeUuid(pub u64);
 

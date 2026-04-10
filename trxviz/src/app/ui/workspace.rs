@@ -26,6 +26,31 @@ impl super::super::TrxVizApp {
                 });
                 ui.add_space(8.0);
             }
+            if !self
+                .scene
+                .trx_files
+                .iter()
+                .all(|trx| trx.import_warnings.is_empty())
+            {
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(255, 214, 102),
+                        "Imported streamline warnings",
+                    );
+                    for trx in self
+                        .scene
+                        .trx_files
+                        .iter()
+                        .filter(|trx| !trx.import_warnings.is_empty())
+                    {
+                        ui.small(format!("{}:", trx.name));
+                        for warning in &trx.import_warnings {
+                            ui.label(warning);
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+            }
             if let Some(message) = self.error_msg.clone() {
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -171,6 +196,13 @@ impl super::super::TrxVizApp {
                 trx.data.nb_vertices,
                 trx.data.groups.len()
             ));
+            if !trx.import_warnings.is_empty() {
+                ui.separator();
+                ui.colored_label(egui::Color32::from_rgb(255, 214, 102), "Import warnings");
+                for warning in &trx.import_warnings {
+                    ui.label(warning);
+                }
+            }
             return;
         }
         if let Some(volume) = self
@@ -310,26 +342,10 @@ impl super::super::TrxVizApp {
                 egui::ComboBox::from_id_salt(format!("render_style_{}", node_uuid.0))
                     .selected_text(format!("{render_style:?}"))
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            render_style,
-                            RenderStyle::Flat,
-                            "Flat",
-                        );
-                        ui.selectable_value(
-                            render_style,
-                            RenderStyle::Illuminated,
-                            "Illuminated",
-                        );
-                        ui.selectable_value(
-                            render_style,
-                            RenderStyle::DepthCue,
-                            "Depth Cue",
-                        );
-                        ui.selectable_value(
-                            render_style,
-                            RenderStyle::Tubes,
-                            "Tubes",
-                        );
+                        ui.selectable_value(render_style, RenderStyle::Flat, "Flat");
+                        ui.selectable_value(render_style, RenderStyle::Illuminated, "Illuminated");
+                        ui.selectable_value(render_style, RenderStyle::DepthCue, "Depth Cue");
+                        ui.selectable_value(render_style, RenderStyle::Tubes, "Tubes");
                     });
                 ui.add(
                     egui::DragValue::new(tube_radius_mm)
@@ -529,14 +545,12 @@ impl super::super::TrxVizApp {
                         ui.selectable_value(
                             color_mode,
                             BoundaryGlyphColorMode::DirectionRgb,
-                            BoundaryGlyphColorMode::DirectionRgb
-                                .label(),
+                            BoundaryGlyphColorMode::DirectionRgb.label(),
                         );
                         ui.selectable_value(
                             color_mode,
                             BoundaryGlyphColorMode::Monochrome,
-                            BoundaryGlyphColorMode::Monochrome
-                                .label(),
+                            BoundaryGlyphColorMode::Monochrome.label(),
                         );
                     });
             }
@@ -688,7 +702,8 @@ fn show_group_select_editor(
     });
 
     if picked_suggestion {
-        ui.ctx().data_mut(|d| d.insert_temp(suggestion_state_id, false));
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(suggestion_state_id, false));
         return;
     }
 

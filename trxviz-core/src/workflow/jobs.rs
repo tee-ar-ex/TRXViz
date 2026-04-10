@@ -87,7 +87,11 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> Result<WorkflowJobOutput
                 plan.depth_mm,
                 dps_values,
             );
-            let scalars = plan.dps_field.as_ref().map(|_| projected).unwrap_or(density);
+            let scalars = plan
+                .dps_field
+                .as_ref()
+                .map(|_| projected)
+                .unwrap_or(density);
             let (range_min, range_max) = robust_range(&scalars);
             Ok(WorkflowJobOutput::SurfaceMap(SurfaceStreamlineMap {
                 surface_id: plan.surface_id,
@@ -268,11 +272,7 @@ fn build_bundle_surface_meshes_with_color_mode(
         .collect()
 }
 
-pub fn bundle_surface_solid_color(
-    flow: &StreamlineFlow,
-    label: &str,
-    per_group: bool,
-) -> [f32; 4] {
+pub fn bundle_surface_solid_color(flow: &StreamlineFlow, label: &str, per_group: bool) -> [f32; 4] {
     if per_group
         && let Some(group_idx) = flow
             .dataset

@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use trxviz_core::data::parcellation_data::guess_label_table_path;
 use trx_rs::Format;
+use trxviz_core::data::parcellation_data::guess_label_table_path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DroppedPathKind {
@@ -16,7 +16,7 @@ pub(super) enum DroppedPathKind {
 pub(super) fn classify_dropped_path(path: &Path) -> DroppedPathKind {
     match trx_rs::detect_format(path) {
         Ok(Format::Trx) => DroppedPathKind::OpenTrx,
-        Ok(format @ (Format::Tck | Format::Vtk | Format::TinyTrack)) => {
+        Ok(format @ (Format::Trk | Format::Tck | Format::Vtk | Format::TinyTrack)) => {
             DroppedPathKind::ImportTractogram(format)
         }
         Err(_) => {
@@ -38,6 +38,20 @@ pub(super) fn classify_dropped_path(path: &Path) -> DroppedPathKind {
                 _ => DroppedPathKind::Unsupported,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DroppedPathKind, classify_dropped_path};
+    use trx_rs::Format;
+
+    #[test]
+    fn trk_paths_are_classified_as_imports() {
+        assert_eq!(
+            classify_dropped_path(std::path::Path::new("sample.trk.gz")),
+            DroppedPathKind::ImportTractogram(Format::Trk)
+        );
     }
 }
 
