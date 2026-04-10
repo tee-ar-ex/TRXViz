@@ -1,0 +1,127 @@
+use std::hash::{Hash, Hasher};
+
+use crate::data::loaded_files::FileId;
+use crate::data::trx_data::ColorMode;
+
+use super::*;
+
+pub fn workflow_streamline_fingerprint(draw: &StreamlineDrawPlan) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    draw.label.hash(&mut hasher);
+    (draw.render_style as u32).hash(&mut hasher);
+    draw.tube_radius_mm.to_bits().hash(&mut hasher);
+    draw.tube_sides.hash(&mut hasher);
+    draw.slab_half_width_mm.to_bits().hash(&mut hasher);
+    hash_flow(&draw.flow, &mut hasher);
+    hasher.finish()
+}
+
+pub fn workflow_reactive_streamline_fingerprint(plan: &ReactiveStreamlinePlan) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    plan.label.hash(&mut hasher);
+    match plan.op {
+        ReactiveStreamlineOp::Merge => 0u8.hash(&mut hasher),
+    }
+    hash_flow(&plan.left, &mut hasher);
+    hash_flow(&plan.right, &mut hasher);
+    hasher.finish()
+}
+
+pub fn workflow_surface_query_fingerprint(
+    flow: &StreamlineFlow,
+    surface_id: FileId,
+    depth_mm: f32,
+) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    surface_id.hash(&mut hasher);
+    depth_mm.to_bits().hash(&mut hasher);
+    hash_flow(flow, &mut hasher);
+    hasher.finish()
+}
+
+pub fn workflow_surface_projection_fingerprint(
+    flow: &StreamlineFlow,
+    surface_id: FileId,
+    depth_mm: f32,
+    field: Option<&str>,
+) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    surface_id.hash(&mut hasher);
+    depth_mm.to_bits().hash(&mut hasher);
+    field.hash(&mut hasher);
+    hash_flow(flow, &mut hasher);
+    hasher.finish()
+}
+
+pub fn workflow_bundle_build_fingerprint(draw: &BundleDrawPlan) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    draw.label.hash(&mut hasher);
+    draw.per_group.hash(&mut hasher);
+    draw.voxel_size_mm.to_bits().hash(&mut hasher);
+    draw.threshold.to_bits().hash(&mut hasher);
+    draw.smooth_sigma.to_bits().hash(&mut hasher);
+    draw.min_component_volume_mm3.to_bits().hash(&mut hasher);
+    draw.opacity.to_bits().hash(&mut hasher);
+    hash_flow(&draw.flow, &mut hasher);
+    hasher.finish()
+}
+
+pub fn workflow_bundle_display_fingerprint(
+    draw: &BundleDrawPlan,
+    boundary_field_revision: Option<u64>,
+) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    workflow_bundle_build_fingerprint(draw).hash(&mut hasher);
+    draw.color_mode.hash(&mut hasher);
+    boundary_field_revision.hash(&mut hasher);
+    hasher.finish()
+}
+
+pub fn workflow_bundle_plan_fingerprint(plan: &BundleSurfacePlan) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    plan.label.hash(&mut hasher);
+    plan.per_group.hash(&mut hasher);
+    plan.voxel_size_mm.to_bits().hash(&mut hasher);
+    plan.threshold.to_bits().hash(&mut hasher);
+    plan.smooth_sigma.to_bits().hash(&mut hasher);
+    plan.min_component_volume_mm3.to_bits().hash(&mut hasher);
+    plan.opacity.to_bits().hash(&mut hasher);
+    hash_flow(&plan.flow, &mut hasher);
+    hasher.finish()
+}
+
+pub fn workflow_boundary_plan_fingerprint(plan: &BoundaryFieldPlan) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    plan.label.hash(&mut hasher);
+    plan.voxel_size_mm.to_bits().hash(&mut hasher);
+    plan.sphere_lod.hash(&mut hasher);
+    plan.normalization.hash(&mut hasher);
+    hash_flow(&plan.flow, &mut hasher);
+    hasher.finish()
+}
+
+fn hash_flow(flow: &StreamlineFlow, state: &mut impl Hasher) {
+    flow.dataset.name.hash(state);
+    flow.selected_streamlines.len().hash(state);
+    for index in flow.selected_streamlines.iter().take(128) {
+        index.hash(state);
+    }
+    match &flow.color_mode {
+        ColorMode::DirectionRgb => 0u8.hash(state),
+        ColorMode::Dpv(name) => {
+            1u8.hash(state);
+            name.hash(state);
+        }
+        ColorMode::Dps(name) => {
+            2u8.hash(state);
+            name.hash(state);
+        }
+        ColorMode::Group => 3u8.hash(state),
+        ColorMode::Uniform(color) => {
+            4u8.hash(state);
+            for channel in color {
+                channel.to_bits().hash(state);
+            }
+        }
+    }
+}

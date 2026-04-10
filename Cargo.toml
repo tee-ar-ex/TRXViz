@@ -1,0 +1,4 @@
+[workspace]
+members = ["trxviz", "trxviz-core", "trxviz-cli"]
+exclude = ["trx-rs"]
+resolver = "2"

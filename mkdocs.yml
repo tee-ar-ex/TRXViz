@@ -1,0 +1,60 @@
+site_name: TRXViz
+site_description: Documentation portal for the TRXViz desktop app, workflow editor, and headless rendering tooling.
+docs_dir: docs
+theme:
+  name: material
+  language: en
+  logo: assets/images/logo-512x512.png
+  favicon: assets/images/logo-512x512.png
+  font:
+    text: IBM Plex Sans
+    code: IBM Plex Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: cyan
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: cyan
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.tabs.link
+    - search.suggest
+    - search.highlight
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+extra_css:
+  - stylesheets/extra.css
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - GUI Guide: gui-guide.md
+  - Workflows: workflows.md
+  - Command Line: cli.md
+  - Architecture: architecture.md
+  - Troubleshooting: troubleshooting.md
+  - Developer Notes: developer.md
+  - API Reference: api.md
