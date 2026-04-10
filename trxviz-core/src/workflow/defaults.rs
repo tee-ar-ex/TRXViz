@@ -67,10 +67,7 @@ fn connect_chain(document: &mut WorkflowDocument, from: WorkflowNodeUuid, to: Wo
             node: from,
             output: 0,
         },
-        InPort {
-            node: to,
-            input: 0,
-        },
+        InPort { node: to, input: 0 },
     );
 }
 

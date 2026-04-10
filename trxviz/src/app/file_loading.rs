@@ -33,6 +33,7 @@ impl super::TrxVizApp {
             .map(|data| LoadedStreamlineSource {
                 data,
                 backing: StreamlineBacking::Native(Arc::new(any)),
+                warnings: Vec::new(),
             })
             .map_err(|e| e.to_string())
     }
@@ -68,6 +69,8 @@ impl super::TrxVizApp {
                 egui::pos2(branch.bounds.min.x, branch.bounds.min.y),
                 egui::pos2(branch.bounds.max.x, branch.bounds.max.y),
             ));
+            self.rebuild_workflow_editor_from_document();
+            self.mark_workflow_semantic_edit(0.0);
         }
     }
 
@@ -166,6 +169,8 @@ impl super::TrxVizApp {
         let job_id = self.next_job_id;
         self.next_job_id += 1;
         let tx = self.worker_tx.clone();
+        let reference_path = state.reference_path.clone();
+        let vtk_coordinate_mode = state.vtk_coordinate_mode;
         let label = path
             .file_name()
             .map(|n| format!("Importing {}", n.to_string_lossy()))
@@ -173,11 +178,32 @@ impl super::TrxVizApp {
         self.pending_file_loads
             .push(super::state::PendingFileLoad { job_id, label });
         std::thread::spawn(move || {
-            let result = match trx_rs::read_tractogram(&path, &ConversionOptions::default()) {
+            let options = match reference_path
+                .as_deref()
+                .map(header_from_reference)
+                .transpose()
+            {
+                Ok(header) => ConversionOptions {
+                    header,
+                    vtk_coordinate_mode,
+                    ..ConversionOptions::default()
+                },
+                Err(err) => {
+                    let _ = tx.send(WorkerMessage::ImportedStreamlinesLoaded {
+                        job_id,
+                        path,
+                        result: Err(err.to_string()),
+                    });
+                    return;
+                }
+            };
+            let warnings = trxviz_core::scene::direct_streamline_import_warnings(&path, &options);
+            let result = match trx_rs::read_tractogram(&path, &options) {
                 Ok(tractogram) => TrxGpuData::from_tractogram(&tractogram)
                     .map(|data| LoadedStreamlineSource {
                         data,
                         backing: StreamlineBacking::Imported(Arc::new(tractogram)),
+                        warnings,
                     })
                     .map_err(|e| e.to_string()),
                 Err(err) => Err(err.to_string()),
@@ -252,7 +278,11 @@ impl super::TrxVizApp {
         explicit_id: Option<FileId>,
         register_workflow_asset: bool,
     ) {
-        let LoadedStreamlineSource { data, backing } = source;
+        let LoadedStreamlineSource {
+            data,
+            backing,
+            warnings,
+        } = source;
         let imported = matches!(backing, StreamlineBacking::Imported(_));
         let is_first = self.scene.trx_files.is_empty()
             && self.scene.nifti_files.is_empty()
@@ -307,6 +337,7 @@ impl super::TrxVizApp {
             path: path.clone(),
             data,
             backing: Some(backing),
+            import_warnings: warnings,
         };
 
         self.scene.trx_files.push(trx);
@@ -606,10 +637,7 @@ impl super::TrxVizApp {
         self.viewport.slices_dirty = true;
     }
 
-    pub(crate) fn reset_slice_view_to_boundary_field(
-        &mut self,
-        field: &BoundaryContactField,
-    ) {
+    pub(crate) fn reset_slice_view_to_boundary_field(&mut self, field: &BoundaryContactField) {
         let size = Vec3::new(
             field.grid.dims[0] as f32,
             field.grid.dims[1] as f32,
@@ -646,6 +674,12 @@ fn create_merged_streamline_source(
             .ok_or_else(|| format!("Unsupported streamline input: {}", path.display()))?;
         let any = match format {
             Format::Trx => AnyTrxFile::load(path).map_err(|err| err.to_string())?,
+            Format::Trk => {
+                return Err(format!(
+                    "TrackVis input is not accepted for merge here; convert {} to .trx first",
+                    path.display()
+                ));
+            }
             Format::Tck | Format::Vtk | Format::TinyTrack => {
                 let header = row
                     .reference_path
@@ -657,6 +691,7 @@ fn create_merged_streamline_source(
                     path,
                     &ConversionOptions {
                         header,
+                        vtk_coordinate_mode: row.vtk_coordinate_mode,
                         ..ConversionOptions::default()
                     },
                 )

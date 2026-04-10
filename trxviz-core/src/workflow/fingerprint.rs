@@ -19,8 +19,53 @@ pub fn workflow_streamline_fingerprint(draw: &StreamlineDrawPlan) -> u64 {
 pub fn workflow_reactive_streamline_fingerprint(plan: &ReactiveStreamlinePlan) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     plan.label.hash(&mut hasher);
-    match plan.op {
+    match &plan.op {
         ReactiveStreamlineOp::Merge => 0u8.hash(&mut hasher),
+        ReactiveStreamlineOp::RemoveDuplicates => 1u8.hash(&mut hasher),
+        ReactiveStreamlineOp::ParcelROI {
+            parcellation,
+            labels,
+        } => {
+            2u8.hash(&mut hasher);
+            labels.hash(&mut hasher);
+            parcellation.dims.hash(&mut hasher);
+        }
+        ReactiveStreamlineOp::ParcelROA {
+            parcellation,
+            labels,
+        } => {
+            3u8.hash(&mut hasher);
+            labels.hash(&mut hasher);
+            parcellation.dims.hash(&mut hasher);
+        }
+        ReactiveStreamlineOp::ParcelEnd {
+            parcellation,
+            labels,
+            endpoint_count,
+        } => {
+            4u8.hash(&mut hasher);
+            labels.hash(&mut hasher);
+            endpoint_count.hash(&mut hasher);
+            parcellation.dims.hash(&mut hasher);
+        }
+        ReactiveStreamlineOp::ParcelCrop {
+            parcellation,
+            labels,
+            keep_inside,
+        } => {
+            5u8.hash(&mut hasher);
+            labels.hash(&mut hasher);
+            keep_inside.hash(&mut hasher);
+            parcellation.dims.hash(&mut hasher);
+        }
+        ReactiveStreamlineOp::AddGroupsFromParcellation {
+            parcellation,
+            parcellation_name,
+        } => {
+            6u8.hash(&mut hasher);
+            parcellation_name.hash(&mut hasher);
+            parcellation.dims.hash(&mut hasher);
+        }
     }
     hash_flow(&plan.left, &mut hasher);
     hash_flow(&plan.right, &mut hasher);

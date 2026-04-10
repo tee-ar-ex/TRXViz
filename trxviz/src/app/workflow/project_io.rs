@@ -3,8 +3,8 @@ use std::path::Path;
 use egui_tiles::{Container, Linear, LinearDir, Tile, Tiles, Tree};
 
 use super::{
-    WorkflowDocument, WorkflowProject, load_workflow_project_from_path,
-    relativized_document, resolve_document_asset_paths,
+    WorkflowDocument, WorkflowProject, load_workflow_project_from_path, relativized_document,
+    resolve_document_asset_paths,
 };
 
 /// The four panes that make up the advanced-mode workspace layout.
@@ -48,9 +48,7 @@ struct GuiWorkflowProject {
 /// Load a project file. Returns `(WorkflowProject, workspace_tree)`.
 /// Old files that have `workspace` nested inside `document` are handled by
 /// trying the new format first, then falling back.
-pub fn gui_load_project(
-    path: &Path,
-) -> Result<(WorkflowProject, Tree<WorkspacePane>), String> {
+pub fn gui_load_project(path: &Path) -> Result<(WorkflowProject, Tree<WorkspacePane>), String> {
     let contents = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
 
     // New format: workspace at top level.

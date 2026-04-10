@@ -10,7 +10,7 @@
 //! This keeps Snarl out of the on-disk format and the evaluator while still
 //! letting us reuse the existing editor widget.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use egui::emath::TSTransform;
 use egui::{Pos2, Rect};
@@ -27,8 +27,7 @@ use trxviz_core::workflow::PortKind;
 use super::*;
 
 /// Build a fresh `Snarl<WorkflowNode>` view from the canonical graph. The
-/// returned Snarl is transient editor state — mutations during `SnarlWidget::show`
-/// should be synced back via [`sync_graph_from_snarl`].
+/// returned Snarl can be reused as persistent editor state.
 pub fn snarl_from_graph(graph: &WorkflowGraph) -> Snarl<WorkflowNode> {
     let mut snarl = Snarl::<WorkflowNode>::new();
     let mut uuid_to_node_id: HashMap<WorkflowNodeUuid, NodeId> = HashMap::new();
@@ -68,7 +67,9 @@ pub fn snarl_from_graph(graph: &WorkflowGraph) -> Snarl<WorkflowNode> {
 pub fn sync_graph_from_snarl(
     snarl: &mut Snarl<WorkflowNode>,
     document: &mut WorkflowDocument,
-) {
+) -> GraphEditSummary {
+    let old_graph = document.graph.clone();
+
     // Pass 1: assign UUIDs to any newly added (uuid == 0) nodes.
     let mut next = document.next_node_uuid.max(1);
     let node_ids: Vec<NodeId> = snarl.node_ids().map(|(id, _)| id).collect();
@@ -115,6 +116,68 @@ pub fn sync_graph_from_snarl(
 
     document.graph = graph;
     document.next_node_uuid = next;
+
+    diff_graphs(&old_graph, &document.graph)
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GraphEditSummary {
+    pub topology_changed: bool,
+    pub node_params_changed: bool,
+    pub node_positions_changed: bool,
+    pub selection_changed: bool,
+}
+
+impl GraphEditSummary {
+    pub fn semantic_changed(self) -> bool {
+        self.topology_changed || self.node_params_changed
+    }
+}
+
+fn diff_graphs(before: &WorkflowGraph, after: &WorkflowGraph) -> GraphEditSummary {
+    let before_nodes: HashMap<WorkflowNodeUuid, (&WorkflowNode, GraphPos)> =
+        before.entries().map(|(uuid, entry)| (*uuid, (&entry.node, entry.pos))).collect();
+    let after_nodes: HashMap<WorkflowNodeUuid, (&WorkflowNode, GraphPos)> =
+        after.entries().map(|(uuid, entry)| (*uuid, (&entry.node, entry.pos))).collect();
+
+    let before_ids: BTreeSet<WorkflowNodeUuid> = before_nodes.keys().copied().collect();
+    let after_ids: BTreeSet<WorkflowNodeUuid> = after_nodes.keys().copied().collect();
+
+    let mut summary = GraphEditSummary {
+        topology_changed: before_ids != after_ids || wire_set(before) != wire_set(after),
+        ..Default::default()
+    };
+
+    for uuid in before_ids.intersection(&after_ids) {
+        let Some((before_node, before_pos)) = before_nodes.get(uuid).copied() else {
+            continue;
+        };
+        let Some((after_node, after_pos)) = after_nodes.get(uuid).copied() else {
+            continue;
+        };
+        if before_node != after_node {
+            summary.node_params_changed = true;
+        }
+        if before_pos != after_pos {
+            summary.node_positions_changed = true;
+        }
+    }
+
+    summary
+}
+
+fn wire_set(graph: &WorkflowGraph) -> BTreeSet<(WorkflowNodeUuid, usize, WorkflowNodeUuid, usize)> {
+    graph
+        .wires()
+        .map(|wire| {
+            (
+                wire.from.node,
+                wire.from.output,
+                wire.to.node,
+                wire.to.input,
+            )
+        })
+        .collect()
 }
 
 pub struct WorkflowGraphViewer<'a> {
@@ -240,7 +303,6 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
             };
             ui.colored_label(color, execution.label());
         }
-
     }
 
     fn connect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<WorkflowNode>) {
@@ -282,7 +344,9 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
         let screen_rect = to_global * rect;
         if ui.input(|i| {
             i.pointer.primary_clicked()
-                && i.pointer.interact_pos().map_or(false, |p| screen_rect.contains(p))
+                && i.pointer
+                    .interact_pos()
+                    .map_or(false, |p| screen_rect.contains(p))
         }) {
             *self.selected = Some(WorkflowSelection::Node(snarl[node].uuid));
         }
@@ -600,4 +664,40 @@ fn pin_info_for_port(port: PortKind) -> PinInfo {
         PortKind::BoundaryField => egui::Color32::from_rgb(255, 160, 96),
     };
     PinInfo::circle().with_fill(color)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moving_node_only_reports_position_change() {
+        let mut document = default_document();
+        make_node(
+            &mut document,
+            WorkflowNodeKind::LimitStreamlines {
+                limit: 10,
+                randomize: false,
+                seed: 1,
+            },
+            GraphPos::new(10.0, 20.0),
+        );
+        let mut snarl = snarl_from_graph(&document.graph);
+        let node_id = snarl
+            .node_ids()
+            .map(|(id, _)| id)
+            .next()
+            .expect("node inserted into snarl");
+        let info = snarl
+            .get_node_info_mut(node_id)
+            .expect("node info must exist");
+        info.pos.x += 50.0;
+
+        let summary = sync_graph_from_snarl(&mut snarl, &mut document);
+
+        assert!(summary.node_positions_changed);
+        assert!(!summary.topology_changed);
+        assert!(!summary.node_params_changed);
+        assert!(!summary.semantic_changed());
+    }
 }

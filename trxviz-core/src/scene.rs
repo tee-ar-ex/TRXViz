@@ -1,5 +1,6 @@
 //! Shared scene and loaded-asset state used by both the GUI and headless paths.
 
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -14,7 +15,7 @@ use crate::workflow::{
     WorkflowNodeUuid, WorkflowRuntime, default_document,
 };
 use glam::Vec3;
-use trx_rs::Format;
+use trx_rs::{ConversionOptions, Format};
 
 #[derive(Clone)]
 pub struct LoadedGiftiSurface {
@@ -40,6 +41,7 @@ pub struct LoadedGiftiSurface {
 pub struct LoadedStreamlineSource {
     pub data: TrxGpuData,
     pub backing: StreamlineBacking,
+    pub warnings: Vec<String>,
 }
 
 pub struct LoadedParcellationSource {
@@ -81,6 +83,18 @@ impl Default for HeadlessScene {
     }
 }
 
+pub fn direct_streamline_import_warnings(path: &Path, options: &ConversionOptions) -> Vec<String> {
+    match trx_rs::detect_format(path) {
+        Ok(Format::Trk) => vec![
+            "TrackVis (.trk/.trk.gz) is only begrudgingly supported for direct viewing. Convert it to .trx for first-class handling.".to_string(),
+            "TrackVis corner-origin coordinates were normalized on import with the usual half-voxel shift.".to_string(),
+        ],
+        Ok(Format::Vtk) => trx_rs::vtk_import_warnings(path, options.vtk_coordinate_mode)
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
 pub struct HeadlessWorkflowState {
     pub document: WorkflowDocument,
     pub runtime: WorkflowRuntime,
@@ -110,4 +124,59 @@ pub struct ImportDialogState {
     pub detected_format: Option<Format>,
     pub reference_path: Option<PathBuf>,
     pub error_msg: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::direct_streamline_import_warnings;
+    use std::path::Path;
+    use trx_rs::ConversionOptions;
+
+    #[test]
+    fn trk_direct_import_warnings_are_present() {
+        let warnings = direct_streamline_import_warnings(
+            Path::new("sample.trk.gz"),
+            &ConversionOptions {
+                vtk_coordinate_mode: trx_rs::VtkCoordinateMode::HeaderOrWarn,
+                ..Default::default()
+            },
+        );
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].contains("TrackVis"));
+        assert!(warnings[1].contains("half-voxel"));
+    }
+
+    #[test]
+    fn non_trk_direct_import_warnings_are_empty() {
+        assert!(
+            direct_streamline_import_warnings(
+                Path::new("sample.tck"),
+                &ConversionOptions {
+                    vtk_coordinate_mode: trx_rs::VtkCoordinateMode::HeaderOrWarn,
+                    ..Default::default()
+                }
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn ambiguous_vtk_direct_import_warns_when_using_default_mode() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("sample.vtk");
+        std::fs::write(
+            &path,
+            "# vtk DataFile Version 4.2\nvtk output\nASCII\nDATASET POLYDATA\nPOINTS 1 float\n1 2 3\nLINES 1 2\n1 0\n",
+        )
+        .unwrap();
+        let warnings = direct_streamline_import_warnings(
+            &path,
+            &ConversionOptions {
+                vtk_coordinate_mode: trx_rs::VtkCoordinateMode::HeaderOrWarn,
+                ..Default::default()
+            },
+        );
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].contains("assumed LPS"));
+    }
 }

@@ -77,15 +77,13 @@ impl super::super::TrxVizApp {
             ui.add_space(spacing_y);
             let size = egui::vec2(available.x, bottom_height);
             self.viewport.window_2d_size = [size.x.max(320.0), size.y.max(240.0)];
-            ui.allocate_ui_with_layout(
-                size,
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| match self.viewport.view_2d.mode {
+            ui.allocate_ui_with_layout(size, egui::Layout::top_down(egui::Align::Min), |ui| {
+                match self.viewport.view_2d.mode {
                     View2DMode::Slice => self.show_2d_slice_mode(ui, &render_data, true),
                     View2DMode::Ortho => self.show_2d_ortho_mode(ui, &render_data, true),
                     View2DMode::Lightbox => self.show_2d_lightbox_mode(ui, &render_data, true),
-                },
-            );
+                }
+            });
         }
     }
 

@@ -3,11 +3,10 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::data::bundle_mesh::{BundleMesh, BundleMeshColorStrategy, build_bundle_mesh};
-use crate::data::loaded_files::StreamlineBacking;
 use crate::data::orientation_field::{BoundaryContactField, StreamlineSet};
 use crate::data::trx_data::{TrxGpuData, build_tube_vertices_from_data, group_name_color};
 
-use super::evaluate::{materialize_merged_streamlines, robust_range};
+use super::evaluate::{materialize_reactive_streamline_flow, robust_range};
 use super::*;
 
 pub fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
@@ -23,28 +22,9 @@ pub fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
 
 pub fn run_workflow_job(payload: WorkflowJobPayload) -> Result<WorkflowJobOutput, String> {
     match payload {
-        WorkflowJobPayload::ReactiveStreamline(plan) => {
-            let tractogram = match plan.op {
-                ReactiveStreamlineOp::Merge => {
-                    materialize_merged_streamlines(&plan.left, &plan.right)?
-                }
-            };
-            let gpu_data =
-                Arc::new(TrxGpuData::from_tractogram(&tractogram).map_err(|err| err.to_string())?);
-            let selected = (0..gpu_data.nb_streamlines as u32).collect();
-            Ok(WorkflowJobOutput::ReactiveStreamline(StreamlineFlow {
-                dataset: Arc::new(StreamlineDataset {
-                    name: plan.label,
-                    gpu_data,
-                    backing: StreamlineBacking::Derived(Arc::new(tractogram)),
-                }),
-                selected_streamlines: Arc::new(selected),
-                color_mode: plan.left.color_mode.clone(),
-                scalar_auto_range: true,
-                scalar_range_min: 0.0,
-                scalar_range_max: 1.0,
-            }))
-        }
+        WorkflowJobPayload::ReactiveStreamline(plan) => Ok(WorkflowJobOutput::ReactiveStreamline(
+            materialize_reactive_streamline_flow(&plan)?,
+        )),
         WorkflowJobPayload::SurfaceQuery(plan) => {
             let hits = plan
                 .flow
@@ -87,7 +67,11 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> Result<WorkflowJobOutput
                 plan.depth_mm,
                 dps_values,
             );
-            let scalars = plan.dps_field.as_ref().map(|_| projected).unwrap_or(density);
+            let scalars = plan
+                .dps_field
+                .as_ref()
+                .map(|_| projected)
+                .unwrap_or(density);
             let (range_min, range_max) = robust_range(&scalars);
             Ok(WorkflowJobOutput::SurfaceMap(SurfaceStreamlineMap {
                 surface_id: plan.surface_id,
@@ -268,11 +252,7 @@ fn build_bundle_surface_meshes_with_color_mode(
         .collect()
 }
 
-pub fn bundle_surface_solid_color(
-    flow: &StreamlineFlow,
-    label: &str,
-    per_group: bool,
-) -> [f32; 4] {
+pub fn bundle_surface_solid_color(flow: &StreamlineFlow, label: &str, per_group: bool) -> [f32; 4] {
     if per_group
         && let Some(group_idx) = flow
             .dataset

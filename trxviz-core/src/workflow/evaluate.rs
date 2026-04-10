@@ -26,7 +26,36 @@ pub fn evaluate_scene_plan(
     display_ids: &mut HashMap<WorkflowNodeUuid, StreamlineDisplayRuntime>,
     next_draw_id: &mut FileId,
     execution_cache: &mut WorkflowExecutionCache,
-    _run_expensive: bool,
+    run_expensive: bool,
+) -> WorkflowRuntime {
+    let mode = if run_expensive {
+        WorkflowEvalMode::Settled
+    } else {
+        WorkflowEvalMode::Settled
+    };
+    evaluate_scene_plan_with_mode(
+        document,
+        streamline_assets,
+        volume_assets,
+        surface_assets,
+        parcellation_assets,
+        display_ids,
+        next_draw_id,
+        execution_cache,
+        mode,
+    )
+}
+
+pub fn evaluate_scene_plan_with_mode(
+    document: &WorkflowDocument,
+    streamline_assets: &[LoadedTrx],
+    volume_assets: &[LoadedNifti],
+    surface_assets: &[LoadedGiftiSurface],
+    parcellation_assets: &[LoadedParcellation],
+    display_ids: &mut HashMap<WorkflowNodeUuid, StreamlineDisplayRuntime>,
+    next_draw_id: &mut FileId,
+    execution_cache: &mut WorkflowExecutionCache,
+    mode: WorkflowEvalMode,
 ) -> WorkflowRuntime {
     let mut runtime = WorkflowRuntime::default();
     let compiled = compile_graph(document);
@@ -92,7 +121,7 @@ pub fn evaluate_scene_plan(
             &mut projection_by_surface,
             &mut runtime.save_streamline_targets,
             execution_cache,
-            _run_expensive,
+            mode,
             &mut node_state,
         );
 
@@ -199,7 +228,7 @@ fn evaluate_node(
     projection_by_surface: &mut HashMap<FileId, SurfaceStreamlineMap>,
     save_targets: &mut HashMap<WorkflowNodeUuid, SaveStreamlinePlan>,
     execution_cache: &mut WorkflowExecutionCache,
-    _run_expensive: bool,
+    _mode: WorkflowEvalMode,
     node_state: &mut NodeEvalState,
 ) -> Result<Option<EvaluatedValue>, String> {
     match &node.kind {
@@ -390,21 +419,15 @@ fn evaluate_node(
         }
         WorkflowNodeKind::RemoveDuplicates => {
             let flow = expect_streamline_input(inputs, "Remove Duplicates")?;
-            let mut seen = HashSet::new();
-            let mut keep = Vec::new();
-            for &streamline_index in flow.selected_streamlines.iter() {
-                let key = streamline_key(flow.dataset.gpu_data.as_ref(), streamline_index as usize);
-                if seen.insert(key) {
-                    keep.push(streamline_index);
-                }
-            }
-            Ok(Some(
-                WorkflowValue::Streamline(StreamlineFlow {
-                    selected_streamlines: Arc::new(keep),
-                    ..flow
-                })
-                .into(),
-            ))
+            let plan = ReactiveStreamlinePlan {
+                node_uuid: node.uuid,
+                label: node.label.clone(),
+                op: ReactiveStreamlineOp::RemoveDuplicates,
+                left: flow.clone(),
+                right: flow,
+            };
+            scene_plan.reactive_streamline_plans.push(plan.clone());
+            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
         }
         WorkflowNodeKind::Merge => {
             let left = expect_streamline_input(inputs, node.kind.title())?;
@@ -432,26 +455,13 @@ fn evaluate_node(
                 left,
                 right,
             };
-            let fingerprint = workflow_reactive_streamline_fingerprint(&plan);
-            let record = execution_cache.node_runs.entry(node.uuid).or_default();
-            prime_expensive_record(record, fingerprint);
-            sync_node_state_from_run_record(node_state, record);
             scene_plan.reactive_streamline_plans.push(plan);
-            if let Some(cache) = execution_cache.derived_streamline_cache.get(&node.uuid) {
-                node_state.summary =
-                    format!("{} streamlines", cache.flow.selected_streamlines.len());
-                return Ok(Some(EvaluatedValue {
-                    value: WorkflowValue::Streamline(cache.flow.clone()),
-                    stale: record.last_success_fingerprint != Some(fingerprint),
-                }));
-            }
-            node_state.summary = node_state
-                .execution
-                .as_ref()
-                .map(|status| status.label())
-                .unwrap_or("Waiting")
-                .to_string();
-            Ok(None)
+            let plan = scene_plan
+                .reactive_streamline_plans
+                .last()
+                .cloned()
+                .expect("just pushed plan");
+            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
         }
         WorkflowNodeKind::ParcelSelect { labels_csv } => {
             let source_id = expect_parcellation_input(inputs, "Parcel Select")?;
@@ -469,25 +479,18 @@ fn evaluate_node(
             let parcellation = parcellation_assets
                 .get(&parcel_selection.source_id)
                 .ok_or_else(|| "Parcel ROI is missing its parcellation".to_string())?;
-            let selected = flow
-                .selected_streamlines
-                .iter()
-                .copied()
-                .filter(|index| {
-                    let points = streamline_points(flow.dataset.gpu_data.as_ref(), *index as usize);
-                    parcellation
-                        .asset
-                        .data
-                        .streamline_hits_labels(points, &parcel_selection.labels)
-                })
-                .collect();
-            Ok(Some(
-                WorkflowValue::Streamline(StreamlineFlow {
-                    selected_streamlines: Arc::new(selected),
-                    ..flow
-                })
-                .into(),
-            ))
+            let plan = ReactiveStreamlinePlan {
+                node_uuid: node.uuid,
+                label: node.label.clone(),
+                op: ReactiveStreamlineOp::ParcelROI {
+                    parcellation: parcellation.asset.data.clone(),
+                    labels: parcel_selection.labels,
+                },
+                left: flow.clone(),
+                right: flow,
+            };
+            scene_plan.reactive_streamline_plans.push(plan.clone());
+            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
         }
         WorkflowNodeKind::ParcelROA => {
             let flow = expect_streamline_input(inputs, "Parcel ROA")?;
@@ -495,25 +498,18 @@ fn evaluate_node(
             let parcellation = parcellation_assets
                 .get(&parcel_selection.source_id)
                 .ok_or_else(|| "Parcel ROA is missing its parcellation".to_string())?;
-            let selected = flow
-                .selected_streamlines
-                .iter()
-                .copied()
-                .filter(|index| {
-                    let points = streamline_points(flow.dataset.gpu_data.as_ref(), *index as usize);
-                    parcellation
-                        .asset
-                        .data
-                        .streamline_avoids_labels(points, &parcel_selection.labels)
-                })
-                .collect();
-            Ok(Some(
-                WorkflowValue::Streamline(StreamlineFlow {
-                    selected_streamlines: Arc::new(selected),
-                    ..flow
-                })
-                .into(),
-            ))
+            let plan = ReactiveStreamlinePlan {
+                node_uuid: node.uuid,
+                label: node.label.clone(),
+                op: ReactiveStreamlineOp::ParcelROA {
+                    parcellation: parcellation.asset.data.clone(),
+                    labels: parcel_selection.labels,
+                },
+                left: flow.clone(),
+                right: flow,
+            };
+            scene_plan.reactive_streamline_plans.push(plan.clone());
+            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
         }
         WorkflowNodeKind::ParcelEnd { endpoint_count } => {
             let flow = expect_streamline_input(inputs, "Parcel End")?;
@@ -521,26 +517,19 @@ fn evaluate_node(
             let parcellation = parcellation_assets
                 .get(&parcel_selection.source_id)
                 .ok_or_else(|| "Parcel End is missing its parcellation".to_string())?;
-            let selected = flow
-                .selected_streamlines
-                .iter()
-                .copied()
-                .filter(|index| {
-                    let points = streamline_points(flow.dataset.gpu_data.as_ref(), *index as usize);
-                    parcellation.asset.data.streamline_end_hits_labels(
-                        points,
-                        &parcel_selection.labels,
-                        *endpoint_count,
-                    )
-                })
-                .collect();
-            Ok(Some(
-                WorkflowValue::Streamline(StreamlineFlow {
-                    selected_streamlines: Arc::new(selected),
-                    ..flow
-                })
-                .into(),
-            ))
+            let plan = ReactiveStreamlinePlan {
+                node_uuid: node.uuid,
+                label: node.label.clone(),
+                op: ReactiveStreamlineOp::ParcelEnd {
+                    parcellation: parcellation.asset.data.clone(),
+                    labels: parcel_selection.labels,
+                    endpoint_count: *endpoint_count,
+                },
+                left: flow.clone(),
+                right: flow,
+            };
+            scene_plan.reactive_streamline_plans.push(plan.clone());
+            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
         }
         WorkflowNodeKind::ParcelLimiting | WorkflowNodeKind::ParcelTerminative => {
             let flow = expect_streamline_input(inputs, node.kind.title())?;
@@ -548,38 +537,20 @@ fn evaluate_node(
             let parcellation = parcellation_assets
                 .get(&parcel_selection.source_id)
                 .ok_or_else(|| format!("{} is missing its parcellation", node.kind.title()))?;
-            let tractogram = match node.kind {
-                WorkflowNodeKind::ParcelLimiting => crop_flow_to_parcels(
-                    &flow,
-                    &parcellation.asset.data,
-                    &parcel_selection.labels,
-                    true,
-                )?,
-                _ => crop_flow_to_parcels(
-                    &flow,
-                    &parcellation.asset.data,
-                    &parcel_selection.labels,
-                    false,
-                )?,
+            let keep_inside = matches!(node.kind, WorkflowNodeKind::ParcelLimiting);
+            let plan = ReactiveStreamlinePlan {
+                node_uuid: node.uuid,
+                label: node.label.clone(),
+                op: ReactiveStreamlineOp::ParcelCrop {
+                    parcellation: parcellation.asset.data.clone(),
+                    labels: parcel_selection.labels,
+                    keep_inside,
+                },
+                left: flow.clone(),
+                right: flow,
             };
-            let gpu_data =
-                Arc::new(TrxGpuData::from_tractogram(&tractogram).map_err(|err| err.to_string())?);
-            let selected = (0..gpu_data.nb_streamlines as u32).collect();
-            Ok(Some(
-                WorkflowValue::Streamline(StreamlineFlow {
-                    dataset: Arc::new(StreamlineDataset {
-                        name: node.label.clone(),
-                        gpu_data,
-                        backing: StreamlineBacking::Derived(Arc::new(tractogram)),
-                    }),
-                    selected_streamlines: Arc::new(selected),
-                    color_mode: flow.color_mode.clone(),
-                    scalar_auto_range: true,
-                    scalar_range_min: 0.0,
-                    scalar_range_max: 1.0,
-                })
-                .into(),
-            ))
+            scene_plan.reactive_streamline_plans.push(plan.clone());
+            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
         }
         WorkflowNodeKind::AddGroupsFromParcellation => {
             let flow = expect_streamline_input(inputs, "Add Groups From Parcellation")?;
@@ -601,13 +572,18 @@ fn evaluate_node(
             let parcellation = parcellation_assets
                 .get(&source_id)
                 .ok_or_else(|| format!("Missing parcellation {source_id}"))?;
-            let grouped = add_groups_from_parcellation(
-                node,
-                &flow,
-                &parcellation.asset.data,
-                &parcellation.asset.name,
-            )?;
-            Ok(Some(WorkflowValue::Streamline(grouped).into()))
+            let plan = ReactiveStreamlinePlan {
+                node_uuid: node.uuid,
+                label: node.label.clone(),
+                op: ReactiveStreamlineOp::AddGroupsFromParcellation {
+                    parcellation: parcellation.asset.data.clone(),
+                    parcellation_name: parcellation.asset.name.clone(),
+                },
+                left: flow.clone(),
+                right: flow,
+            };
+            scene_plan.reactive_streamline_plans.push(plan.clone());
+            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
         }
         WorkflowNodeKind::ColorByDirection => {
             let flow = expect_streamline_input(inputs, "Color By Direction")?;
@@ -1189,9 +1165,44 @@ fn resolve_selected_labels(csv: &str, parcellation: &ParcellationVolume) -> BTre
     resolved
 }
 
+fn evaluate_derived_streamline_plan(
+    node: &WorkflowNode,
+    plan: ReactiveStreamlinePlan,
+    inputs: &[Option<EvaluatedValue>],
+    execution_cache: &mut WorkflowExecutionCache,
+    node_state: &mut NodeEvalState,
+) -> Result<Option<EvaluatedValue>, String> {
+    let fingerprint = workflow_reactive_streamline_fingerprint(&plan);
+    let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
+    let record = execution_cache.node_runs.entry(node.uuid).or_default();
+    prime_expensive_record(record, fingerprint);
+    sync_node_state_from_run_record(node_state, record);
+    if let Some(cache) = execution_cache.derived_streamline_cache.get(&node.uuid) {
+        node_state.summary = format!("{} streamlines", cache.flow.selected_streamlines.len());
+        return Ok(Some(EvaluatedValue {
+            value: WorkflowValue::Streamline(cache.flow.clone()),
+            stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
+        }));
+    }
+    node_state.summary = node_state
+        .execution
+        .as_ref()
+        .map(|status| status.label())
+        .unwrap_or("Waiting")
+        .to_string();
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GroupFilter, parse_group_filter};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use trx_rs::Tractogram;
+
+    use super::*;
+    use crate::data::loaded_files::{LoadedTrx, StreamlineBacking};
 
     #[test]
     fn group_filter_empty_means_all() {
@@ -1212,6 +1223,100 @@ mod tests {
             }
             GroupFilter::All | GroupFilter::None => panic!("expected explicit labels"),
         }
+    }
+
+    #[test]
+    fn interactive_remove_duplicates_defers_work_and_uses_plan() {
+        let mut tractogram = Tractogram::new();
+        tractogram
+            .push_streamline(&[[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+            .expect("first streamline");
+        tractogram
+            .push_streamline(&[[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+            .expect("duplicate streamline");
+        let gpu_data = Arc::new(TrxGpuData::from_tractogram(&tractogram).expect("gpu data"));
+        let streamline_assets = vec![LoadedTrx {
+            id: 0,
+            name: "test".to_string(),
+            path: PathBuf::from("test.trx"),
+            data: gpu_data,
+            backing: Some(StreamlineBacking::Imported(Arc::new(tractogram))),
+            import_warnings: Vec::new(),
+        }];
+
+        let mut document = default_document();
+        let source = make_node(
+            &mut document,
+            WorkflowNodeKind::StreamlineSource { source_id: 0 },
+            GraphPos::new(0.0, 0.0),
+        );
+        let dedupe = make_node(
+            &mut document,
+            WorkflowNodeKind::RemoveDuplicates,
+            GraphPos::new(200.0, 0.0),
+        );
+        document.graph.connect(
+            OutPort {
+                node: source,
+                output: 0,
+            },
+            InPort {
+                node: dedupe,
+                input: 0,
+            },
+        );
+
+        let runtime = evaluate_scene_plan_with_mode(
+            &document,
+            &streamline_assets,
+            &[],
+            &[],
+            &[],
+            &mut HashMap::new(),
+            &mut 1_000_000usize,
+            &mut WorkflowExecutionCache::default(),
+            WorkflowEvalMode::Interactive,
+        );
+
+        assert_eq!(runtime.scene_plan.reactive_streamline_plans.len(), 1);
+        let state = runtime
+            .node_state
+            .get(&dedupe)
+            .expect("remove duplicates state");
+        assert!(state.error.is_none());
+        assert!(matches!(
+            state.execution,
+            Some(WorkflowExecutionStatus::NeverRun)
+        ));
+    }
+
+    #[test]
+    fn interactive_unconnected_expensive_node_reports_only_input_error() {
+        let mut document = default_document();
+        let query = make_node(
+            &mut document,
+            WorkflowNodeKind::SurfaceDepthQuery { depth_mm: 2.0 },
+            GraphPos::new(0.0, 0.0),
+        );
+
+        let runtime = evaluate_scene_plan_with_mode(
+            &document,
+            &[],
+            &[],
+            &[],
+            &[],
+            &mut HashMap::new(),
+            &mut 1_000_000usize,
+            &mut WorkflowExecutionCache::default(),
+            WorkflowEvalMode::Interactive,
+        );
+
+        assert!(runtime.scene_plan.surface_query_plans.is_empty());
+        let state = runtime.node_state.get(&query).expect("query state");
+        assert_eq!(
+            state.error.as_deref(),
+            Some("Surface Depth Query needs a streamline input")
+        );
     }
 }
 
@@ -1282,8 +1387,8 @@ pub(crate) fn robust_range(values: &[f32]) -> (f32, f32) {
     (lo, hi)
 }
 
-pub(crate) fn add_groups_from_parcellation(
-    node: &WorkflowNode,
+pub(crate) fn add_groups_from_parcellation_from_label(
+    label: &str,
     flow: &StreamlineFlow,
     parcellation: &ParcellationVolume,
     parcellation_name: &str,
@@ -1337,7 +1442,7 @@ pub(crate) fn add_groups_from_parcellation(
     let selected = (0..gpu_data.nb_streamlines as u32).collect();
     Ok(StreamlineFlow {
         dataset: Arc::new(StreamlineDataset {
-            name: node.label.clone(),
+            name: label.to_string(),
             gpu_data,
             backing: StreamlineBacking::Derived(Arc::new(grouped)),
         }),
@@ -1390,6 +1495,126 @@ pub(crate) fn materialize_merged_streamlines(
     }
 
     Ok(out)
+}
+
+pub(crate) fn materialize_reactive_streamline_flow(
+    plan: &ReactiveStreamlinePlan,
+) -> Result<StreamlineFlow, String> {
+    match &plan.op {
+        ReactiveStreamlineOp::Merge => {
+            let tractogram = materialize_merged_streamlines(&plan.left, &plan.right)?;
+            streamline_flow_from_tractogram(plan.label.clone(), &plan.left, tractogram)
+        }
+        ReactiveStreamlineOp::RemoveDuplicates => {
+            let mut seen = HashSet::new();
+            let mut keep = Vec::new();
+            for &streamline_index in plan.left.selected_streamlines.iter() {
+                let key =
+                    streamline_key(plan.left.dataset.gpu_data.as_ref(), streamline_index as usize);
+                if seen.insert(key) {
+                    keep.push(streamline_index);
+                }
+            }
+            Ok(StreamlineFlow {
+                selected_streamlines: Arc::new(keep),
+                ..plan.left.clone()
+            })
+        }
+        ReactiveStreamlineOp::ParcelROI {
+            parcellation,
+            labels,
+        } => {
+            let selected = plan
+                .left
+                .selected_streamlines
+                .iter()
+                .copied()
+                .filter(|index| {
+                    let points =
+                        streamline_points(plan.left.dataset.gpu_data.as_ref(), *index as usize);
+                    parcellation.streamline_hits_labels(points, labels)
+                })
+                .collect();
+            Ok(StreamlineFlow {
+                selected_streamlines: Arc::new(selected),
+                ..plan.left.clone()
+            })
+        }
+        ReactiveStreamlineOp::ParcelROA {
+            parcellation,
+            labels,
+        } => {
+            let selected = plan
+                .left
+                .selected_streamlines
+                .iter()
+                .copied()
+                .filter(|index| {
+                    let points =
+                        streamline_points(plan.left.dataset.gpu_data.as_ref(), *index as usize);
+                    parcellation.streamline_avoids_labels(points, labels)
+                })
+                .collect();
+            Ok(StreamlineFlow {
+                selected_streamlines: Arc::new(selected),
+                ..plan.left.clone()
+            })
+        }
+        ReactiveStreamlineOp::ParcelEnd {
+            parcellation,
+            labels,
+            endpoint_count,
+        } => {
+            let selected = plan
+                .left
+                .selected_streamlines
+                .iter()
+                .copied()
+                .filter(|index| {
+                    let points =
+                        streamline_points(plan.left.dataset.gpu_data.as_ref(), *index as usize);
+                    parcellation.streamline_end_hits_labels(points, labels, *endpoint_count)
+                })
+                .collect();
+            Ok(StreamlineFlow {
+                selected_streamlines: Arc::new(selected),
+                ..plan.left.clone()
+            })
+        }
+        ReactiveStreamlineOp::ParcelCrop {
+            parcellation,
+            labels,
+            keep_inside,
+        } => {
+            let tractogram = crop_flow_to_parcels(&plan.left, parcellation, labels, *keep_inside)?;
+            streamline_flow_from_tractogram(plan.label.clone(), &plan.left, tractogram)
+        }
+        ReactiveStreamlineOp::AddGroupsFromParcellation {
+            parcellation,
+            parcellation_name,
+        } => add_groups_from_parcellation_from_label(&plan.label, &plan.left, parcellation, parcellation_name),
+    }
+}
+
+fn streamline_flow_from_tractogram(
+    label: String,
+    source_flow: &StreamlineFlow,
+    tractogram: Tractogram,
+) -> Result<StreamlineFlow, String> {
+    let gpu_data = Arc::new(TrxGpuData::from_tractogram(&tractogram).map_err(|err| err.to_string())?);
+    let selected = (0..gpu_data.nb_streamlines as u32).collect();
+    Ok(StreamlineFlow {
+        dataset: Arc::new(StreamlineDataset {
+            name: label,
+            gpu_data,
+            backing: StreamlineBacking::Derived(Arc::new(tractogram)),
+        }),
+        selected_streamlines: Arc::new(selected),
+        color_mode: source_flow.color_mode.clone(),
+        scalar_auto_range: true,
+        scalar_range_min: 0.0,
+        scalar_range_max: 1.0,
+    })
 }
 
 fn subset_tractogram_from_flow(flow: &StreamlineFlow) -> Result<Tractogram, String> {
@@ -1477,6 +1702,7 @@ pub fn save_streamline_plan(plan: &SaveStreamlinePlan) -> Result<(), String> {
         &ConversionOptions {
             header,
             trx_positions_dtype,
+            ..Default::default()
         },
     )
     .map_err(|err| err.to_string())

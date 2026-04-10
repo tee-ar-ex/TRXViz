@@ -7,11 +7,11 @@ mod workflow;
 
 use std::path::PathBuf;
 
-use trxviz_core::renderer::slice_renderer::{AllSliceResources, SliceAxis};
 use state::{
     ImportDialogState, MergeStreamlinesDialogState, PendingFileLoad, SceneState, UiMode,
     ViewportState, WorkerMessage, WorkerReceiver, WorkerSender, WorkflowState,
 };
+use trxviz_core::renderer::slice_renderer::{AllSliceResources, SliceAxis};
 use workflow::workflow_job_kind_title;
 
 /// Main application state.
@@ -199,7 +199,9 @@ impl TrxVizApp {
         let Some(paths) = rfd::FileDialog::new()
             .add_filter(
                 "TRXViz files",
-                &["trx", "tck", "vtk", "tt", "gz", "nii", "gii", "gifti"],
+                &[
+                    "trx", "trk", "tck", "vtk", "tt", "gz", "nii", "gii", "gifti",
+                ],
             )
             .pick_files()
         else {
@@ -394,7 +396,10 @@ impl eframe::App for TrxVizApp {
                 if self.import_dialog.detected_format.is_some_and(|format| {
                     matches!(
                         format,
-                        trx_rs::Format::Tck | trx_rs::Format::Vtk | trx_rs::Format::TinyTrack
+                        trx_rs::Format::Trk
+                            | trx_rs::Format::Tck
+                            | trx_rs::Format::Vtk
+                            | trx_rs::Format::TinyTrack
                     )
                 }) && self.import_dialog.source_path.is_some()
                 {
@@ -434,8 +439,10 @@ impl eframe::App for TrxVizApp {
             }
         }
 
-        self.refresh_workflow_runtime();
-        self.queue_workflow_jobs();
+        self.refresh_workflow_runtime_if_needed(ctx);
+        if self.workflow.last_settled_revision == self.workflow.document_revision {
+            self.queue_workflow_jobs();
+        }
         self.sync_workflow_resources(frame);
         self.show_viewports(ctx);
         let open_files_after_ui = match self.ui_mode {

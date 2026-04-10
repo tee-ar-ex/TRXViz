@@ -38,10 +38,7 @@ fn asset_path_mut(asset: &mut WorkflowAssetDocument) -> &mut PathBuf {
     }
 }
 
-pub fn relativized_document(
-    document: &WorkflowDocument,
-    project_path: &Path,
-) -> WorkflowDocument {
+pub fn relativized_document(document: &WorkflowDocument, project_path: &Path) -> WorkflowDocument {
     let mut document = document.clone();
     let Some(base_dir) = project_path.parent() else {
         return document;
@@ -68,5 +65,3 @@ pub fn resolve_document_asset_paths(document: &mut WorkflowDocument, project_pat
         }
     }
 }
-
-

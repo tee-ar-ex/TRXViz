@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use anyhow::{Context, bail};
 use clap::{Args, Parser, Subcommand};
 use glam::Vec3;
-use trxviz_core::headless::{AssetArgs, HeadlessRenderOptions, render_assets_png, render_project_png};
+use trxviz_core::headless::{
+    AssetArgs, HeadlessRenderOptions, render_assets_png, render_project_png,
+};
 
 #[derive(Parser)]
 #[command(name = "trxviz-cli")]
@@ -123,7 +125,10 @@ mod tests {
     #[test]
     fn parse_vec3_accepts_three_components() {
         assert_eq!(parse_vec3("1,2,3").unwrap(), Vec3::new(1.0, 2.0, 3.0));
-        assert_eq!(parse_vec3(" 1.5, -2, 0 ").unwrap(), Vec3::new(1.5, -2.0, 0.0));
+        assert_eq!(
+            parse_vec3(" 1.5, -2, 0 ").unwrap(),
+            Vec3::new(1.5, -2.0, 0.0)
+        );
     }
 
     #[test]

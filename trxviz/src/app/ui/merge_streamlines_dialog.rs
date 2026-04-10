@@ -1,4 +1,4 @@
-use trx_rs::Format;
+use trx_rs::{Format, VtkCoordinateMode};
 
 use crate::app::state::{FormatlessDType, MergeStreamlineRowState, MergeStreamlinesDialogState};
 
@@ -103,6 +103,32 @@ pub fn show_merge_streamlines_dialog(
                 match row.detected_format {
                     Some(format) => {
                         ui.small(format_summary(format));
+                        if matches!(format, Format::Vtk) {
+                            egui::ComboBox::from_id_salt(("merge_vtk_mode", idx))
+                                .selected_text(vtk_coordinate_mode_label(row.vtk_coordinate_mode))
+                                .show_ui(ui, |ui| {
+                                    for mode in [
+                                        VtkCoordinateMode::HeaderOrWarn,
+                                        VtkCoordinateMode::AssumeRas,
+                                        VtkCoordinateMode::AssumeLps,
+                                    ] {
+                                        ui.selectable_value(
+                                            &mut row.vtk_coordinate_mode,
+                                            mode,
+                                            vtk_coordinate_mode_label(mode),
+                                        );
+                                    }
+                                });
+                            ui.small(vtk_coordinate_mode_description(row.vtk_coordinate_mode));
+                            if let Some(path) = row.source_path.as_ref()
+                                && let Ok(warnings) =
+                                    trx_rs::vtk_import_warnings(path, row.vtk_coordinate_mode)
+                            {
+                                for warning in warnings {
+                                    ui.colored_label(egui::Color32::YELLOW, warning);
+                                }
+                            }
+                        }
                     }
                     None if row.source_path.is_some() => {
                         ui.colored_label(
@@ -214,9 +240,30 @@ pub fn show_merge_streamlines_dialog(
 fn format_summary(format: Format) -> &'static str {
     match format {
         Format::Trx => "Native TRX input.",
+        Format::Trk => "TrackVis input is not accepted here; convert it to TRX first.",
         Format::Tck => "MRtrix TCK input. Gzipped `.tck.gz` is supported.",
         Format::Vtk => "VTK PolyData streamline input.",
         Format::TinyTrack => "DSI Studio Tiny Track input.",
+    }
+}
+
+fn vtk_coordinate_mode_label(mode: VtkCoordinateMode) -> &'static str {
+    match mode {
+        VtkCoordinateMode::HeaderOrWarn => "Use header, else warn + assume LPS",
+        VtkCoordinateMode::AssumeRas => "Force RAS",
+        VtkCoordinateMode::AssumeLps => "Force LPS",
+    }
+}
+
+fn vtk_coordinate_mode_description(mode: VtkCoordinateMode) -> &'static str {
+    match mode {
+        VtkCoordinateMode::HeaderOrWarn => {
+            "Reads `SPACE=RAS` or `SPACE=LPS` when present. If the file is silent, trx-rs warns and assumes LPS."
+        }
+        VtkCoordinateMode::AssumeRas => "Treat the stored VTK coordinates as already being in RAS.",
+        VtkCoordinateMode::AssumeLps => {
+            "Treat the stored VTK coordinates as LPS and flip them into RAS."
+        }
     }
 }
 
@@ -238,7 +285,9 @@ fn show_compact_path_label(ui: &mut egui::Ui, path: Option<&std::path::Path>, em
                 |ui| {
                     ui.set_max_width(PATH_LABEL_WIDTH);
                     let response = ui
-                        .add(egui::Label::new(egui::RichText::new(file_name).monospace()).truncate())
+                        .add(
+                            egui::Label::new(egui::RichText::new(file_name).monospace()).truncate(),
+                        )
                         .on_hover_text(path.display().to_string());
                     ui.small(parent).on_hover_text(path.display().to_string());
                     response.context_menu(|ui| {
