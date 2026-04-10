@@ -439,8 +439,10 @@ impl eframe::App for TrxVizApp {
             }
         }
 
-        self.refresh_workflow_runtime();
-        self.queue_workflow_jobs();
+        self.refresh_workflow_runtime_if_needed(ctx);
+        if self.workflow.last_settled_revision == self.workflow.document_revision {
+            self.queue_workflow_jobs();
+        }
         self.sync_workflow_resources(frame);
         self.show_viewports(ctx);
         let open_files_after_ui = match self.ui_mode {

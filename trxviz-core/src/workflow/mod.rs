@@ -10,7 +10,7 @@ mod simple_workflow;
 mod types;
 
 pub use defaults::*;
-pub use evaluate::{evaluate_scene_plan, save_streamline_plan};
+pub use evaluate::{evaluate_scene_plan, evaluate_scene_plan_with_mode, save_streamline_plan};
 pub use fingerprint::{
     workflow_boundary_plan_fingerprint, workflow_bundle_display_fingerprint,
     workflow_bundle_plan_fingerprint, workflow_reactive_streamline_fingerprint,

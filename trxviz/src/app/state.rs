@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::mpsc;
 
 use egui::Rect;
+use egui_snarl::Snarl;
 use glam::Vec3;
 use trxviz_core::data::gifti_data::GiftiSurfaceData;
 use trxviz_core::data::loaded_files::{FileId, LoadedNifti};
@@ -19,8 +20,8 @@ pub use trxviz_core::scene::{
 
 use crate::app::workflow::{
     StreamlineDisplayRuntime, WorkflowDocument, WorkflowExecutionCache, WorkflowJobKind,
-    WorkflowJobMessage, WorkflowNodeUuid, WorkflowRuntime, WorkflowSelection, WorkspacePane,
-    default_document, default_workspace_tree,
+    WorkflowJobMessage, WorkflowNode, WorkflowNodeUuid, WorkflowRuntime, WorkflowSelection,
+    WorkspacePane, default_document, default_workspace_tree, snarl_from_graph,
 };
 use egui_tiles::Tree;
 use trx_rs::{Format, VtkCoordinateMode};
@@ -440,6 +441,7 @@ impl ViewportState {
 
 pub struct WorkflowState {
     pub document: WorkflowDocument,
+    pub editor_snarl: Snarl<WorkflowNode>,
     pub workspace: Tree<WorkspacePane>,
     pub runtime: WorkflowRuntime,
     pub selection: Option<WorkflowSelection>,
@@ -451,6 +453,13 @@ pub struct WorkflowState {
     pub execution_cache: WorkflowExecutionCache,
     pub run_expensive_requested: bool,
     pub run_session_active: bool,
+    pub document_revision: u64,
+    pub last_interactive_revision: u64,
+    pub last_settled_revision: u64,
+    pub last_runtime_revision: u64,
+    pub last_resource_sync_revision: u64,
+    pub editor_interaction_active: bool,
+    pub last_semantic_edit_at: f64,
     pub job_tx: mpsc::Sender<WorkflowJobMessage>,
     pub job_rx: mpsc::Receiver<WorkflowJobMessage>,
     pub jobs_in_flight: HashMap<WorkflowNodeUuid, (WorkflowJobKind, u64)>,
@@ -461,8 +470,10 @@ impl WorkflowState {
         job_tx: mpsc::Sender<WorkflowJobMessage>,
         job_rx: mpsc::Receiver<WorkflowJobMessage>,
     ) -> Self {
+        let document = default_document();
         Self {
-            document: default_document(),
+            editor_snarl: snarl_from_graph(&document.graph),
+            document,
             workspace: default_workspace_tree(),
             runtime: WorkflowRuntime::default(),
             selection: None,
@@ -474,6 +485,13 @@ impl WorkflowState {
             execution_cache: WorkflowExecutionCache::default(),
             run_expensive_requested: false,
             run_session_active: false,
+            document_revision: 1,
+            last_interactive_revision: 0,
+            last_settled_revision: 0,
+            last_runtime_revision: 0,
+            last_resource_sync_revision: 0,
+            editor_interaction_active: false,
+            last_semantic_edit_at: 0.0,
             job_tx,
             job_rx,
             jobs_in_flight: HashMap::new(),

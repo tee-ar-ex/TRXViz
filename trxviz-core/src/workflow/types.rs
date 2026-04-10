@@ -253,6 +253,12 @@ pub struct NodeEvalState {
     pub available_streamline_groups: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkflowEvalMode {
+    Interactive,
+    Settled,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WorkflowExecutionStatus {
     NeverRun,
@@ -534,9 +540,32 @@ pub struct SurfaceMapPlan {
     pub dps_field: Option<String>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum ReactiveStreamlineOp {
     Merge,
+    RemoveDuplicates,
+    ParcelROI {
+        parcellation: Arc<ParcellationVolume>,
+        labels: BTreeSet<u32>,
+    },
+    ParcelROA {
+        parcellation: Arc<ParcellationVolume>,
+        labels: BTreeSet<u32>,
+    },
+    ParcelEnd {
+        parcellation: Arc<ParcellationVolume>,
+        labels: BTreeSet<u32>,
+        endpoint_count: usize,
+    },
+    ParcelCrop {
+        parcellation: Arc<ParcellationVolume>,
+        labels: BTreeSet<u32>,
+        keep_inside: bool,
+    },
+    AddGroupsFromParcellation {
+        parcellation: Arc<ParcellationVolume>,
+        parcellation_name: String,
+    },
 }
 
 #[derive(Clone)]

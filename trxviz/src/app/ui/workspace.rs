@@ -144,23 +144,29 @@ impl super::super::TrxVizApp {
         });
         ui.separator();
 
-        // The canonical graph lives in `self.workflow.document.graph`
-        // (`WorkflowGraph`, serde-pure). The egui-snarl editor needs its own
-        // mutable `Snarl<WorkflowNode>`: rebuild it from the canonical graph
-        // on every frame, run the widget, then sync any edits back.
-        let mut editor_snarl = workflow::snarl_from_graph(&self.workflow.document.graph);
-
+        let prior_selection = self.workflow.selection;
         let mut viewer = WorkflowGraphViewer {
             selected: &mut self.workflow.selection,
             focus_bounds: &mut self.workflow.graph_focus_request,
             viewport_rect: ui.max_rect(),
             node_state: &self.workflow.runtime.node_state,
         };
-        egui_snarl::ui::SnarlWidget::new()
+        let response = egui_snarl::ui::SnarlWidget::new()
             .id(egui::Id::new("workflow_graph"))
-            .show(&mut editor_snarl, &mut viewer, ui);
+            .show(&mut self.workflow.editor_snarl, &mut viewer, ui);
 
-        workflow::sync_graph_from_snarl(&mut editor_snarl, &mut self.workflow.document);
+        let mut summary: workflow::GraphEditSummary = workflow::sync_graph_from_snarl(
+            &mut self.workflow.editor_snarl,
+            &mut self.workflow.document,
+        );
+        summary.selection_changed = self.workflow.selection != prior_selection;
+        if summary.semantic_changed() {
+            self.mark_workflow_semantic_edit(ui.ctx().input(|input| input.time));
+        } else if summary.node_positions_changed || summary.selection_changed {
+            self.mark_workflow_nonsemantic_edit();
+        }
+        self.workflow.editor_interaction_active =
+            response.hovered() && ui.ctx().input(|input| input.pointer.any_down());
     }
 
     fn show_inspector_pane(&mut self, ui: &mut egui::Ui) {
@@ -263,16 +269,23 @@ impl super::super::TrxVizApp {
     }
 
     fn show_node_inspector(&mut self, ui: &mut egui::Ui, node_uuid: workflow::WorkflowNodeUuid) {
-        let Some(node) = self.workflow.document.graph.get_mut(node_uuid) else {
+        let Some(original_node) = self.workflow.document.graph.get(node_uuid).cloned() else {
             ui.small("Selected node is no longer present.");
             return;
         };
 
         let mut save_now = false;
-        ui.text_edit_singleline(&mut node.label);
-        ui.separator();
+        let node_changed = {
+            let node = self
+                .workflow
+                .document
+                .graph
+                .get_mut(node_uuid)
+                .expect("node must still exist while inspector is open");
+            ui.text_edit_singleline(&mut node.label);
+            ui.separator();
 
-        match &mut node.kind {
+            match &mut node.kind {
             workflow::WorkflowNodeKind::LimitStreamlines {
                 limit,
                 randomize,
@@ -589,10 +602,12 @@ impl super::super::TrxVizApp {
                     ui.small("Connect a streamline input to enable export.");
                 }
             }
-            _ => {
-                ui.small("This node has no editable parameters yet.");
+                _ => {
+                    ui.small("This node has no editable parameters yet.");
+                }
             }
-        }
+            *node != original_node
+        };
 
         if let Some(state) = self.workflow.runtime.node_state.get(&node_uuid) {
             ui.separator();
@@ -618,6 +633,26 @@ impl super::super::TrxVizApp {
 
         if save_now {
             self.save_streamline_node(node_uuid);
+        }
+
+        if node_changed {
+            let node_copy = self
+                .workflow
+                .document
+                .graph
+                .get(node_uuid)
+                .cloned()
+                .expect("node must still exist after inspector edit");
+            if let Some(node_id) = self
+                .workflow
+                .editor_snarl
+                .node_ids()
+                .find_map(|(id, value)| (value.uuid == node_uuid).then_some(id))
+                && let Some(info) = self.workflow.editor_snarl.get_node_info_mut(node_id)
+            {
+                info.value = node_copy;
+            }
+            self.mark_workflow_semantic_edit(ui.ctx().input(|input| input.time));
         }
     }
 

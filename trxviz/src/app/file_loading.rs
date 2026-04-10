@@ -69,6 +69,8 @@ impl super::TrxVizApp {
                 egui::pos2(branch.bounds.min.x, branch.bounds.min.y),
                 egui::pos2(branch.bounds.max.x, branch.bounds.max.y),
             ));
+            self.rebuild_workflow_editor_from_document();
+            self.mark_workflow_semantic_edit(0.0);
         }
     }
 

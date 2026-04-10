@@ -28,7 +28,22 @@ pub(crate) fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
 }
 
 impl crate::app::TrxVizApp {
+    pub(in crate::app) fn rebuild_workflow_editor_from_document(&mut self) {
+        self.workflow.editor_snarl = snarl_from_graph(&self.workflow.document.graph);
+    }
+
+    pub(in crate::app) fn mark_workflow_semantic_edit(&mut self, at_time: f64) {
+        self.workflow.document_revision += 1;
+        self.workflow.last_semantic_edit_at = at_time;
+        self.workflow.editor_interaction_active = true;
+    }
+
+    pub(in crate::app) fn mark_workflow_nonsemantic_edit(&mut self) {
+        self.workflow.editor_interaction_active = true;
+    }
+
     pub(in crate::app) fn poll_workflow_job_messages(&mut self) {
+        let mut changed = false;
         while let Ok(message) = self.workflow.job_rx.try_recv() {
             match message {
                 WorkflowJobMessage::Started {
@@ -41,6 +56,7 @@ impl crate::app::TrxVizApp {
                         && record.current_fingerprint == Some(fingerprint)
                     {
                         record.status = WorkflowExecutionStatus::Running;
+                        changed = true;
                     }
                 }
                 WorkflowJobMessage::Finished {
@@ -66,6 +82,7 @@ impl crate::app::TrxVizApp {
                                     .derived_streamline_cache
                                     .insert(node_uuid, CachedDerivedStreamline { flow });
                                 mark_expensive_success(record, fingerprint, summary);
+                                changed = true;
                             }
                             WorkflowJobOutput::SurfaceQuery(flow) => {
                                 let summary =
@@ -75,6 +92,7 @@ impl crate::app::TrxVizApp {
                                     .surface_query_cache
                                     .insert(node_uuid, CachedSurfaceQuery { flow });
                                 mark_expensive_success(record, fingerprint, summary);
+                                changed = true;
                             }
                             WorkflowJobOutput::SurfaceMap(map) => {
                                 let summary = format!(
@@ -86,6 +104,7 @@ impl crate::app::TrxVizApp {
                                     .surface_streamline_map_cache
                                     .insert(node_uuid, CachedSurfaceStreamlineMap { map });
                                 mark_expensive_success(record, fingerprint, summary);
+                                changed = true;
                             }
                             WorkflowJobOutput::TubeGeometry { vertices, indices } => {
                                 self.workflow.execution_cache.tube_geometry_cache.insert(
@@ -101,9 +120,10 @@ impl crate::app::TrxVizApp {
                                     fingerprint,
                                     "Tube geometry ready".to_string(),
                                 );
+                                changed = true;
                             }
                             WorkflowJobOutput::BundleSurface { meshes } => {
-                                let summary = if meshes.is_empty() {
+                                let build_summary = if meshes.is_empty() {
                                     "Bundle surface is empty".to_string()
                                 } else {
                                     format!("{} bundle surface mesh(es)", meshes.len())
@@ -118,7 +138,46 @@ impl crate::app::TrxVizApp {
                                             meshes,
                                         },
                                     );
-                                mark_expensive_success(record, fingerprint, summary);
+                                mark_expensive_success(
+                                    record,
+                                    fingerprint,
+                                    build_summary.clone(),
+                                );
+                                if let Some(draw) = self
+                                    .workflow
+                                    .runtime
+                                    .scene_plan
+                                    .bundle_draws
+                                    .iter()
+                                    .find(|draw| draw.node_uuid == node_uuid)
+                                {
+                                    let build_fingerprint = workflow_bundle_plan_fingerprint(
+                                        &BundleSurfacePlan {
+                                            build_node_uuid: draw.build_node_uuid,
+                                            label: draw.label.clone(),
+                                            flow: draw.flow.clone(),
+                                            per_group: draw.per_group,
+                                            voxel_size_mm: draw.voxel_size_mm,
+                                            threshold: draw.threshold,
+                                            smooth_sigma: draw.smooth_sigma,
+                                            min_component_volume_mm3: draw
+                                                .min_component_volume_mm3,
+                                            opacity: draw.opacity,
+                                        },
+                                    );
+                                    let build_record = self
+                                        .workflow
+                                        .execution_cache
+                                        .node_runs
+                                        .entry(draw.build_node_uuid)
+                                        .or_default();
+                                    mark_expensive_success(
+                                        build_record,
+                                        build_fingerprint,
+                                        build_summary,
+                                    );
+                                }
+                                changed = true;
                             }
                             WorkflowJobOutput::BoundaryField { field } => {
                                 if let Some(field) = field {
@@ -131,6 +190,7 @@ impl crate::app::TrxVizApp {
                                         fingerprint,
                                         "Boundary field ready".to_string(),
                                     );
+                                    changed = true;
                                 } else {
                                     self.workflow
                                         .execution_cache
@@ -141,15 +201,20 @@ impl crate::app::TrxVizApp {
                                         fingerprint,
                                         "Boundary field is empty".to_string(),
                                     );
+                                    changed = true;
                                 }
                             }
                         },
                         Err(error) => {
                             mark_expensive_failure(record, fingerprint, &error);
+                            changed = true;
                         }
                     }
                 }
             }
+        }
+        if changed {
+            self.workflow.last_runtime_revision += 1;
         }
     }
 
@@ -307,32 +372,6 @@ impl crate::app::TrxVizApp {
             }
         }
 
-        for plan in self
-            .workflow
-            .runtime
-            .scene_plan
-            .bundle_surface_plans
-            .clone()
-        {
-            let fingerprint = workflow_bundle_plan_fingerprint(&plan);
-            let record = self
-                .workflow
-                .execution_cache
-                .node_runs
-                .entry(plan.build_node_uuid)
-                .or_default();
-            if record.last_success_fingerprint != Some(fingerprint) {
-                mark_expensive_success(
-                    record,
-                    fingerprint,
-                    format!(
-                        "Bundle surface build for {} streamline(s)",
-                        plan.flow.selected_streamlines.len()
-                    ),
-                );
-            }
-        }
-
         for draw in self.workflow.runtime.scene_plan.bundle_draws.clone() {
             let boundary_field = draw.boundary_field_node_uuid.and_then(|uuid| {
                 self.workflow
@@ -392,9 +431,9 @@ impl crate::app::TrxVizApp {
         queued_any
     }
 
-    pub(in crate::app) fn refresh_workflow_runtime(&mut self) {
+    pub(in crate::app) fn refresh_workflow_runtime(&mut self, mode: WorkflowEvalMode) {
         ensure_node_uuids(&mut self.workflow.document);
-        self.workflow.runtime = evaluate_scene_plan(
+        self.workflow.runtime = evaluate_scene_plan_with_mode(
             &self.workflow.document,
             &self.scene.trx_files,
             &self.scene.nifti_files,
@@ -403,11 +442,35 @@ impl crate::app::TrxVizApp {
             &mut self.workflow.display_runtimes,
             &mut self.workflow.next_draw_id,
             &mut self.workflow.execution_cache,
-            false,
+            mode,
         );
+        self.workflow.last_runtime_revision += 1;
+    }
+
+    pub(in crate::app) fn refresh_workflow_runtime_if_needed(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|input| input.time);
+        let needs_interactive = self.workflow.document_revision != self.workflow.last_interactive_revision;
+        if needs_interactive {
+            self.refresh_workflow_runtime(WorkflowEvalMode::Interactive);
+            self.workflow.last_interactive_revision = self.workflow.document_revision;
+        }
+
+        let should_run_settled = self.workflow.run_expensive_requested
+            || (self.workflow.document_revision != self.workflow.last_settled_revision
+                && !self.workflow.editor_interaction_active
+                && (now - self.workflow.last_semantic_edit_at) >= 0.150);
+        if should_run_settled {
+            self.refresh_workflow_runtime(WorkflowEvalMode::Settled);
+            self.workflow.last_interactive_revision = self.workflow.document_revision;
+            self.workflow.last_settled_revision = self.workflow.document_revision;
+            self.workflow.editor_interaction_active = false;
+        }
     }
 
     pub(in crate::app) fn sync_workflow_resources(&mut self, frame: &mut eframe::Frame) {
+        if self.workflow.last_resource_sync_revision == self.workflow.last_runtime_revision {
+            return;
+        }
         let Some(rs) = frame.wgpu_render_state() else {
             return;
         };
@@ -665,6 +728,7 @@ impl crate::app::TrxVizApp {
                 }
             }
         }
+        self.workflow.last_resource_sync_revision = self.workflow.last_runtime_revision;
     }
 
     pub(in crate::app) fn clear_loaded_scene(&mut self, frame: &mut eframe::Frame) {
@@ -702,11 +766,19 @@ impl crate::app::TrxVizApp {
         self.workflow.selection = None;
         self.workflow.node_feedback.clear();
         self.workflow.document = default_document();
+        self.rebuild_workflow_editor_from_document();
         self.scene.next_file_id = 0;
         self.workflow.next_draw_id = 1_000_000;
         self.workflow.run_expensive_requested = false;
         self.workflow.run_session_active = false;
         self.workflow.jobs_in_flight.clear();
+        self.workflow.document_revision += 1;
+        self.workflow.last_interactive_revision = 0;
+        self.workflow.last_settled_revision = 0;
+        self.workflow.last_runtime_revision += 1;
+        self.workflow.last_resource_sync_revision = 0;
+        self.workflow.editor_interaction_active = false;
+        self.workflow.last_semantic_edit_at = 0.0;
     }
 
     pub(in crate::app) fn new_workflow_project(&mut self, frame: &mut eframe::Frame) {
@@ -900,9 +972,14 @@ impl crate::app::TrxVizApp {
         self.workflow.document = project.document;
         self.workflow.workspace = workspace;
         ensure_node_uuids(&mut self.workflow.document);
+        self.rebuild_workflow_editor_from_document();
         self.workflow.project_path = Some(path.clone());
         self.status_msg = Some(format!("Opened workflow project {}", path.display()));
         self.error_msg = None;
+        self.workflow.document_revision += 1;
+        self.workflow.last_interactive_revision = 0;
+        self.workflow.last_settled_revision = 0;
+        self.workflow.editor_interaction_active = false;
     }
 
     pub(in crate::app) fn save_streamline_node(&mut self, node_uuid: WorkflowNodeUuid) {
