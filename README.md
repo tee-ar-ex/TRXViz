@@ -1,6 +1,8 @@
 # TRXViz
 
-A cross-platform desktop application for visualizing [TRX](https://github.com/tee-ar-ex/trx-spec) brain tractography files with NIfTI-1 background volumes. Includes a headless CLI for producing renders as part of data-processing pipelines on compute nodes with no display.
+A cross-platform desktop application for visualizing [TRX](https://github.com/tee-ar-ex/trx-spec)
+brain tractography files with NIfTI-1 background volumes. Includes a headless CLI for producing
+renders as part of data-processing pipelines on compute nodes with no display.
 
 Built with Rust, [egui](https://github.com/emilk/egui), and [wgpu](https://wgpu.rs/) for GPU-accelerated rendering.
 
@@ -31,6 +33,10 @@ Built with Rust, [egui](https://github.com/emilk/egui), and [wgpu](https://wgpu.
 
 ## Quick start
 
+For most users, start with a prebuilt release from the
+[TRXViz GitHub releases page](https://github.com/tee-ar-ex/TRXViz/releases) and only use the cargo
+commands below if you want to build from source.
+
 ```bash
 # GUI — open a tractogram with an optional background volume
 cargo run -p trxviz --release -- tractogram.trx background.nii.gz
@@ -41,6 +47,40 @@ cargo run -p trxviz-cli -- render --project workflow.json --out scene.png
 # CLI — render from loose assets
 cargo run -p trxviz-cli -- render --trx tractogram.trx --nifti background.nii.gz --out scene.png
 ```
+
+## Downloading Executables
+
+Prebuilt GUI and CLI executables are published on the
+[TRXViz GitHub releases page](https://github.com/tee-ar-ex/TRXViz/releases).
+
+- Download the asset for your platform from the latest release.
+- On macOS, move `TRXViz.app` into `/Applications`.
+- On Windows, unzip the release archive to a normal local folder.
+- The macOS CLI binary is bundled inside the app at
+  `/Applications/TRXViz.app/Contents/MacOS/trxviz-cli`.
+- On Windows, `trxviz.exe` and `trxviz-cli.exe` are included in the extracted release folder.
+
+### Opening The Unsigned macOS App
+
+Because the macOS app is unsigned, Gatekeeper may block the first launch.
+
+1. Try opening `TRXViz.app` once from Finder.
+2. Open `System Settings > Privacy & Security`.
+3. In the `Security` section, click `Open Anyway` for TRXViz.
+4. Confirm `Open` and authenticate if prompted.
+
+You can also Control-click the app in Finder and choose `Open` to create the same exception.
+
+### Opening The Unsigned Windows App
+
+Windows may show a Microsoft Defender SmartScreen warning for unsigned releases.
+
+1. Open `trxviz.exe`.
+2. Click `More info`.
+3. Click `Run anyway` if you trust the downloaded release.
+
+Some Windows 11 systems with Smart App Control enabled may block unsigned apps more aggressively.
+If that happens, use a machine that permits the app or build from source locally.
 
 ## Building
 

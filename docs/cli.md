@@ -34,6 +34,9 @@ trxviz-cli render \
   --out scene.png
 ```
 
+The `--trx` input can also point to imported tractogram formats including `.trk`, `.tck`,
+`.tck.gz`, `.vtk`, and `.tt.gz`.
+
 ## Camera and Output Controls
 
 - `--width` / `--height`: output image size

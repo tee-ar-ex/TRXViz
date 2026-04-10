@@ -115,7 +115,7 @@ shape, your saved projects still load.
 
 ## External dependencies worth knowing about
 
-- **`trx-rs`** — TRX file format reader/writer. Pulled from [GitHub](https://github.com/tee-ar-ex/trx-rs)
+- **`trx-rs`** — TRX reader/writer plus imported tractogram support. Pulled from [GitHub](https://github.com/tee-ar-ex/trx-rs)
   as a git dependency. Not a member of the TRXViz workspace so that it can evolve on its own cadence.
 - **`wgpu`** — GPU abstraction. Used by both the GUI and the headless
   renderer; all shaders live in `trxviz-core/src/shaders/`.
