@@ -9,6 +9,7 @@ pub fn save_workflow_project_to_path(
     let project = WorkflowProject {
         version: 1,
         document: document.clone(),
+        slice_view_ui: None,
     };
     let json = serde_json::to_string_pretty(&project).map_err(|err| err.to_string())?;
     std::fs::write(path, json).map_err(|err| err.to_string())
@@ -25,6 +26,7 @@ pub fn load_workflow_project_from_path(path: &Path) -> Result<WorkflowProject, S
         .map(|document| WorkflowProject {
             version: 1,
             document,
+            slice_view_ui: None,
         })
         .map_err(|err| err.to_string())
 }

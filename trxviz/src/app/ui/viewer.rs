@@ -98,6 +98,9 @@ impl super::super::TrxVizApp {
                 if ui.button("Pop Out 2D").clicked() {
                     self.viewport.view_2d.window_open = true;
                 }
+                if ui.button("Copy 3D Camera").clicked() {
+                    self.copy_camera_3d_json(ui.ctx());
+                }
                 ui.separator();
                 ui.label("Slices");
                 ui.checkbox(&mut self.viewport.slice_visible[0], "Axial");

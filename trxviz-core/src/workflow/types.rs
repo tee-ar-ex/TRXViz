@@ -213,12 +213,21 @@ pub struct WorkflowDocument {
     pub next_node_uuid: u64,
     pub graph: WorkflowGraph,
     pub assets: Vec<WorkflowAssetDocument>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera_3d: Option<WorkflowCamera3D>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slice_view_3d: Option<WorkflowSliceView3D>,
+    // Backward compatibility for projects saved before slice positions were persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slice_visible_3d: Option<[bool; 3]>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WorkflowProject {
     pub version: u32,
     pub document: WorkflowDocument,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slice_view_ui: Option<WorkflowSliceViewUi>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -241,6 +250,54 @@ pub enum WorkflowAssetDocument {
         path: PathBuf,
         label_table_path: Option<PathBuf>,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct WorkflowCamera3D {
+    pub target: [f32; 3],
+    pub azimuth_deg: f32,
+    pub elevation_deg: f32,
+    pub distance: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct WorkflowSliceView3D {
+    pub visible: [bool; 3],
+    /// World-space slice positions in RAS mm: [axial_z, coronal_y, sagittal_x].
+    pub positions_ras: [f32; 3],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum WorkflowSliceViewKind {
+    Axial,
+    Coronal,
+    Sagittal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum WorkflowView2DMode {
+    Slice,
+    Ortho,
+    Lightbox,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct WorkflowOrthoSliceCamera {
+    pub center: [f32; 2],
+    pub half_extent: f32,
+    pub rotation: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct WorkflowSliceViewUi {
+    pub mode: WorkflowView2DMode,
+    pub single_view: WorkflowSliceViewKind,
+    pub lightbox_axis: WorkflowSliceViewKind,
+    pub lightbox_rows: usize,
+    pub lightbox_cols: usize,
+    pub active_axis: usize,
+    pub ortho_show_row: bool,
+    pub slice_cameras: [WorkflowOrthoSliceCamera; 3],
 }
 
 #[derive(Clone, Debug, Default)]
@@ -763,6 +820,9 @@ pub fn default_document() -> WorkflowDocument {
         next_node_uuid: 1,
         graph: WorkflowGraph::new(),
         assets: Vec::new(),
+        camera_3d: None,
+        slice_view_3d: None,
+        slice_visible_3d: None,
     }
 }
 
@@ -771,6 +831,7 @@ impl Default for WorkflowProject {
         Self {
             version: 1,
             document: default_document(),
+            slice_view_ui: None,
         }
     }
 }
@@ -925,4 +986,69 @@ pub fn ensure_node_uuids(document: &mut WorkflowDocument) {
     }
     next = next.max(document.graph.max_uuid() + 1);
     document.next_node_uuid = next;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        WorkflowCamera3D, WorkflowDocument, WorkflowOrthoSliceCamera, WorkflowProject,
+        WorkflowSliceView3D, WorkflowSliceViewKind, WorkflowSliceViewUi, WorkflowView2DMode,
+    };
+
+    #[test]
+    fn workflow_document_camera_round_trips() {
+        let mut document = super::default_document();
+        document.camera_3d = Some(WorkflowCamera3D {
+            target: [1.0, 2.0, 3.0],
+            azimuth_deg: 45.0,
+            elevation_deg: 25.0,
+            distance: 180.0,
+        });
+        document.slice_view_3d = Some(WorkflowSliceView3D {
+            visible: [true, false, true],
+            positions_ras: [10.0, 20.0, 30.0],
+        });
+        document.slice_visible_3d = Some([true, false, true]);
+
+        let json = serde_json::to_string(&document).unwrap();
+        let restored: WorkflowDocument = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.camera_3d, document.camera_3d);
+        assert_eq!(restored.slice_view_3d, document.slice_view_3d);
+        assert_eq!(restored.slice_visible_3d, document.slice_visible_3d);
+    }
+
+    #[test]
+    fn workflow_document_defaults_camera_when_missing() {
+        let json = r#"{"next_node_uuid":1,"graph":{"nodes":{},"wires":[]},"assets":[]}"#;
+        let restored: WorkflowDocument = serde_json::from_str(json).unwrap();
+        assert!(restored.camera_3d.is_none());
+        assert!(restored.slice_view_3d.is_none());
+        assert!(restored.slice_visible_3d.is_none());
+    }
+
+    #[test]
+    fn workflow_project_slice_view_ui_round_trips() {
+        let project = WorkflowProject {
+            version: 1,
+            document: super::default_document(),
+            slice_view_ui: Some(WorkflowSliceViewUi {
+                mode: WorkflowView2DMode::Lightbox,
+                single_view: WorkflowSliceViewKind::Axial,
+                lightbox_axis: WorkflowSliceViewKind::Sagittal,
+                lightbox_rows: 3,
+                lightbox_cols: 4,
+                active_axis: 2,
+                ortho_show_row: false,
+                slice_cameras: [WorkflowOrthoSliceCamera {
+                    center: [0.0, 1.0],
+                    half_extent: 42.0,
+                    rotation: 0.0,
+                }; 3],
+            }),
+        };
+
+        let json = serde_json::to_string(&project).unwrap();
+        let restored: WorkflowProject = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.slice_view_ui, project.slice_view_ui);
+    }
 }

@@ -12,17 +12,24 @@ Use `trxviz-cli` when you need reproducible PNG output without opening the deskt
 cargo run -- render --project workflow.json --out scene.png
 ```
 
+Render the saved 2D viewer state from a project:
+
+```bash
+cargo run -- render --project workflow.json --view 2d --out scene.png
+```
+
 ## Render Loose Assets
 
 ```bash
 cargo run -- render \
-  --trx tractogram.trx \
+  --tractogram tractogram.trx \
   --nifti volume.nii.gz \
   --out scene.png
 ```
 
 ## Useful Options
 
+- `--view 3d|2d`
 - `--width` / `--height`
 - `--target`
 - `--azimuth`

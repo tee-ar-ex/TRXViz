@@ -81,7 +81,7 @@ Or render a scene from loose assets:
 
 ```bash
 cargo run -p trxviz-cli -- render \
-  --trx tractogram.trx \
+  --tractogram tractogram.trx \
   --nifti background.nii.gz \
   --out scene.png
 ```
@@ -99,4 +99,4 @@ cargo run -p trxviz-cli -- render \
 
 - [GUI Guide](gui-guide.md) for viewer behavior and export
 - [Workflows](workflows.md) for graph-based usage
-- [Command Line](cli.md) for render automation and headless caveats
+- [Command Line](cli.md) for render automation, saved-camera behavior, and headless caveats
