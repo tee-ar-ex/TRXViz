@@ -80,8 +80,11 @@ If that happens, use a machine that permits the app or build from source locally
 # Render a saved workflow project offscreen
 cargo run -p trxviz-cli -- render --project workflow.json --out scene.png
 
+# Render the saved 2D viewer state from a workflow project
+cargo run -p trxviz-cli -- render --project workflow.json --view 2d --out scene-2d.png
+
 # Or render a scene from loose assets
-cargo run -p trxviz-cli -- render --trx tractogram.trx --nifti background.nii.gz --out scene.png
+cargo run -p trxviz-cli -- render --tractogram tractogram.trx --nifti background.nii.gz --out scene.png
 ```
 
 ## Building
@@ -124,6 +127,19 @@ touch "target/release/TRXViz.app"
 | Slice | Pan | Left-click drag |
 | Slice | Zoom | Right-click drag |
 | Slice | Change slice | Scroll |
+
+## Saved 3D Camera
+
+Workflow project JSON can now store the current 3D camera under `document.camera_3d` and the 3D
+slice state under `document.slice_view_3d`.
+
+- Save a workflow project after framing the view you want to preserve.
+- Use `View > Copy 3D Camera JSON` in the app, or the `Copy 3D Camera` button in the preview
+  toolbar, to copy a JSON snippet for manual editing.
+- Saved GUI projects also restore the slice-plane positions and 2D slice-view pan/zoom state.
+- `trxviz-cli render --project workflow.json --view 2d` renders the saved 2D viewer state.
+- `trxviz-cli render --project workflow.json` uses the saved camera by default unless you pass
+  `--target`, `--azimuth`, `--elevation`, or `--distance`.
 
 ## Dependencies
 

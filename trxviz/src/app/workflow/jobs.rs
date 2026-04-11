@@ -789,6 +789,7 @@ impl crate::app::TrxVizApp {
     }
 
     pub(in crate::app) fn save_workflow_project(&mut self, save_as: bool) {
+        self.sync_viewport_camera_into_workflow_document();
         let target_path = if !save_as {
             self.workflow.project_path.clone()
         } else {
@@ -808,6 +809,7 @@ impl crate::app::TrxVizApp {
         match gui_save_project(
             &self.workflow.document,
             &self.workflow.workspace,
+            crate::app::workflow::capture_gui_slice_view_state(&self.viewport),
             &target_path,
         ) {
             Ok(()) => {
@@ -835,7 +837,7 @@ impl crate::app::TrxVizApp {
             return;
         }
 
-        let (project, workspace) = match gui_load_project(&path) {
+        let (project, workspace, slice_view_ui) = match gui_load_project(&path) {
             Ok(result) => result,
             Err(err) => {
                 self.error_msg = Some(format!("Failed to read workflow project: {err}"));
@@ -970,6 +972,18 @@ impl crate::app::TrxVizApp {
         }
 
         self.workflow.document = project.document;
+        if let Some(camera) = self.workflow.document.camera_3d {
+            self.viewport.apply_workflow_camera_3d(camera);
+        }
+        if let Some(slice_view) = self.workflow.document.slice_view_3d {
+            self.viewport
+                .apply_workflow_slice_view_3d(slice_view, &self.scene.nifti_files);
+        } else if let Some(slice_visible) = self.workflow.document.slice_visible_3d {
+            self.viewport.slice_visible = slice_visible;
+        }
+        if let Some(slice_view_ui) = slice_view_ui {
+            crate::app::workflow::apply_gui_slice_view_state(&mut self.viewport, slice_view_ui);
+        }
         self.workflow.workspace = workspace;
         ensure_node_uuids(&mut self.workflow.document);
         self.rebuild_workflow_editor_from_document();

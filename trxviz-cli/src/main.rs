@@ -4,7 +4,7 @@ use anyhow::{Context, bail};
 use clap::{Args, Parser, Subcommand};
 use glam::Vec3;
 use trxviz_core::headless::{
-    AssetArgs, HeadlessRenderOptions, render_assets_png, render_project_png,
+    AssetArgs, HeadlessRenderOptions, HeadlessView, render_assets_png, render_project_png,
 };
 
 #[derive(Parser)]
@@ -20,12 +20,20 @@ enum Command {
     Render(RenderArgs),
 }
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum ViewArg {
+    #[value(name = "3d")]
+    View3d,
+    #[value(name = "2d")]
+    View2d,
+}
+
 #[derive(Args)]
 struct RenderArgs {
     #[arg(long)]
     project: Option<PathBuf>,
-    #[arg(long = "trx")]
-    trx_paths: Vec<PathBuf>,
+    #[arg(long = "tractogram")]
+    tractogram_paths: Vec<PathBuf>,
     #[arg(long = "nifti")]
     nifti_paths: Vec<PathBuf>,
     #[arg(long = "surface")]
@@ -38,6 +46,8 @@ struct RenderArgs {
     width: u32,
     #[arg(long, default_value_t = 1080)]
     height: u32,
+    #[arg(long, value_enum, default_value_t = ViewArg::View3d)]
+    view: ViewArg,
     #[arg(long, value_parser = parse_vec3)]
     target: Option<Vec3>,
     #[arg(long)]
@@ -66,6 +76,10 @@ fn run_render(args: RenderArgs) -> anyhow::Result<()> {
     let options = HeadlessRenderOptions {
         width: args.width,
         height: args.height,
+        view: match args.view {
+            ViewArg::View3d => HeadlessView::View3D,
+            ViewArg::View2d => HeadlessView::View2D,
+        },
         target: args.target,
         azimuth_deg: args.azimuth,
         elevation_deg: args.elevation,
@@ -73,7 +87,7 @@ fn run_render(args: RenderArgs) -> anyhow::Result<()> {
     };
 
     if let Some(project_path) = args.project {
-        if !(args.trx_paths.is_empty()
+        if !(args.tractogram_paths.is_empty()
             && args.nifti_paths.is_empty()
             && args.surface_paths.is_empty()
             && args.parcellation_paths.is_empty())
@@ -85,8 +99,12 @@ fn run_render(args: RenderArgs) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if options.view == HeadlessView::View2D {
+        bail!("--view 2d currently requires --project");
+    }
+
     let assets = AssetArgs {
-        trx_paths: args.trx_paths,
+        tractogram_paths: args.tractogram_paths,
         nifti_paths: args.nifti_paths,
         surface_paths: args.surface_paths,
         parcellation_paths: args.parcellation_paths,
@@ -160,7 +178,46 @@ mod tests {
                 assert_eq!(args.out, PathBuf::from("scene.png"));
                 assert_eq!(args.width, 800);
                 assert_eq!(args.height, 600);
+                assert!(matches!(args.view, ViewArg::View3d));
                 assert_eq!(args.target, Some(Vec3::new(1.0, 2.0, 3.0)));
+            }
+        }
+    }
+
+    #[test]
+    fn clap_parses_tractogram_flag() {
+        let cli = Cli::parse_from([
+            "trxviz-cli",
+            "render",
+            "--tractogram",
+            "bundle.tck.gz",
+            "--out",
+            "scene.png",
+        ]);
+
+        match cli.command {
+            Command::Render(args) => {
+                assert_eq!(args.tractogram_paths, vec![PathBuf::from("bundle.tck.gz")]);
+            }
+        }
+    }
+
+    #[test]
+    fn clap_parses_2d_view_flag() {
+        let cli = Cli::parse_from([
+            "trxviz-cli",
+            "render",
+            "--project",
+            "workflow.json",
+            "--view",
+            "2d",
+            "--out",
+            "scene.png",
+        ]);
+
+        match cli.command {
+            Command::Render(args) => {
+                assert!(matches!(args.view, ViewArg::View2d));
             }
         }
     }

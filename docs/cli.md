@@ -24,21 +24,41 @@ trxviz-cli render --project workflow.json --out scene.png
 
 This is the preferred path for reproducible figure generation.
 
+If the workflow project contains `document.camera_3d` and `document.slice_view_3d`,
+`trxviz-cli` uses those saved 3D view settings by default. Command-line camera flags override the
+saved project camera when provided.
+
+To render the saved 2D viewer state instead of the 3D scene:
+
+```bash
+trxviz-cli render --project workflow.json --view 2d --out scene.png
+```
+
+Project-driven 2D rendering reads:
+
+- `document.slice_view_3d` for the shared slice-plane positions and visibility
+- top-level `slice_view_ui` for the saved 2D mode, layout, and per-slice pan/zoom state
+
+If `slice_view_ui` is missing, `--view 2d` exits with an error telling the user to open and save
+the project from the GUI first.
+
 ## Loose Asset Rendering
 
 ```bash
 trxviz-cli render \
-  --trx tractogram.trx \
+  --tractogram tractogram.trx \
   --nifti volume.nii.gz \
   --surface mesh.gii \
   --out scene.png
 ```
 
-The `--trx` input can also point to imported tractogram formats including `.trk`, `.tck`,
-`.tck.gz`, `.vtk`, and `.tt.gz`.
+The `--tractogram` input follows the same format-detection rules as the GUI. Native `.trx` files
+load directly, while `.trk`, `.trk.gz`, `.tck`, `.tck.gz`, `.vtk`, `.tt`, and `.tt.gz` are
+imported according to their extension before rendering.
 
 ## Camera and Output Controls
 
+- `--view`: choose `3d` or `2d` project rendering; defaults to `3d`
 - `--width` / `--height`: output image size
 - `--target`: override camera target
 - `--azimuth`, `--elevation`, `--distance`: camera placement controls

@@ -97,6 +97,7 @@ pub fn direct_streamline_import_warnings(path: &Path, options: &ConversionOption
 
 pub struct HeadlessWorkflowState {
     pub document: WorkflowDocument,
+    pub slice_view_ui: Option<crate::workflow::WorkflowSliceViewUi>,
     pub runtime: WorkflowRuntime,
     pub display_runtimes: std::collections::HashMap<WorkflowNodeUuid, StreamlineDisplayRuntime>,
     pub next_draw_id: FileId,
@@ -108,6 +109,7 @@ impl Default for HeadlessWorkflowState {
     fn default() -> Self {
         Self {
             document: default_document(),
+            slice_view_ui: None,
             runtime: WorkflowRuntime::default(),
             display_runtimes: std::collections::HashMap::new(),
             next_draw_id: 1_000_000,

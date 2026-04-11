@@ -189,6 +189,27 @@ impl NiftiVolume {
         Vec3::new(v.x, v.y, v.z)
     }
 
+    pub fn nearest_slice_index(&self, axis_index: usize, world_pos: f32) -> usize {
+        let world_to_voxel = self.voxel_to_ras.inverse();
+        let probe = match axis_index {
+            0 => Vec3::new(0.0, 0.0, world_pos),
+            1 => Vec3::new(0.0, world_pos, 0.0),
+            _ => Vec3::new(world_pos, 0.0, 0.0),
+        };
+        let voxel = world_to_voxel * probe.extend(1.0);
+        let coord = match axis_index {
+            0 => voxel.z,
+            1 => voxel.y,
+            _ => voxel.x,
+        };
+        let max = match axis_index {
+            0 => self.dims[2].saturating_sub(1),
+            1 => self.dims[1].saturating_sub(1),
+            _ => self.dims[0].saturating_sub(1),
+        } as isize;
+        (coord.round() as isize).clamp(0, max) as usize
+    }
+
     /// Compute the 4 corner positions (in RAS+ space) of an axial slice at voxel index k.
     ///
     /// The NIfTI affine maps integer voxel indices to the *center* of each voxel.

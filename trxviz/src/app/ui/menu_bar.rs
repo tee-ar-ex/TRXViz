@@ -16,6 +16,7 @@ pub struct MenuAction {
     pub open_2d_window: bool,
     pub export_3d_view: bool,
     pub export_2d_view: bool,
+    pub copy_camera_3d_json: bool,
     pub switch_mode: Option<UiMode>,
 }
 
@@ -36,6 +37,7 @@ pub fn show_menu_bar(ctx: &egui::Context, ui_mode: UiMode) -> MenuAction {
         open_2d_window: false,
         export_3d_view: false,
         export_2d_view: false,
+        copy_camera_3d_json: false,
         switch_mode: None,
     };
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
@@ -121,6 +123,10 @@ pub fn show_menu_bar(ctx: &egui::Context, ui_mode: UiMode) -> MenuAction {
                 }
                 if ui.button("Export 2D View...").clicked() {
                     action.export_2d_view = true;
+                    ui.close();
+                }
+                if ui.button("Copy 3D Camera JSON").clicked() {
+                    action.copy_camera_3d_json = true;
                     ui.close();
                 }
             });

@@ -31,6 +31,32 @@ pub struct TrxVizApp {
 }
 
 impl TrxVizApp {
+    fn sync_viewport_camera_into_workflow_document(&mut self) {
+        self.workflow.document.camera_3d = Some(self.viewport.workflow_camera_3d());
+        self.workflow.document.slice_view_3d =
+            Some(self.viewport.workflow_slice_view_3d(&self.scene.nifti_files));
+        self.workflow.document.slice_visible_3d = Some(self.viewport.slice_visible);
+    }
+
+    fn copy_camera_3d_json(&mut self, ctx: &egui::Context) {
+        let snippet = serde_json::json!({
+            "camera_3d": self.viewport.workflow_camera_3d(),
+            "slice_view_3d": self.viewport.workflow_slice_view_3d(&self.scene.nifti_files),
+            "slice_visible_3d": self.viewport.slice_visible,
+        });
+        match serde_json::to_string_pretty(&snippet) {
+            Ok(json) => {
+                ctx.copy_text(json);
+                self.status_msg =
+                    Some("Copied 3D camera JSON to the clipboard. Paste it under document.".into());
+                self.error_msg = None;
+            }
+            Err(err) => {
+                self.error_msg = Some(format!("Failed to serialize 3D camera: {err}"));
+            }
+        }
+    }
+
     fn poll_worker_messages(&mut self, frame: &mut eframe::Frame) {
         while let Ok(message) = self.worker_rx.try_recv() {
             match message {
@@ -389,6 +415,9 @@ impl eframe::App for TrxVizApp {
         if menu_action.export_2d_view {
             self.viewport.export_dialog.open = true;
             self.viewport.export_dialog.target = state::ExportTarget::View2D;
+        }
+        if menu_action.copy_camera_3d_json {
+            self.copy_camera_3d_json(ctx);
         }
         if self.ui_mode == UiMode::Advanced || self.import_dialog.open {
             let import_action = ui::import_dialog::show_import_dialog(ctx, &mut self.import_dialog);
