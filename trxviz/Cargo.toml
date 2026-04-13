@@ -11,7 +11,7 @@ category = "public.app-category.medical"
 
 [dependencies]
 trxviz-core = { path = "../trxviz-core" }
-trx-rs = { git = "https://github.com/tee-ar-ex/trx-rs" }
+trx-rs = { path = "../../trx-rs" }
 eframe = { version = "0.33", default-features = false, features = ["wgpu", "wayland", "x11", "default_fonts"] }
 egui = "0.33"
 egui-wgpu = "0.33"
