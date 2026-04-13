@@ -2,12 +2,16 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use tempfile::tempdir;
 use trx_rs::{AnyTrxFile, ConversionOptions};
 use trxviz_core::data::gifti_data::GiftiSurfaceData;
 use trxviz_core::data::loaded_files::{FileId, StreamlineBacking};
 use trxviz_core::data::nifti_data::NiftiVolume;
 use trxviz_core::data::parcellation_data::ParcellationVolume;
 use trxviz_core::data::trx_data::{RenderStyle, TrxGpuData};
+use trxviz_core::headless::{
+    HeadlessSceneExportFormat, HeadlessSceneExportOptions, export_project_glb,
+};
 use trxviz_core::renderer::background_renderer::BackgroundResources;
 use trxviz_core::renderer::glyph_renderer::GlyphResources;
 use trxviz_core::renderer::mesh_renderer::MeshResources;
@@ -139,11 +143,7 @@ impl crate::app::TrxVizApp {
                                             meshes,
                                         },
                                     );
-                                mark_expensive_success(
-                                    record,
-                                    fingerprint,
-                                    build_summary.clone(),
-                                );
+                                mark_expensive_success(record, fingerprint, build_summary.clone());
                                 if let Some(draw) = self
                                     .workflow
                                     .runtime
@@ -152,8 +152,8 @@ impl crate::app::TrxVizApp {
                                     .iter()
                                     .find(|draw| draw.node_uuid == node_uuid)
                                 {
-                                    let build_fingerprint = workflow_bundle_plan_fingerprint(
-                                        &BundleSurfacePlan {
+                                    let build_fingerprint =
+                                        workflow_bundle_plan_fingerprint(&BundleSurfacePlan {
                                             build_node_uuid: draw.build_node_uuid,
                                             label: draw.label.clone(),
                                             flow: draw.flow.clone(),
@@ -162,13 +162,11 @@ impl crate::app::TrxVizApp {
                                             voxel_size_mm: draw.voxel_size_mm,
                                             threshold: draw.threshold,
                                             smooth_sigma: draw.smooth_sigma,
-                                            min_component_volume_mm3: draw
-                                                .min_component_volume_mm3,
+                                            min_component_volume_mm3: draw.min_component_volume_mm3,
                                             tube_radius_mm: draw.tube_radius_mm,
                                             tube_sides: draw.tube_sides,
                                             opacity: draw.opacity,
-                                        },
-                                    );
+                                        });
                                     let build_record = self
                                         .workflow
                                         .execution_cache
@@ -456,7 +454,8 @@ impl crate::app::TrxVizApp {
 
     pub(in crate::app) fn refresh_workflow_runtime_if_needed(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
-        let needs_interactive = self.workflow.document_revision != self.workflow.last_interactive_revision;
+        let needs_interactive =
+            self.workflow.document_revision != self.workflow.last_interactive_revision;
         if needs_interactive {
             self.refresh_workflow_runtime(WorkflowEvalMode::Interactive);
             self.workflow.last_interactive_revision = self.workflow.document_revision;
@@ -498,10 +497,9 @@ impl crate::app::TrxVizApp {
             .get::<BackgroundResources>()
             .is_none()
         {
-            renderer.callback_resources.insert(BackgroundResources::new(
-                &rs.device,
-                rs.target_format,
-            ));
+            renderer
+                .callback_resources
+                .insert(BackgroundResources::new(&rs.device, rs.target_format));
         }
         if renderer.callback_resources.get::<MeshResources>().is_none() {
             renderer
@@ -844,6 +842,74 @@ impl crate::app::TrxVizApp {
         }
     }
 
+    pub(in crate::app) fn export_to_blender(&mut self) {
+        self.sync_viewport_camera_into_workflow_document();
+        let default_name = self
+            .workflow
+            .project_path
+            .as_ref()
+            .and_then(|path| path.file_stem())
+            .and_then(|stem| stem.to_str())
+            .filter(|stem| !stem.is_empty())
+            .map(|stem| format!("{stem}.glb"))
+            .unwrap_or_else(|| "trxviz_scene.glb".to_string());
+        let Some(output_path) = rfd::FileDialog::new()
+            .add_filter("GLB files", &["glb"])
+            .set_file_name(&default_name)
+            .save_file()
+        else {
+            return;
+        };
+
+        let temp_dir = match tempdir() {
+            Ok(dir) => dir,
+            Err(err) => {
+                self.error_msg = Some(format!(
+                    "Failed to create temporary export directory: {err}"
+                ));
+                return;
+            }
+        };
+        let project_path = temp_dir.path().join("export_project.json");
+        if let Err(err) = gui_save_project(
+            &self.workflow.document,
+            &self.workflow.workspace,
+            crate::app::workflow::capture_gui_slice_view_state(&self.viewport),
+            &project_path,
+        ) {
+            self.error_msg = Some(format!("Failed to prepare Blender export: {err}"));
+            return;
+        }
+
+        let width = self.viewport.window_3d_size[0].max(1.0).round() as u32;
+        let height = self.viewport.window_3d_size[1].max(1.0).round() as u32;
+        let options = HeadlessSceneExportOptions {
+            format: HeadlessSceneExportFormat::Glb,
+            include_camera: true,
+            include_lights: true,
+            include_slices: true,
+            width,
+            height,
+            target: None,
+            azimuth_deg: None,
+            elevation_deg: None,
+            distance: None,
+        };
+
+        match export_project_glb(&project_path, &output_path, &options) {
+            Ok(()) => {
+                self.status_msg = Some(format!(
+                    "Exported Blender scene to {}",
+                    output_path.display()
+                ));
+                self.error_msg = None;
+            }
+            Err(err) => {
+                self.error_msg = Some(format!("Failed to export Blender scene: {err}"));
+            }
+        }
+    }
+
     pub(in crate::app) fn open_workflow_project(
         &mut self,
         path: PathBuf,
@@ -993,9 +1059,8 @@ impl crate::app::TrxVizApp {
         if let Some(camera) = self.workflow.document.camera_3d {
             self.viewport.apply_workflow_camera_3d(camera);
         }
-        self.viewport.apply_workflow_render_3d(
-            self.workflow.document.render_3d.clone().unwrap_or_default(),
-        );
+        self.viewport
+            .apply_workflow_render_3d(self.workflow.document.render_3d.clone().unwrap_or_default());
         if let Some(slice_view) = self.workflow.document.slice_view_3d {
             self.viewport
                 .apply_workflow_slice_view_3d(slice_view, &self.scene.nifti_files);

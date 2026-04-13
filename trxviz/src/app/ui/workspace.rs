@@ -229,9 +229,9 @@ impl super::super::TrxVizApp {
             } else {
                 let mut color = match render.background {
                     crate::app::state::WorkflowBackground3D::Solid { color } => color,
-                    crate::app::state::WorkflowBackground3D::VerticalGradient { bottom, .. } => {
-                        bottom
-                    }
+                    crate::app::state::WorkflowBackground3D::VerticalGradient {
+                        bottom, ..
+                    } => bottom,
                 };
                 ui.label("Background color");
                 ui.color_edit_button_rgb(&mut color);
@@ -364,268 +364,275 @@ impl super::super::TrxVizApp {
             ui.separator();
 
             match &mut node.kind {
-            workflow::WorkflowNodeKind::LimitStreamlines {
-                limit,
-                randomize,
-                seed,
-            } => {
-                ui.add(egui::Slider::new(limit, 1..=1_000_000).text("Limit"));
-                ui.checkbox(randomize, "Randomize before limiting");
-                if *randomize {
+                workflow::WorkflowNodeKind::LimitStreamlines {
+                    limit,
+                    randomize,
+                    seed,
+                } => {
+                    ui.add(egui::Slider::new(limit, 1..=1_000_000).text("Limit"));
+                    ui.checkbox(randomize, "Randomize before limiting");
+                    if *randomize {
+                        ui.add(egui::DragValue::new(seed).speed(1.0).prefix("Seed "));
+                    }
+                }
+                workflow::WorkflowNodeKind::GroupSelect { groups_csv } => {
+                    ui.label("Comma-separated group names");
+                    let available_groups = self
+                        .workflow
+                        .runtime
+                        .node_state
+                        .get(&node_uuid)
+                        .map(|state| state.available_streamline_groups.as_slice())
+                        .unwrap_or(&[]);
+                    show_group_select_editor(ui, groups_csv, available_groups);
+                }
+                workflow::WorkflowNodeKind::RandomSubset { limit, seed } => {
+                    ui.add(egui::Slider::new(limit, 1..=1_000_000).text("Limit"));
                     ui.add(egui::DragValue::new(seed).speed(1.0).prefix("Seed "));
                 }
-            }
-            workflow::WorkflowNodeKind::GroupSelect { groups_csv } => {
-                ui.label("Comma-separated group names");
-                let available_groups = self
-                    .workflow
-                    .runtime
-                    .node_state
-                    .get(&node_uuid)
-                    .map(|state| state.available_streamline_groups.as_slice())
-                    .unwrap_or(&[]);
-                show_group_select_editor(ui, groups_csv, available_groups);
-            }
-            workflow::WorkflowNodeKind::RandomSubset { limit, seed } => {
-                ui.add(egui::Slider::new(limit, 1..=1_000_000).text("Limit"));
-                ui.add(egui::DragValue::new(seed).speed(1.0).prefix("Seed "));
-            }
-            workflow::WorkflowNodeKind::SphereQuery { center, radius_mm } => {
-                ui.label("Center (RAS+ mm)");
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut center[0]).speed(0.5).prefix("X "));
-                    ui.add(egui::DragValue::new(&mut center[1]).speed(0.5).prefix("Y "));
-                    ui.add(egui::DragValue::new(&mut center[2]).speed(0.5).prefix("Z "));
-                });
-                ui.add(egui::DragValue::new(radius_mm).speed(0.5).prefix("Radius "));
-            }
-            workflow::WorkflowNodeKind::SurfaceDepthQuery { depth_mm }
-            | workflow::WorkflowNodeKind::SurfaceProjectionDensity { depth_mm } => {
-                ui.add(egui::DragValue::new(depth_mm).speed(0.25).prefix("Depth "));
-            }
-            workflow::WorkflowNodeKind::SurfaceProjectionMeanDps { depth_mm, field } => {
-                ui.add(egui::DragValue::new(depth_mm).speed(0.25).prefix("Depth "));
-                ui.text_edit_singleline(field);
-            }
-            workflow::WorkflowNodeKind::ParcelSelect { labels_csv } => {
-                ui.label("Comma-separated label IDs");
-                ui.small("Leave empty to use every nonzero parcel label.");
-                ui.text_edit_multiline(labels_csv);
-            }
-            workflow::WorkflowNodeKind::ParcelEnd { endpoint_count } => {
-                ui.add(egui::Slider::new(endpoint_count, 1..=2).text("Matching endpoints"));
-            }
-            workflow::WorkflowNodeKind::ColorByDPV { field }
-            | workflow::WorkflowNodeKind::ColorByDPS { field } => {
-                ui.text_edit_singleline(field);
-            }
-            workflow::WorkflowNodeKind::UniformColor { color } => {
-                ui.color_edit_button_rgba_unmultiplied(color);
-            }
-            workflow::WorkflowNodeKind::RemoveDuplicates { params } => {
-                egui::ComboBox::from_id_salt(format!("duplicate_mode_{}", node_uuid.0))
-                    .selected_text(match params.mode {
-                        trx_rs::DuplicateRemovalMode::Exact => "Exact",
-                        trx_rs::DuplicateRemovalMode::Near => "Near",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut params.mode,
-                            trx_rs::DuplicateRemovalMode::Exact,
-                            "Exact",
-                        );
-                        ui.selectable_value(
-                            &mut params.mode,
-                            trx_rs::DuplicateRemovalMode::Near,
-                            "Near",
-                        );
+                workflow::WorkflowNodeKind::SphereQuery { center, radius_mm } => {
+                    ui.label("Center (RAS+ mm)");
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut center[0]).speed(0.5).prefix("X "));
+                        ui.add(egui::DragValue::new(&mut center[1]).speed(0.5).prefix("Y "));
+                        ui.add(egui::DragValue::new(&mut center[2]).speed(0.5).prefix("Z "));
                     });
-                if matches!(params.mode, trx_rs::DuplicateRemovalMode::Near) {
-                    ui.add(
-                        egui::DragValue::new(&mut params.tolerance_mm)
-                            .speed(0.05)
-                            .range(0.05..=100.0)
-                            .prefix("Tolerance "),
-                    );
-                    ui.add(
-                        egui::DragValue::new(&mut params.endpoint_tolerance_mm)
-                            .speed(0.05)
-                            .range(0.05..=100.0)
-                            .prefix("Endpoint tol "),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut params.min_shared_voxel_fraction, 0.0..=1.0)
-                            .text("Shared voxels"),
-                    );
+                    ui.add(egui::DragValue::new(radius_mm).speed(0.5).prefix("Radius "));
                 }
-            }
-            workflow::WorkflowNodeKind::StreamlineDisplay {
-                enabled,
-                render_style,
-                tube_radius_mm,
-                tube_sides,
-                slab_half_width_mm,
-            } => {
-                ui.checkbox(enabled, "Visible");
-                egui::ComboBox::from_id_salt(format!("render_style_{}", node_uuid.0))
-                    .selected_text(format!("{render_style:?}"))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(render_style, RenderStyle::Flat, "Flat");
-                        ui.selectable_value(render_style, RenderStyle::Illuminated, "Illuminated");
-                        ui.selectable_value(render_style, RenderStyle::DepthCue, "Depth Cue");
-                        ui.selectable_value(render_style, RenderStyle::Tubes, "Tubes");
-                    });
-                ui.add(
-                    egui::DragValue::new(tube_radius_mm)
-                        .speed(0.1)
-                        .prefix("Tube radius "),
-                );
-                ui.add(
-                    egui::DragValue::new(tube_sides)
-                        .speed(1.0)
-                        .prefix("Tube sides "),
-                );
-                ui.add(
-                    egui::DragValue::new(slab_half_width_mm)
-                        .speed(0.5)
-                        .prefix("Slice slab "),
-                );
-            }
-            workflow::WorkflowNodeKind::VolumeDisplay {
-                colormap,
-                opacity,
-                window_center,
-                window_width,
-            } => {
-                egui::ComboBox::from_id_salt(format!("volume_colormap_{}", node_uuid.0))
-                    .selected_text(colormap.label())
-                    .show_ui(ui, |ui| {
-                        for value in VolumeColormap::ALL {
-                            ui.selectable_value(colormap, *value, value.label());
-                        }
-                    });
-                ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
-                ui.add(egui::Slider::new(window_center, 0.0..=1.0).text("Window center"));
-                ui.add(egui::Slider::new(window_width, 0.01..=2.0).text("Window width"));
-            }
-            workflow::WorkflowNodeKind::SurfaceDisplay {
-                color,
-                opacity,
-                outline_color,
-                outline_thickness,
-                show_projection_map,
-                map_opacity,
-                map_threshold,
-                gloss,
-                projection_colormap,
-                range_min,
-                range_max,
-            } => {
-                ui.label("Surface");
-                ui.color_edit_button_rgb(color);
-                ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
-                ui.separator();
-                ui.label("Slice outline");
-                ui.color_edit_button_rgb(outline_color);
-                ui.add(egui::Slider::new(outline_thickness, 0.25..=8.0).text("Thickness"));
-                ui.separator();
-                ui.checkbox(show_projection_map, "Show surface map");
-                ui.add(egui::Slider::new(map_opacity, 0.0..=1.0).text("Map opacity"));
-                ui.add(egui::Slider::new(map_threshold, 0.0..=1.0).text("Map threshold"));
-                ui.add(egui::Slider::new(gloss, 0.0..=1.0).text("Gloss"));
-                egui::ComboBox::from_id_salt(format!("surface_colormap_{}", node_uuid.0))
-                    .selected_text(format!("{projection_colormap:?}"))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            projection_colormap,
-                            SurfaceColormap::BlueWhiteRed,
-                            "Blue-White-Red",
+                workflow::WorkflowNodeKind::SurfaceDepthQuery { depth_mm }
+                | workflow::WorkflowNodeKind::SurfaceProjectionDensity { depth_mm } => {
+                    ui.add(egui::DragValue::new(depth_mm).speed(0.25).prefix("Depth "));
+                }
+                workflow::WorkflowNodeKind::SurfaceProjectionMeanDps { depth_mm, field } => {
+                    ui.add(egui::DragValue::new(depth_mm).speed(0.25).prefix("Depth "));
+                    ui.text_edit_singleline(field);
+                }
+                workflow::WorkflowNodeKind::ParcelSelect { labels_csv } => {
+                    ui.label("Comma-separated label IDs");
+                    ui.small("Leave empty to use every nonzero parcel label.");
+                    ui.text_edit_multiline(labels_csv);
+                }
+                workflow::WorkflowNodeKind::ParcelEnd { endpoint_count } => {
+                    ui.add(egui::Slider::new(endpoint_count, 1..=2).text("Matching endpoints"));
+                }
+                workflow::WorkflowNodeKind::ColorByDPV { field }
+                | workflow::WorkflowNodeKind::ColorByDPS { field } => {
+                    ui.text_edit_singleline(field);
+                }
+                workflow::WorkflowNodeKind::UniformColor { color } => {
+                    ui.color_edit_button_rgba_unmultiplied(color);
+                }
+                workflow::WorkflowNodeKind::RemoveDuplicates { params } => {
+                    egui::ComboBox::from_id_salt(format!("duplicate_mode_{}", node_uuid.0))
+                        .selected_text(match params.mode {
+                            trx_rs::DuplicateRemovalMode::Exact => "Exact",
+                            trx_rs::DuplicateRemovalMode::Near => "Near",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut params.mode,
+                                trx_rs::DuplicateRemovalMode::Exact,
+                                "Exact",
+                            );
+                            ui.selectable_value(
+                                &mut params.mode,
+                                trx_rs::DuplicateRemovalMode::Near,
+                                "Near",
+                            );
+                        });
+                    if matches!(params.mode, trx_rs::DuplicateRemovalMode::Near) {
+                        ui.add(
+                            egui::DragValue::new(&mut params.tolerance_mm)
+                                .speed(0.05)
+                                .range(0.05..=100.0)
+                                .prefix("Tolerance "),
                         );
-                        ui.selectable_value(
-                            projection_colormap,
-                            SurfaceColormap::Viridis,
-                            "Viridis",
+                        ui.add(
+                            egui::DragValue::new(&mut params.endpoint_tolerance_mm)
+                                .speed(0.05)
+                                .range(0.05..=100.0)
+                                .prefix("Endpoint tol "),
                         );
-                        ui.selectable_value(
-                            projection_colormap,
-                            SurfaceColormap::Inferno,
-                            "Inferno",
+                        ui.add(
+                            egui::Slider::new(&mut params.min_shared_voxel_fraction, 0.0..=1.0)
+                                .text("Shared voxels"),
                         );
-                    });
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(range_min).speed(0.1).prefix("Min "));
-                    ui.add(egui::DragValue::new(range_max).speed(0.1).prefix("Max "));
-                });
-            }
-            workflow::WorkflowNodeKind::BundleSurfaceBuild {
-                per_group,
-                build_mode,
-                voxel_size_mm,
-                threshold,
-                smooth_sigma,
-                min_component_volume_mm3,
-                tube_radius_mm,
-                tube_sides,
-                opacity,
-            } => {
-                ui.checkbox(per_group, "Per group");
-                egui::ComboBox::from_id_salt(format!("bundle_build_mode_{}", node_uuid.0))
-                    .selected_text(build_mode.label())
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            build_mode,
-                            workflow::BundleSurfaceBuildMode::MarchingCubes,
-                            workflow::BundleSurfaceBuildMode::MarchingCubes.label(),
-                        );
-                        ui.selectable_value(
-                            build_mode,
-                            workflow::BundleSurfaceBuildMode::Streamtubes,
-                            workflow::BundleSurfaceBuildMode::Streamtubes.label(),
-                        );
-                    });
-                if matches!(*build_mode, workflow::BundleSurfaceBuildMode::MarchingCubes) {
-                    ui.add(
-                        egui::DragValue::new(voxel_size_mm)
-                            .speed(0.1)
-                            .prefix("Voxel "),
-                    );
-                    ui.add(
-                        egui::DragValue::new(threshold)
-                            .speed(0.1)
-                            .prefix("Threshold "),
-                    );
-                    ui.add(
-                        egui::DragValue::new(smooth_sigma)
-                            .speed(0.05)
-                            .prefix("Smooth "),
-                    );
-                    ui.add(
-                        egui::DragValue::new(min_component_volume_mm3)
-                            .speed(1.0)
-                            .range(0.0..=1_000_000.0)
-                            .prefix("Min component mm^3 "),
-                    );
-                } else {
+                    }
+                }
+                workflow::WorkflowNodeKind::StreamlineDisplay {
+                    enabled,
+                    render_style,
+                    tube_radius_mm,
+                    tube_sides,
+                    slab_half_width_mm,
+                } => {
+                    ui.checkbox(enabled, "Visible");
+                    egui::ComboBox::from_id_salt(format!("render_style_{}", node_uuid.0))
+                        .selected_text(format!("{render_style:?}"))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(render_style, RenderStyle::Flat, "Flat");
+                            ui.selectable_value(
+                                render_style,
+                                RenderStyle::Illuminated,
+                                "Illuminated",
+                            );
+                            ui.selectable_value(render_style, RenderStyle::DepthCue, "Depth Cue");
+                            ui.selectable_value(render_style, RenderStyle::Tubes, "Tubes");
+                        });
                     ui.add(
                         egui::DragValue::new(tube_radius_mm)
-                            .speed(0.05)
-                            .range(0.01..=20.0)
+                            .speed(0.1)
                             .prefix("Tube radius "),
                     );
                     ui.add(
                         egui::DragValue::new(tube_sides)
                             .speed(1.0)
-                            .range(3..=64)
                             .prefix("Tube sides "),
                     );
+                    ui.add(
+                        egui::DragValue::new(slab_half_width_mm)
+                            .speed(0.5)
+                            .prefix("Slice slab "),
+                    );
                 }
-                ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
-            }
-            workflow::WorkflowNodeKind::BundleSurfaceDisplay {
-                color_mode,
-                outline_thickness,
-            } => {
-                egui::ComboBox::from_id_salt(format!("bundle_surface_color_mode_{}", node_uuid.0))
+                workflow::WorkflowNodeKind::VolumeDisplay {
+                    colormap,
+                    opacity,
+                    window_center,
+                    window_width,
+                } => {
+                    egui::ComboBox::from_id_salt(format!("volume_colormap_{}", node_uuid.0))
+                        .selected_text(colormap.label())
+                        .show_ui(ui, |ui| {
+                            for value in VolumeColormap::ALL {
+                                ui.selectable_value(colormap, *value, value.label());
+                            }
+                        });
+                    ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
+                    ui.add(egui::Slider::new(window_center, 0.0..=1.0).text("Window center"));
+                    ui.add(egui::Slider::new(window_width, 0.01..=2.0).text("Window width"));
+                }
+                workflow::WorkflowNodeKind::SurfaceDisplay {
+                    color,
+                    opacity,
+                    outline_color,
+                    outline_thickness,
+                    show_projection_map,
+                    map_opacity,
+                    map_threshold,
+                    gloss,
+                    projection_colormap,
+                    range_min,
+                    range_max,
+                } => {
+                    ui.label("Surface");
+                    ui.color_edit_button_rgb(color);
+                    ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
+                    ui.separator();
+                    ui.label("Slice outline");
+                    ui.color_edit_button_rgb(outline_color);
+                    ui.add(egui::Slider::new(outline_thickness, 0.25..=8.0).text("Thickness"));
+                    ui.separator();
+                    ui.checkbox(show_projection_map, "Show surface map");
+                    ui.add(egui::Slider::new(map_opacity, 0.0..=1.0).text("Map opacity"));
+                    ui.add(egui::Slider::new(map_threshold, 0.0..=1.0).text("Map threshold"));
+                    ui.add(egui::Slider::new(gloss, 0.0..=1.0).text("Gloss"));
+                    egui::ComboBox::from_id_salt(format!("surface_colormap_{}", node_uuid.0))
+                        .selected_text(format!("{projection_colormap:?}"))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                projection_colormap,
+                                SurfaceColormap::BlueWhiteRed,
+                                "Blue-White-Red",
+                            );
+                            ui.selectable_value(
+                                projection_colormap,
+                                SurfaceColormap::Viridis,
+                                "Viridis",
+                            );
+                            ui.selectable_value(
+                                projection_colormap,
+                                SurfaceColormap::Inferno,
+                                "Inferno",
+                            );
+                        });
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(range_min).speed(0.1).prefix("Min "));
+                        ui.add(egui::DragValue::new(range_max).speed(0.1).prefix("Max "));
+                    });
+                }
+                workflow::WorkflowNodeKind::BundleSurfaceBuild {
+                    per_group,
+                    build_mode,
+                    voxel_size_mm,
+                    threshold,
+                    smooth_sigma,
+                    min_component_volume_mm3,
+                    tube_radius_mm,
+                    tube_sides,
+                    opacity,
+                } => {
+                    ui.checkbox(per_group, "Per group");
+                    egui::ComboBox::from_id_salt(format!("bundle_build_mode_{}", node_uuid.0))
+                        .selected_text(build_mode.label())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                build_mode,
+                                workflow::BundleSurfaceBuildMode::MarchingCubes,
+                                workflow::BundleSurfaceBuildMode::MarchingCubes.label(),
+                            );
+                            ui.selectable_value(
+                                build_mode,
+                                workflow::BundleSurfaceBuildMode::Streamtubes,
+                                workflow::BundleSurfaceBuildMode::Streamtubes.label(),
+                            );
+                        });
+                    if matches!(*build_mode, workflow::BundleSurfaceBuildMode::MarchingCubes) {
+                        ui.add(
+                            egui::DragValue::new(voxel_size_mm)
+                                .speed(0.1)
+                                .prefix("Voxel "),
+                        );
+                        ui.add(
+                            egui::DragValue::new(threshold)
+                                .speed(0.1)
+                                .prefix("Threshold "),
+                        );
+                        ui.add(
+                            egui::DragValue::new(smooth_sigma)
+                                .speed(0.05)
+                                .prefix("Smooth "),
+                        );
+                        ui.add(
+                            egui::DragValue::new(min_component_volume_mm3)
+                                .speed(1.0)
+                                .range(0.0..=1_000_000.0)
+                                .prefix("Min component mm^3 "),
+                        );
+                    } else {
+                        ui.add(
+                            egui::DragValue::new(tube_radius_mm)
+                                .speed(0.05)
+                                .range(0.01..=20.0)
+                                .prefix("Tube radius "),
+                        );
+                        ui.add(
+                            egui::DragValue::new(tube_sides)
+                                .speed(1.0)
+                                .range(3..=64)
+                                .prefix("Tube sides "),
+                        );
+                    }
+                    ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
+                }
+                workflow::WorkflowNodeKind::BundleSurfaceDisplay {
+                    color_mode,
+                    outline_thickness,
+                } => {
+                    egui::ComboBox::from_id_salt(format!(
+                        "bundle_surface_color_mode_{}",
+                        node_uuid.0
+                    ))
                     .selected_text(color_mode.label())
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
@@ -644,67 +651,70 @@ impl super::super::TrxVizApp {
                             workflow::BundleSurfaceColorMode::SourceColors.label(),
                         );
                     });
-                ui.separator();
-                ui.label("Slice outline");
-                ui.add(egui::Slider::new(outline_thickness, 0.25..=8.0).text("Thickness"));
-            }
-            workflow::WorkflowNodeKind::BoundaryFieldBuild {
-                voxel_size_mm,
-                sphere_lod,
-                normalization,
-            } => {
-                ui.add(
-                    egui::DragValue::new(voxel_size_mm)
-                        .speed(0.1)
-                        .range(0.5..=100.0)
-                        .prefix("Voxel "),
-                );
-                ui.add(
-                    egui::DragValue::new(sphere_lod)
-                        .speed(1.0)
-                        .range(4..=64)
-                        .prefix("Sphere LOD "),
-                );
-                egui::ComboBox::from_id_salt(format!(
-                    "boundary_field_normalization_{}",
-                    node_uuid.0
-                ))
-                .selected_text(normalization.label())
-                .show_ui(ui, |ui| {
-                    for value in BoundaryGlyphNormalization::ALL {
-                        ui.selectable_value(normalization, value, value.label());
-                    }
-                });
-            }
-            workflow::WorkflowNodeKind::BoundaryGlyphDisplay {
-                enabled,
-                scale,
-                density_3d_step,
-                slice_density_step,
-                color_mode,
-                min_contacts,
-            } => {
-                ui.checkbox(enabled, "Visible");
-                ui.add(egui::DragValue::new(scale).speed(0.1).prefix("Scale "));
-                ui.add(
-                    egui::DragValue::new(density_3d_step)
-                        .speed(1.0)
-                        .range(1..=64)
-                        .prefix("3D step "),
-                );
-                ui.add(
-                    egui::DragValue::new(slice_density_step)
-                        .speed(1.0)
-                        .range(1..=64)
-                        .prefix("Slice step "),
-                );
-                ui.add(
-                    egui::DragValue::new(min_contacts)
-                        .speed(1.0)
-                        .range(1..=1_000_000)
-                        .prefix("Min contacts "),
-                );
-                egui::ComboBox::from_id_salt(format!("boundary_glyph_color_mode_{}", node_uuid.0))
+                    ui.separator();
+                    ui.label("Slice outline");
+                    ui.add(egui::Slider::new(outline_thickness, 0.25..=8.0).text("Thickness"));
+                }
+                workflow::WorkflowNodeKind::BoundaryFieldBuild {
+                    voxel_size_mm,
+                    sphere_lod,
+                    normalization,
+                } => {
+                    ui.add(
+                        egui::DragValue::new(voxel_size_mm)
+                            .speed(0.1)
+                            .range(0.5..=100.0)
+                            .prefix("Voxel "),
+                    );
+                    ui.add(
+                        egui::DragValue::new(sphere_lod)
+                            .speed(1.0)
+                            .range(4..=64)
+                            .prefix("Sphere LOD "),
+                    );
+                    egui::ComboBox::from_id_salt(format!(
+                        "boundary_field_normalization_{}",
+                        node_uuid.0
+                    ))
+                    .selected_text(normalization.label())
+                    .show_ui(ui, |ui| {
+                        for value in BoundaryGlyphNormalization::ALL {
+                            ui.selectable_value(normalization, value, value.label());
+                        }
+                    });
+                }
+                workflow::WorkflowNodeKind::BoundaryGlyphDisplay {
+                    enabled,
+                    scale,
+                    density_3d_step,
+                    slice_density_step,
+                    color_mode,
+                    min_contacts,
+                } => {
+                    ui.checkbox(enabled, "Visible");
+                    ui.add(egui::DragValue::new(scale).speed(0.1).prefix("Scale "));
+                    ui.add(
+                        egui::DragValue::new(density_3d_step)
+                            .speed(1.0)
+                            .range(1..=64)
+                            .prefix("3D step "),
+                    );
+                    ui.add(
+                        egui::DragValue::new(slice_density_step)
+                            .speed(1.0)
+                            .range(1..=64)
+                            .prefix("Slice step "),
+                    );
+                    ui.add(
+                        egui::DragValue::new(min_contacts)
+                            .speed(1.0)
+                            .range(1..=1_000_000)
+                            .prefix("Min contacts "),
+                    );
+                    egui::ComboBox::from_id_salt(format!(
+                        "boundary_glyph_color_mode_{}",
+                        node_uuid.0
+                    ))
                     .selected_text(color_mode.label())
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
@@ -718,42 +728,42 @@ impl super::super::TrxVizApp {
                             BoundaryGlyphColorMode::Monochrome.label(),
                         );
                     });
-            }
-            workflow::WorkflowNodeKind::ParcellationDisplay {
-                labels_csv,
-                opacity,
-            } => {
-                ui.label("Comma-separated label IDs");
-                ui.small("Leave empty to use every nonzero parcel label.");
-                ui.text_edit_multiline(labels_csv);
-                ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
-            }
-            workflow::WorkflowNodeKind::SaveStreamlines { output_path } => {
-                ui.horizontal(|ui| {
-                    ui.text_edit_singleline(output_path);
-                    if ui.button("Browse...").clicked()
-                        && let Some(path) = rfd::FileDialog::new()
-                            .set_file_name("streamlines.trx")
-                            .save_file()
+                }
+                workflow::WorkflowNodeKind::ParcellationDisplay {
+                    labels_csv,
+                    opacity,
+                } => {
+                    ui.label("Comma-separated label IDs");
+                    ui.small("Leave empty to use every nonzero parcel label.");
+                    ui.text_edit_multiline(labels_csv);
+                    ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
+                }
+                workflow::WorkflowNodeKind::SaveStreamlines { output_path } => {
+                    ui.horizontal(|ui| {
+                        ui.text_edit_singleline(output_path);
+                        if ui.button("Browse...").clicked()
+                            && let Some(path) = rfd::FileDialog::new()
+                                .set_file_name("streamlines.trx")
+                                .save_file()
+                        {
+                            *output_path = path.display().to_string();
+                        }
+                    });
+                    let ready = self
+                        .workflow
+                        .runtime
+                        .save_streamline_targets
+                        .contains_key(&node_uuid);
+                    if ui
+                        .add_enabled(ready, egui::Button::new("Save Now"))
+                        .clicked()
                     {
-                        *output_path = path.display().to_string();
+                        save_now = true;
                     }
-                });
-                let ready = self
-                    .workflow
-                    .runtime
-                    .save_streamline_targets
-                    .contains_key(&node_uuid);
-                if ui
-                    .add_enabled(ready, egui::Button::new("Save Now"))
-                    .clicked()
-                {
-                    save_now = true;
+                    if !ready {
+                        ui.small("Connect a streamline input to enable export.");
+                    }
                 }
-                if !ready {
-                    ui.small("Connect a streamline input to enable export.");
-                }
-            }
                 _ => {
                     ui.small("This node has no editable parameters yet.");
                 }

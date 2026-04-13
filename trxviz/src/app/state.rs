@@ -10,9 +10,7 @@ use trxviz_core::data::gifti_data::GiftiSurfaceData;
 use trxviz_core::data::loaded_files::{FileId, LoadedNifti};
 use trxviz_core::data::nifti_data::NiftiVolume;
 use trxviz_core::data::orientation_field::BoundaryContactField;
-pub use trxviz_core::lighting::{
-    SceneLightingParams, WorkflowBackground3D, WorkflowRender3D,
-};
+pub use trxviz_core::lighting::{SceneLightingParams, WorkflowBackground3D, WorkflowRender3D};
 use trxviz_core::renderer::camera::{OrbitCamera, OrthoSliceCamera};
 use trxviz_core::renderer::slice_renderer::SliceAxis;
 pub use trxviz_core::scene::{
@@ -373,9 +371,12 @@ impl ViewportState {
         self.slice_world_offsets = slice_view.positions_ras;
         if let Some(nf) = nifti_files.first() {
             self.slice_indices = [
-                nf.volume.nearest_slice_index(0, slice_view.positions_ras[0]),
-                nf.volume.nearest_slice_index(1, slice_view.positions_ras[1]),
-                nf.volume.nearest_slice_index(2, slice_view.positions_ras[2]),
+                nf.volume
+                    .nearest_slice_index(0, slice_view.positions_ras[0]),
+                nf.volume
+                    .nearest_slice_index(1, slice_view.positions_ras[1]),
+                nf.volume
+                    .nearest_slice_index(2, slice_view.positions_ras[2]),
             ];
             self.slices_dirty = true;
         }

@@ -728,13 +728,8 @@ pub fn build_streamtube_bundle_mesh(
     tube_radius_mm: f32,
     tube_sides: u32,
 ) -> Option<BundleMesh> {
-    let (tube_vertices, tube_indices) = build_tube_vertices_from_data(
-        positions,
-        colors,
-        offsets,
-        tube_radius_mm,
-        tube_sides,
-    );
+    let (tube_vertices, tube_indices) =
+        build_tube_vertices_from_data(positions, colors, offsets, tube_radius_mm, tube_sides);
     if tube_indices.is_empty() {
         return None;
     }
@@ -890,7 +885,12 @@ fn quantize_grid_point(point: [f32; 3], cell_size: f32) -> (i32, i32, i32) {
     )
 }
 
-fn point_inside_segment_tube(point: [f32; 3], start: [f32; 3], end: [f32; 3], radius2: f32) -> bool {
+fn point_inside_segment_tube(
+    point: [f32; 3],
+    start: [f32; 3],
+    end: [f32; 3],
+    radius2: f32,
+) -> bool {
     let start = Vec3::from(start);
     let end = Vec3::from(end);
     let point = Vec3::from(point);
@@ -1013,11 +1013,18 @@ mod tests {
         ];
         let offsets = vec![0, 3, 6];
 
-        let mesh =
-            build_streamtube_bundle_mesh(&positions, &colors, &offsets, 0.2, 6).unwrap();
+        let mesh = build_streamtube_bundle_mesh(&positions, &colors, &offsets, 0.2, 6).unwrap();
 
         assert!(!mesh.indices.is_empty());
-        assert!(mesh.vertices.iter().any(|vertex| vertex.color == [1.0, 0.0, 0.0, 1.0]));
-        assert!(mesh.vertices.iter().any(|vertex| vertex.color == [0.0, 0.0, 1.0, 1.0]));
+        assert!(
+            mesh.vertices
+                .iter()
+                .any(|vertex| vertex.color == [1.0, 0.0, 0.0, 1.0])
+        );
+        assert!(
+            mesh.vertices
+                .iter()
+                .any(|vertex| vertex.color == [0.0, 0.0, 1.0, 1.0])
+        );
     }
 }

@@ -227,7 +227,8 @@ fn build_bundle_surface_meshes_with_color_mode(
             match plan.build_mode {
                 BundleSurfaceBuildMode::MarchingCubes => {
                     let (positions, colors) = subset.selected_vertex_data(&selected);
-                    let solid_color = bundle_surface_solid_color(&plan.flow, &label, plan.per_group);
+                    let solid_color =
+                        bundle_surface_solid_color(&plan.flow, &label, plan.per_group);
                     let (strategy, boundary_field) = match color_mode {
                         BundleSurfaceColorMode::Solid => {
                             (BundleMeshColorStrategy::Constant(solid_color), None)

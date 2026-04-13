@@ -6,8 +6,8 @@ use crate::app::state::{SliceViewKind, View2DMode, ViewportState};
 
 use super::{
     WorkflowDocument, WorkflowOrthoSliceCamera, WorkflowProject, WorkflowSliceViewKind,
-    WorkflowSliceViewUi, WorkflowView2DMode, load_workflow_project_from_path,
-    relativized_document, resolve_document_asset_paths,
+    WorkflowSliceViewUi, WorkflowView2DMode, load_workflow_project_from_path, relativized_document,
+    resolve_document_asset_paths,
 };
 
 /// The four panes that make up the advanced-mode workspace layout.
@@ -120,7 +120,14 @@ pub fn apply_gui_slice_view_state(viewport: &mut ViewportState, state: WorkflowS
 /// trying the new format first, then falling back.
 pub fn gui_load_project(
     path: &Path,
-) -> Result<(WorkflowProject, Tree<WorkspacePane>, Option<WorkflowSliceViewUi>), String> {
+) -> Result<
+    (
+        WorkflowProject,
+        Tree<WorkspacePane>,
+        Option<WorkflowSliceViewUi>,
+    ),
+    String,
+> {
     let contents = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
 
     // New format: workspace at top level.
