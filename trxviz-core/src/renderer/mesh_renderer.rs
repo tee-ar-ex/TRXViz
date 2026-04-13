@@ -547,9 +547,7 @@ impl MeshResources {
         for draw in draws {
             match draw {
                 TransparentDraw::Surface {
-                    surface,
-                    viewport,
-                    ..
+                    surface, viewport, ..
                 } => {
                     if using_bundle_pipeline {
                         render_pass.set_pipeline(&self.transparent_pipeline);

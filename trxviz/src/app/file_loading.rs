@@ -309,10 +309,9 @@ impl super::TrxVizApp {
                 .get::<BackgroundResources>()
                 .is_none()
             {
-                renderer.callback_resources.insert(BackgroundResources::new(
-                    &rs.device,
-                    rs.target_format,
-                ));
+                renderer
+                    .callback_resources
+                    .insert(BackgroundResources::new(&rs.device, rs.target_format));
             }
             if renderer.callback_resources.get::<MeshResources>().is_none() {
                 let mr = MeshResources::new(&rs.device, rs.target_format);
@@ -500,10 +499,9 @@ impl super::TrxVizApp {
             .get::<BackgroundResources>()
             .is_none()
         {
-            renderer.callback_resources.insert(BackgroundResources::new(
-                &rs.device,
-                rs.target_format,
-            ));
+            renderer
+                .callback_resources
+                .insert(BackgroundResources::new(&rs.device, rs.target_format));
         }
         if renderer.callback_resources.get::<MeshResources>().is_none() {
             renderer

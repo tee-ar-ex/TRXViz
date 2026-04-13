@@ -8,8 +8,7 @@ use petgraph::Directed;
 use petgraph::algo::toposort;
 use petgraph::stable_graph::StableGraph;
 use trx_rs::{
-    ConversionOptions, DType, DataArray, Tractogram, remove_duplicates_tractogram,
-    write_tractogram,
+    ConversionOptions, DType, DataArray, Tractogram, remove_duplicates_tractogram, write_tractogram,
 };
 
 use crate::data::loaded_files::{FileId, LoadedNifti, LoadedTrx, StreamlineBacking};
@@ -953,11 +952,12 @@ fn evaluate_node(
                     ..Default::default()
                 }
             });
-            let resolved_color_mode = if matches!(bundle.build_mode, BundleSurfaceBuildMode::Streamtubes) {
-                BundleSurfaceColorMode::SourceColors
-            } else {
-                *color_mode
-            };
+            let resolved_color_mode =
+                if matches!(bundle.build_mode, BundleSurfaceBuildMode::Streamtubes) {
+                    BundleSurfaceColorMode::SourceColors
+                } else {
+                    *color_mode
+                };
             let draw = BundleDrawPlan {
                 node_uuid: node.uuid,
                 build_node_uuid: bundle.build_node_uuid,
@@ -991,9 +991,15 @@ fn evaluate_node(
             sync_node_state_from_run_record(node_state, record);
             let boundary_stale = boundary_field.as_ref().is_some_and(|(_, stale)| *stale);
             node_state.summary = if stale || boundary_stale {
-                format!("Displaying stale bundle surface ({})", resolved_color_mode.label())
+                format!(
+                    "Displaying stale bundle surface ({})",
+                    resolved_color_mode.label()
+                )
             } else {
-                format!("Displaying bundle surface ({})", resolved_color_mode.label())
+                format!(
+                    "Displaying bundle surface ({})",
+                    resolved_color_mode.label()
+                )
             };
             scene_plan.bundle_draws.push(draw);
             Ok(None)
@@ -1595,7 +1601,12 @@ pub(crate) fn materialize_reactive_streamline_flow(
         ReactiveStreamlineOp::AddGroupsFromParcellation {
             parcellation,
             parcellation_name,
-        } => add_groups_from_parcellation_from_label(&plan.label, &plan.left, parcellation, parcellation_name),
+        } => add_groups_from_parcellation_from_label(
+            &plan.label,
+            &plan.left,
+            parcellation,
+            parcellation_name,
+        ),
     }
 }
 
@@ -1604,7 +1615,8 @@ fn streamline_flow_from_tractogram(
     source_flow: &StreamlineFlow,
     tractogram: Tractogram,
 ) -> Result<StreamlineFlow, String> {
-    let gpu_data = Arc::new(TrxGpuData::from_tractogram(&tractogram).map_err(|err| err.to_string())?);
+    let gpu_data =
+        Arc::new(TrxGpuData::from_tractogram(&tractogram).map_err(|err| err.to_string())?);
     let selected = (0..gpu_data.nb_streamlines as u32).collect();
     Ok(StreamlineFlow {
         dataset: Arc::new(StreamlineDataset {

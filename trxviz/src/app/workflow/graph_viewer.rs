@@ -135,10 +135,14 @@ impl GraphEditSummary {
 }
 
 fn diff_graphs(before: &WorkflowGraph, after: &WorkflowGraph) -> GraphEditSummary {
-    let before_nodes: HashMap<WorkflowNodeUuid, (&WorkflowNode, GraphPos)> =
-        before.entries().map(|(uuid, entry)| (*uuid, (&entry.node, entry.pos))).collect();
-    let after_nodes: HashMap<WorkflowNodeUuid, (&WorkflowNode, GraphPos)> =
-        after.entries().map(|(uuid, entry)| (*uuid, (&entry.node, entry.pos))).collect();
+    let before_nodes: HashMap<WorkflowNodeUuid, (&WorkflowNode, GraphPos)> = before
+        .entries()
+        .map(|(uuid, entry)| (*uuid, (&entry.node, entry.pos)))
+        .collect();
+    let after_nodes: HashMap<WorkflowNodeUuid, (&WorkflowNode, GraphPos)> = after
+        .entries()
+        .map(|(uuid, entry)| (*uuid, (&entry.node, entry.pos)))
+        .collect();
 
     let before_ids: BTreeSet<WorkflowNodeUuid> = before_nodes.keys().copied().collect();
     let after_ids: BTreeSet<WorkflowNodeUuid> = after_nodes.keys().copied().collect();

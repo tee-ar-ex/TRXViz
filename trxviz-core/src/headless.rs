@@ -389,9 +389,15 @@ fn load_project_state(
         scene.slice_world_offsets = slice_view.positions_ras;
         if let Some(nifti) = scene.nifti_files.first() {
             scene.slice_indices = [
-                nifti.volume.nearest_slice_index(0, slice_view.positions_ras[0]),
-                nifti.volume.nearest_slice_index(1, slice_view.positions_ras[1]),
-                nifti.volume.nearest_slice_index(2, slice_view.positions_ras[2]),
+                nifti
+                    .volume
+                    .nearest_slice_index(0, slice_view.positions_ras[0]),
+                nifti
+                    .volume
+                    .nearest_slice_index(1, slice_view.positions_ras[1]),
+                nifti
+                    .volume
+                    .nearest_slice_index(2, slice_view.positions_ras[2]),
             ];
         }
     } else if let Some(slice_visible) = project.document.slice_visible_3d {
@@ -517,7 +523,8 @@ fn load_streamline_source(path: &Path) -> anyhow::Result<(LoadedStreamlineSource
 
     let options = ConversionOptions::default();
     let warnings = direct_streamline_import_warnings(path, &options);
-    let tractogram = trx_rs::read_tractogram(path, &options).map_err(|err| anyhow!(err.to_string()))?;
+    let tractogram =
+        trx_rs::read_tractogram(path, &options).map_err(|err| anyhow!(err.to_string()))?;
     let data = TrxGpuData::from_tractogram(&tractogram).map_err(|err| anyhow!(err.to_string()))?;
     Ok((
         LoadedStreamlineSource {
@@ -1361,7 +1368,9 @@ fn render_scene3d_to_png(
     let camera_pos = camera.eye();
     let camera_dir = camera.view_direction();
     let lighting = render_3d.scene_lighting();
-    let bounds_radius = ((resources.bounds.max - resources.bounds.min) * 0.5).length().max(1.0);
+    let bounds_radius = ((resources.bounds.max - resources.bounds.min) * 0.5)
+        .length()
+        .max(1.0);
     let fog_span = (camera.distance + bounds_radius).max(1.0);
     let fog_near = fog_span * render_3d.fog_start_fraction;
     let fog_far = fog_span * render_3d.fog_end_fraction;
@@ -1663,7 +1672,8 @@ fn render_scene2d_to_png(
         let bind_group_index = panel.axis_index + 1;
         let aspect = panel.rect.width as f32 / panel.rect.height.max(1) as f32;
         let camera = &slice_view_ui.slice_cameras[panel.axis_index];
-        let view_proj = build_slice_camera(panel.axis_index, camera).view_projection(aspect, panel.slice_pos);
+        let view_proj =
+            build_slice_camera(panel.axis_index, camera).view_projection(aspect, panel.slice_pos);
 
         for volume in &render_data.volume_draws {
             if let Some((_, slice)) = resources
@@ -1794,7 +1804,8 @@ fn render_scene2d_to_png(
                         slice.quad_index_buffer.slice(..),
                         wgpu::IndexFormat::Uint16,
                     );
-                    render_pass.set_vertex_buffer(0, slice.quad_buffers[panel.axis_index].slice(..));
+                    render_pass
+                        .set_vertex_buffer(0, slice.quad_buffers[panel.axis_index].slice(..));
                     render_pass.draw_indexed(0..6, 0, 0..1);
                 }
             }
@@ -1843,7 +1854,12 @@ fn build_2d_panels(
         WorkflowView2DMode::Slice => {
             let axis_index = axis_index_for_kind(slice_view_ui.single_view);
             vec![SlicePanel {
-                rect: ViewportRect { x: 0, y: 0, width, height },
+                rect: ViewportRect {
+                    x: 0,
+                    y: 0,
+                    width,
+                    height,
+                },
                 axis_index,
                 slice_pos: slice_world_position(scene, axis_index),
             }]
@@ -1904,12 +1920,12 @@ fn build_2d_panels(
             let axis_index = axis_index_for_kind(slice_view_ui.lightbox_axis);
             let rows = slice_view_ui.lightbox_rows.max(1);
             let cols = slice_view_ui.lightbox_cols.max(1);
-            let tile_width =
-                ((width.saturating_sub(SPACING * cols.saturating_sub(1) as u32)) / cols as u32)
-                    .max(1);
-            let tile_height =
-                ((height.saturating_sub(SPACING * rows.saturating_sub(1) as u32)) / rows as u32)
-                    .max(1);
+            let tile_width = ((width.saturating_sub(SPACING * cols.saturating_sub(1) as u32))
+                / cols as u32)
+                .max(1);
+            let tile_height = ((height.saturating_sub(SPACING * rows.saturating_sub(1) as u32))
+                / rows as u32)
+                .max(1);
             let total = rows * cols;
             let center_tile = total / 2;
             let center_index = scene.slice_indices[axis_index];
@@ -1992,7 +2008,8 @@ fn slice_world_position_for_index(scene: &HeadlessScene, axis_index: usize, inde
 }
 
 fn max_slice_index(scene: &HeadlessScene, axis_index: usize) -> usize {
-    scene.nifti_files
+    scene
+        .nifti_files
         .first()
         .map(|nf| match axis_index {
             0 => nf.volume.dims[2].saturating_sub(1),
@@ -2180,10 +2197,15 @@ fn build_glb_scene(
     let mut builder = GlbBuilder::new();
     let scene_bounds = compute_scene_bounds(scene, workflow);
     let scene_center = (scene_bounds.min + scene_bounds.max) * 0.5;
-    let scene_radius = ((scene_bounds.max - scene_bounds.min) * 0.5).length().max(1.0);
+    let scene_radius = ((scene_bounds.max - scene_bounds.min) * 0.5)
+        .length()
+        .max(1.0);
 
     for (draw_index, draw) in workflow.runtime.scene_plan.surface_draws.iter().enumerate() {
-        let Some(surface) = scene.gifti_surfaces.iter().find(|surface| surface.id == draw.source_id)
+        let Some(surface) = scene
+            .gifti_surfaces
+            .iter()
+            .find(|surface| surface.id == draw.source_id)
         else {
             continue;
         };
@@ -2297,7 +2319,11 @@ fn build_glb_scene(
             material,
             false,
         )?;
-        builder.add_mesh_node(format!("streamlines_{}", draw.label), mesh, glam::Mat4::IDENTITY);
+        builder.add_mesh_node(
+            format!("streamlines_{}", draw.label),
+            mesh,
+            glam::Mat4::IDENTITY,
+        );
     }
 
     if options.include_slices {
@@ -2305,7 +2331,11 @@ fn build_glb_scene(
             if volume.opacity <= 0.001 {
                 continue;
             }
-            let Some(nifti) = scene.nifti_files.iter().find(|nifti| nifti.id == volume.file_id) else {
+            let Some(nifti) = scene
+                .nifti_files
+                .iter()
+                .find(|nifti| nifti.id == volume.file_id)
+            else {
                 continue;
             };
             for axis_index in 0..3 {
@@ -2366,7 +2396,11 @@ fn add_bundle_mesh_to_glb(
         .iter()
         .map(|vertex| gltf_vector(vertex.normal))
         .collect::<Vec<_>>();
-    let colors = mesh.vertices.iter().map(|vertex| vertex.color).collect::<Vec<_>>();
+    let colors = mesh
+        .vertices
+        .iter()
+        .map(|vertex| vertex.color)
+        .collect::<Vec<_>>();
     let material = if matches!(
         draw.build_mode,
         crate::workflow::BundleSurfaceBuildMode::Streamtubes
@@ -2426,11 +2460,17 @@ fn add_slice_plane_to_glb(
     let indices = [0u32, 1, 2, 0, 2, 3];
     let png = bake_slice_png(volume, draw, axis_index, slice_index)?;
     let texture = builder.add_png_texture(
-        format!("{}_slice_texture_{}_{}", volume_name, axis_index, slice_index),
+        format!(
+            "{}_slice_texture_{}_{}",
+            volume_name, axis_index, slice_index
+        ),
         &png,
     );
     let material = builder.add_textured_material(
-        format!("{}_slice_material_{}_{}", volume_name, axis_index, slice_index),
+        format!(
+            "{}_slice_material_{}_{}",
+            volume_name, axis_index, slice_index
+        ),
         draw.opacity,
         true,
         true,
@@ -2488,10 +2528,7 @@ fn bake_surface_vertex_colors(
         .collect()
 }
 
-fn surface_colormap_rgb(
-    t: f32,
-    cmap: crate::renderer::mesh_renderer::SurfaceColormap,
-) -> [f32; 3] {
+fn surface_colormap_rgb(t: f32, cmap: crate::renderer::mesh_renderer::SurfaceColormap) -> [f32; 3] {
     let t = t.clamp(0.0, 1.0);
     match cmap {
         crate::renderer::mesh_renderer::SurfaceColormap::BlueWhiteRed => {
@@ -2567,9 +2604,18 @@ fn bake_slice_png(
     for row in 0..height as usize {
         for col in 0..width as usize {
             let value = match axis_index {
-                0 => volume.data[col + row * volume.dims[0] + slice_index * volume.dims[0] * volume.dims[1]],
-                1 => volume.data[col + slice_index * volume.dims[0] + row * volume.dims[0] * volume.dims[1]],
-                _ => volume.data[slice_index + col * volume.dims[0] + row * volume.dims[0] * volume.dims[1]],
+                0 => {
+                    volume.data
+                        [col + row * volume.dims[0] + slice_index * volume.dims[0] * volume.dims[1]]
+                }
+                1 => {
+                    volume.data
+                        [col + slice_index * volume.dims[0] + row * volume.dims[0] * volume.dims[1]]
+                }
+                _ => {
+                    volume.data
+                        [slice_index + col * volume.dims[0] + row * volume.dims[0] * volume.dims[1]]
+                }
             };
             let t = ((value - lo) / (hi - lo).max(0.001)).clamp(0.0, 1.0);
             let rgb = volume_colormap_rgb(t, draw.colormap);
@@ -2593,7 +2639,11 @@ fn bake_slice_png(
 
 fn volume_colormap_rgb(t: f32, colormap: u32) -> [f32; 3] {
     match colormap {
-        1 => [clamp01(t * 2.5), clamp01(t * 2.5 - 1.0), clamp01(t * 5.0 - 4.0)],
+        1 => [
+            clamp01(t * 2.5),
+            clamp01(t * 2.5 - 1.0),
+            clamp01(t * 5.0 - 4.0),
+        ],
         2 => [t, 1.0 - t, 1.0],
         3 => [1.0, t, 0.0],
         4 => [0.0, t, 1.0],
@@ -2618,7 +2668,9 @@ fn gltf_point(point: [f32; 3]) -> [f32; 3] {
 }
 
 fn gltf_vector(vector: [f32; 3]) -> [f32; 3] {
-    (gltf_axis_conversion() * Vec3::from(vector)).normalize_or_zero().to_array()
+    (gltf_axis_conversion() * Vec3::from(vector))
+        .normalize_or_zero()
+        .to_array()
 }
 
 fn gltf_axis_conversion() -> glam::Mat3 {
@@ -2656,7 +2708,8 @@ fn add_lighting_rig_to_glb(
         headlight_power,
     );
 
-    let key_pos = scene_center + right * rig_distance * 0.9 + up * rig_distance * 0.7 - forward * rig_distance * 0.55;
+    let key_pos = scene_center + right * rig_distance * 0.9 + up * rig_distance * 0.7
+        - forward * rig_distance * 0.55;
     builder.add_spot_light(
         "key_light".to_string(),
         key_pos,
@@ -2666,15 +2719,14 @@ fn add_lighting_rig_to_glb(
         key_power,
     );
 
-    let fill_pos = scene_center - right * rig_distance * 1.1 + up * rig_distance * 0.35 - forward * rig_distance * 0.25;
-    builder.add_point_light(
-        "fill_light".to_string(),
-        fill_pos,
-        fill_power,
-    );
+    let fill_pos = scene_center - right * rig_distance * 1.1 + up * rig_distance * 0.35
+        - forward * rig_distance * 0.25;
+    builder.add_point_light("fill_light".to_string(), fill_pos, fill_power);
 
     if rim_power > 0.0 {
-        let rim_pos = scene_center - right * rig_distance * 0.8 + up * rig_distance * 0.55 + forward * rig_distance * 0.95;
+        let rim_pos = scene_center - right * rig_distance * 0.8
+            + up * rig_distance * 0.55
+            + forward * rig_distance * 0.95;
         builder.add_spot_light(
             "rim_light".to_string(),
             rim_pos,
@@ -2686,14 +2738,9 @@ fn add_lighting_rig_to_glb(
     }
 
     let overhead_pos = scene_center + Vec3::Z * rig_distance * 1.5;
-    builder.add_point_light(
-        "overhead_fill".to_string(),
-        overhead_pos,
-        overhead_power,
-    );
+    builder.add_point_light("overhead_fill".to_string(), overhead_pos, overhead_power);
 
-    let backfill_pos =
-        scene_center + forward * rig_distance * 1.2 + up * rig_distance * 0.15;
+    let backfill_pos = scene_center + forward * rig_distance * 1.2 + up * rig_distance * 0.15;
     builder.add_point_light("back_fill".to_string(), backfill_pos, backfill_power);
 }
 
@@ -3091,8 +3138,12 @@ impl GlbBuilder {
                 Value::Array(self.extensions_used.into_iter().map(Value::from).collect());
         }
         if !self.extensions_required.is_empty() {
-            root["extensionsRequired"] =
-                Value::Array(self.extensions_required.into_iter().map(Value::from).collect());
+            root["extensionsRequired"] = Value::Array(
+                self.extensions_required
+                    .into_iter()
+                    .map(Value::from)
+                    .collect(),
+            );
         }
 
         let mut json_bytes = serde_json::to_vec(&root)?;

@@ -6,6 +6,7 @@ pub struct MenuAction {
     pub open_workflow_project: bool,
     pub save_workflow_project: bool,
     pub save_workflow_project_as: bool,
+    pub export_to_blender: bool,
     pub open_trx: bool,
     pub import_streamlines: bool,
     pub create_streamline_merge: bool,
@@ -27,6 +28,7 @@ pub fn show_menu_bar(ctx: &egui::Context, ui_mode: UiMode) -> MenuAction {
         open_workflow_project: false,
         save_workflow_project: false,
         save_workflow_project_as: false,
+        export_to_blender: false,
         open_trx: false,
         import_streamlines: false,
         create_streamline_merge: false,
@@ -49,6 +51,10 @@ pub fn show_menu_bar(ctx: &egui::Context, ui_mode: UiMode) -> MenuAction {
                 }
                 if ui.button("Open Project...").clicked() {
                     action.open_workflow_project = true;
+                    ui.close();
+                }
+                if ui.button("Export to Blender...").clicked() {
+                    action.export_to_blender = true;
                     ui.close();
                 }
                 if ui_mode == UiMode::Advanced {
