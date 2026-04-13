@@ -400,7 +400,14 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 pos,
                 WorkflowNodeKind::SurfaceDepthQuery { depth_mm: 2.0 },
             );
-            add_node_button(ui, snarl, pos, WorkflowNodeKind::RemoveDuplicates);
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::RemoveDuplicates {
+                    params: trx_rs::DuplicateRemovalParams::default(),
+                },
+            );
             add_node_button(ui, snarl, pos, WorkflowNodeKind::Merge);
             add_node_button(ui, snarl, pos, WorkflowNodeKind::AddGroupsFromParcellation);
         });
@@ -528,10 +535,13 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 pos,
                 WorkflowNodeKind::BundleSurfaceBuild {
                     per_group: false,
+                    build_mode: BundleSurfaceBuildMode::MarchingCubes,
                     voxel_size_mm: 2.0,
                     threshold: 3.0,
                     smooth_sigma: 0.5,
                     min_component_volume_mm3: 0.0,
+                    tube_radius_mm: 0.4,
+                    tube_sides: 8,
                     opacity: 0.5,
                 },
             );

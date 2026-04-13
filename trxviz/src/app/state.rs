@@ -10,7 +10,9 @@ use trxviz_core::data::gifti_data::GiftiSurfaceData;
 use trxviz_core::data::loaded_files::{FileId, LoadedNifti};
 use trxviz_core::data::nifti_data::NiftiVolume;
 use trxviz_core::data::orientation_field::BoundaryContactField;
-pub use trxviz_core::lighting::SceneLightingParams;
+pub use trxviz_core::lighting::{
+    SceneLightingParams, WorkflowBackground3D, WorkflowRender3D,
+};
 use trxviz_core::renderer::camera::{OrbitCamera, OrthoSliceCamera};
 use trxviz_core::renderer::slice_renderer::SliceAxis;
 pub use trxviz_core::scene::{
@@ -283,7 +285,7 @@ pub struct ViewportState {
     pub volume_extent: f32,
     pub slice_visible: [bool; 3],
     pub slice_world_offsets: [f32; 3],
-    pub scene_lighting: SceneLightingParams,
+    pub render_3d: WorkflowRender3D,
     pub boundary_field: Option<Arc<BoundaryContactField>>,
     pub boundary_field_revision: u64,
     pub window_3d_open: bool,
@@ -309,7 +311,7 @@ impl Default for ViewportState {
             volume_extent: 200.0,
             slice_visible: [true; 3],
             slice_world_offsets: [0.0; 3],
-            scene_lighting: SceneLightingParams::default(),
+            render_3d: WorkflowRender3D::default(),
             boundary_field: None,
             boundary_field_revision: 0,
             window_3d_open: false,
@@ -337,6 +339,18 @@ impl ViewportState {
         self.camera_3d.yaw = camera.azimuth_deg.to_radians();
         self.camera_3d.pitch = camera.elevation_deg.to_radians();
         self.camera_3d.distance = camera.distance.max(0.1);
+    }
+
+    pub fn workflow_render_3d(&self) -> WorkflowRender3D {
+        self.render_3d.clone().sanitized()
+    }
+
+    pub fn apply_workflow_render_3d(&mut self, render_3d: WorkflowRender3D) {
+        self.render_3d = render_3d.sanitized();
+    }
+
+    pub fn scene_lighting(&self) -> SceneLightingParams {
+        self.render_3d.scene_lighting()
     }
 
     pub fn workflow_slice_view_3d(&self, nifti_files: &[LoadedNifti]) -> WorkflowSliceView3D {

@@ -8,6 +8,7 @@ use trxviz_core::data::loaded_files::{FileId, StreamlineBacking};
 use trxviz_core::data::nifti_data::NiftiVolume;
 use trxviz_core::data::parcellation_data::ParcellationVolume;
 use trxviz_core::data::trx_data::{RenderStyle, TrxGpuData};
+use trxviz_core::renderer::background_renderer::BackgroundResources;
 use trxviz_core::renderer::glyph_renderer::GlyphResources;
 use trxviz_core::renderer::mesh_renderer::MeshResources;
 use trxviz_core::renderer::slice_renderer::AllSliceResources;
@@ -157,11 +158,14 @@ impl crate::app::TrxVizApp {
                                             label: draw.label.clone(),
                                             flow: draw.flow.clone(),
                                             per_group: draw.per_group,
+                                            build_mode: draw.build_mode,
                                             voxel_size_mm: draw.voxel_size_mm,
                                             threshold: draw.threshold,
                                             smooth_sigma: draw.smooth_sigma,
                                             min_component_volume_mm3: draw
                                                 .min_component_volume_mm3,
+                                            tube_radius_mm: draw.tube_radius_mm,
+                                            tube_sides: draw.tube_sides,
                                             opacity: draw.opacity,
                                         },
                                     );
@@ -404,10 +408,13 @@ impl crate::app::TrxVizApp {
                     label: draw.label.clone(),
                     flow: draw.flow.clone(),
                     per_group: draw.per_group,
+                    build_mode: draw.build_mode,
                     voxel_size_mm: draw.voxel_size_mm,
                     threshold: draw.threshold,
                     smooth_sigma: draw.smooth_sigma,
                     min_component_volume_mm3: draw.min_component_volume_mm3,
+                    tube_radius_mm: draw.tube_radius_mm,
+                    tube_sides: draw.tube_sides,
                     opacity: draw.opacity,
                 };
                 self.queue_workflow_job(
@@ -485,6 +492,16 @@ impl crate::app::TrxVizApp {
             renderer.callback_resources.insert(AllStreamlineResources {
                 entries: Vec::new(),
             });
+        }
+        if renderer
+            .callback_resources
+            .get::<BackgroundResources>()
+            .is_none()
+        {
+            renderer.callback_resources.insert(BackgroundResources::new(
+                &rs.device,
+                rs.target_format,
+            ));
         }
         if renderer.callback_resources.get::<MeshResources>().is_none() {
             renderer
@@ -760,6 +777,7 @@ impl crate::app::TrxVizApp {
         self.pending_file_loads.clear();
         self.viewport.boundary_field = None;
         self.viewport.boundary_field_revision = 0;
+        self.viewport.apply_workflow_render_3d(Default::default());
         self.workflow.runtime = WorkflowRuntime::default();
         self.workflow.execution_cache = WorkflowExecutionCache::default();
         self.workflow.display_runtimes.clear();
@@ -975,6 +993,9 @@ impl crate::app::TrxVizApp {
         if let Some(camera) = self.workflow.document.camera_3d {
             self.viewport.apply_workflow_camera_3d(camera);
         }
+        self.viewport.apply_workflow_render_3d(
+            self.workflow.document.render_3d.clone().unwrap_or_default(),
+        );
         if let Some(slice_view) = self.workflow.document.slice_view_3d {
             self.viewport
                 .apply_workflow_slice_view_3d(slice_view, &self.scene.nifti_files);

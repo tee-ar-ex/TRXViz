@@ -7,6 +7,7 @@
 Use it when you need:
 
 - PNG output without opening the GUI
+- Blender-oriented scene export as `GLB`
 - automation in scripts or batch jobs
 - stable renders from saved workflow project files
 
@@ -62,6 +63,27 @@ imported according to their extension before rendering.
 - `--width` / `--height`: output image size
 - `--target`: override camera target
 - `--azimuth`, `--elevation`, `--distance`: camera placement controls
+
+## Blender Scene Export
+
+```bash
+trxviz-cli export-scene --project workflow.json --out scene.glb
+```
+
+This exports the visible 3D scene as a Blender-oriented `GLB`, including visible surfaces, bundle
+meshes, streamline tubes, visible slice planes, the saved 3D camera, and an approximate lighting
+rig.
+
+The export writes only the `GLB`. For Blender-side presentation styling, use one of the scripts in
+the separate `trxviz-blender-styles` repo after import.
+
+Useful toggles:
+
+- `--include-camera=true|false`
+- `--include-lights=true|false`
+- `--include-slices=true|false`
+
+The exporter preserves the visible workflow result (mostly). 
 
 ## Installation on macOS
 

@@ -1,6 +1,7 @@
 use trxviz_core::data::orientation_field::BoundaryGlyphColorMode;
 use trxviz_core::data::trx_data::RenderStyle;
-use trxviz_core::lighting::SceneLightingParams;
+use trxviz_core::lighting::{SceneLightingParams, WorkflowRender3D};
+use trxviz_core::renderer::background_renderer::BackgroundResources;
 use trxviz_core::renderer::glyph_renderer::GlyphResources;
 use trxviz_core::renderer::mesh_renderer::{MeshDrawStyle, MeshResources};
 use trxviz_core::renderer::slice_renderer::AllSliceResources;
@@ -46,6 +47,9 @@ pub(super) struct Scene3DCallback {
     pub(super) boundary_glyph_color_mode: BoundaryGlyphColorMode,
     pub(super) boundary_glyph_draw_step: u32,
     pub(super) scene_lighting: SceneLightingParams,
+    pub(super) render_3d: WorkflowRender3D,
+    pub(super) fog_near: f32,
+    pub(super) fog_far: f32,
 }
 
 impl egui_wgpu::CallbackTrait for Scene3DCallback {
@@ -57,6 +61,15 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
         _egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
+        if let Some(bg) = callback_resources.get_mut::<BackgroundResources>() {
+            bg.update(
+                queue,
+                &self.render_3d.background,
+                self.render_3d.exposure,
+                self.render_3d.contrast,
+                self.render_3d.vignette_strength,
+            );
+        }
         if let Some(all) = callback_resources.get_mut::<AllStreamlineResources>() {
             for sd in &self.streamline_draws {
                 if !sd.visible {
@@ -79,6 +92,9 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                         0.0,
                         aux,
                         self.scene_lighting,
+                        &self.render_3d,
+                        self.fog_near,
+                        self.fog_far,
                     );
                 }
             }
@@ -108,6 +124,9 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                     style,
                     self.camera_pos,
                     self.scene_lighting,
+                    &self.render_3d,
+                    self.fog_near,
+                    self.fog_far,
                 );
             }
             for bd in &self.bundle_draws {
@@ -118,6 +137,9 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                     self.camera_pos,
                     bd.opacity,
                     self.scene_lighting,
+                    &self.render_3d,
+                    self.fog_near,
+                    self.fog_far,
                 );
             }
         }
@@ -127,12 +149,16 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                     queue,
                     0,
                     self.view_proj,
+                    self.camera_pos,
                     3,
                     0.0,
                     0.0,
                     self.boundary_glyph_color_mode,
                     self.boundary_glyph_draw_step,
                     self.scene_lighting,
+                    &self.render_3d,
+                    self.fog_near,
+                    self.fog_far,
                 );
             }
         }
@@ -157,6 +183,10 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
             0.0,
             1.0,
         );
+
+        if let Some(bg) = callback_resources.get::<BackgroundResources>() {
+            bg.paint(render_pass);
+        }
 
         if let Some(all) = callback_resources.get::<AllSliceResources>() {
             for vd in &self.volume_draws {
@@ -223,10 +253,23 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                     .map(|draw| (draw.file_id, draw.opacity))
                     .collect();
                 mr.paint_bundle_opaque(render_pass, &bundle_draws);
-                mr.paint_bundle_transparent(render_pass, &bundle_draws, self.camera_dir);
-            }
-            if !self.surface_draws.is_empty() {
-                mr.paint_transparent(render_pass, 0, &self.surface_draws, self.camera_dir);
+                mr.paint_transparent(
+                    render_pass,
+                    0,
+                    &self.surface_draws,
+                    &bundle_draws,
+                    self.camera_pos,
+                    self.camera_dir,
+                );
+            } else if !self.surface_draws.is_empty() {
+                mr.paint_transparent(
+                    render_pass,
+                    0,
+                    &self.surface_draws,
+                    &[],
+                    self.camera_pos,
+                    self.camera_dir,
+                );
             }
         }
         if self.show_boundary_glyphs {
@@ -263,6 +306,12 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
         _egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
+        let neutral_render = WorkflowRender3D {
+            vignette_strength: 0.0,
+            exposure: 1.0,
+            contrast: 1.0,
+            ..Default::default()
+        };
         if let Some(all) = callback_resources.get_mut::<AllSliceResources>() {
             for vd in &self.volume_draws {
                 if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.file_id) {
@@ -298,6 +347,9 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                         slab_max,
                         0.5,
                         self.scene_lighting,
+                        &neutral_render,
+                        0.0,
+                        1.0,
                     );
                 }
             }
@@ -308,12 +360,16 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                     queue,
                     self.bind_group_index,
                     self.view_proj,
+                    glam::Vec3::ZERO,
                     self.slab_axis,
                     self.slab_min,
                     self.slab_max,
                     self.boundary_glyph_color_mode,
                     self.boundary_glyph_draw_step,
                     self.scene_lighting,
+                    &neutral_render,
+                    0.0,
+                    1.0,
                 );
             }
         }

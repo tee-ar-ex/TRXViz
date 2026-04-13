@@ -1,5 +1,6 @@
 //! Shared renderer infrastructure used by the GUI and offscreen render paths.
 
+pub mod background_renderer;
 pub mod camera;
 pub mod glyph_renderer;
 pub mod mesh_renderer;

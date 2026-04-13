@@ -33,6 +33,7 @@ pub struct TrxVizApp {
 impl TrxVizApp {
     fn sync_viewport_camera_into_workflow_document(&mut self) {
         self.workflow.document.camera_3d = Some(self.viewport.workflow_camera_3d());
+        self.workflow.document.render_3d = Some(self.viewport.workflow_render_3d());
         self.workflow.document.slice_view_3d =
             Some(self.viewport.workflow_slice_view_3d(&self.scene.nifti_files));
         self.workflow.document.slice_visible_3d = Some(self.viewport.slice_visible);

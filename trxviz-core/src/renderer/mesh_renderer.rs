@@ -5,7 +5,7 @@ use wgpu::util::DeviceExt;
 
 use crate::data::bundle_mesh::{BundleMesh, BundleMeshVertex};
 use crate::data::gifti_data::GiftiSurfaceData;
-use crate::lighting::SceneLightingParams;
+use crate::lighting::{SceneLightingParams, WorkflowRender3D};
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -25,7 +25,10 @@ struct MeshUniforms {
     specular_strength: f32,
     scalar_enabled: u32,
     colormap: u32,
-    _pad: [u32; 3],
+    _pad0: f32,
+    fog_color: [f32; 4],
+    fog_params: [f32; 4],
+    post_params: [f32; 4],
 }
 
 #[repr(C)]
@@ -65,7 +68,10 @@ struct BundleUniforms {
     fill_strength: f32,
     headlight_mix: f32,
     specular_strength: f32,
-    _pad: [f32; 3],
+    _pad0: [f32; 7],
+    fog_color: [f32; 4],
+    fog_params: [f32; 4],
+    post_params: [f32; 4],
 }
 
 struct BundleGpuSurface {
@@ -73,6 +79,7 @@ struct BundleGpuSurface {
     index_buffer: wgpu::Buffer,
     transparent_index_buffers: [wgpu::Buffer; 6],
     num_indices: u32,
+    centroid: [f32; 3],
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
@@ -93,6 +100,7 @@ struct GpuSurface {
     index_buffer: wgpu::Buffer,
     transparent_index_buffers: [wgpu::Buffer; 6],
     num_indices: u32,
+    centroid: [f32; 3],
     uniform_buffers: [wgpu::Buffer; 4],
     bind_groups: [wgpu::BindGroup; 4],
 }
@@ -345,7 +353,10 @@ impl MeshResources {
             specular_strength: 0.14,
             scalar_enabled: 0,
             colormap: SurfaceColormap::BlueWhiteRed as u32,
-            _pad: [0; 3],
+            _pad0: 0.0,
+            fog_color: [0.0, 0.0, 0.0, 0.0],
+            fog_params: [0.0, 1.0, 0.0, 0.0],
+            post_params: [1.0, 1.0, 0.12, 0.0],
         };
 
         let uniform_buffers: [wgpu::Buffer; 4] = std::array::from_fn(|i| {
@@ -374,6 +385,7 @@ impl MeshResources {
                 index_buffer,
                 transparent_index_buffers,
                 num_indices: surface.indices.len() as u32,
+                centroid: compute_centroid(&surface.vertices),
                 uniform_buffers,
                 bind_groups,
             },
@@ -389,6 +401,9 @@ impl MeshResources {
         style: &MeshDrawStyle,
         camera_pos: glam::Vec3,
         scene_lighting: SceneLightingParams,
+        render_3d: &WorkflowRender3D,
+        fog_near: f32,
+        fog_far: f32,
     ) {
         if let Some(surface) = self.surfaces.get(&surface_index) {
             let uniforms = MeshUniforms {
@@ -408,7 +423,20 @@ impl MeshResources {
                     * (0.15 + 0.85 * style.gloss.clamp(0.0, 1.0)),
                 scalar_enabled: if style.scalar_enabled { 1 } else { 0 },
                 colormap: style.colormap as u32,
-                _pad: [0; 3],
+                _pad0: 0.0,
+                fog_color: [
+                    render_3d.fog_color[0],
+                    render_3d.fog_color[1],
+                    render_3d.fog_color[2],
+                    if render_3d.fog_enabled { 1.0 } else { 0.0 },
+                ],
+                fog_params: [fog_near, fog_far.max(fog_near + 0.001), 0.0, 0.0],
+                post_params: [
+                    render_3d.exposure,
+                    render_3d.contrast,
+                    render_3d.vignette_strength,
+                    0.0,
+                ],
             };
             queue.write_buffer(
                 &surface.uniform_buffers[viewport],
@@ -456,23 +484,101 @@ impl MeshResources {
         render_pass: &mut wgpu::RenderPass<'static>,
         viewport: usize,
         draw_calls: &[(usize, MeshDrawStyle)],
+        bundle_draw_calls: &[(usize, f32)],
+        camera_pos: glam::Vec3,
         camera_dir: glam::Vec3,
     ) {
-        render_pass.set_pipeline(&self.transparent_pipeline);
         let transparent_order = transparent_view_bucket(camera_dir);
+        enum TransparentDraw<'a> {
+            Surface {
+                surface: &'a GpuSurface,
+                viewport: usize,
+                depth: f32,
+            },
+            Bundle {
+                surface: &'a BundleGpuSurface,
+                depth: f32,
+            },
+        }
+
+        let mut draws = Vec::new();
         for (surface_index, style) in draw_calls {
+            if style.color[3] <= 0.001 || style.color[3] >= 0.999 {
+                continue;
+            }
             if let Some(surface) = self.surfaces.get(surface_index) {
-                if style.color[3] <= 0.001 || style.color[3] >= 0.999 {
-                    continue;
+                let centroid = Vec3::from_array(surface.centroid);
+                let depth = (centroid - camera_pos).dot(camera_dir);
+                draws.push(TransparentDraw::Surface {
+                    surface,
+                    viewport,
+                    depth,
+                });
+            }
+        }
+        for (file_id, opacity) in bundle_draw_calls {
+            if *opacity <= 0.001 || *opacity >= 0.999 {
+                continue;
+            }
+            if let Some(surfaces) = self.bundle_surfaces.get(file_id) {
+                for surface in surfaces {
+                    let centroid = Vec3::from_array(surface.centroid);
+                    let depth = (centroid - camera_pos).dot(camera_dir);
+                    draws.push(TransparentDraw::Bundle { surface, depth });
                 }
-                render_pass.set_bind_group(0, &surface.bind_groups[viewport], &[]);
-                render_pass.set_vertex_buffer(0, surface.vertex_buffer.slice(..));
-                render_pass.set_vertex_buffer(1, surface.scalar_buffer.slice(..));
-                render_pass.set_index_buffer(
-                    surface.transparent_index_buffers[transparent_order].slice(..),
-                    wgpu::IndexFormat::Uint32,
-                );
-                render_pass.draw_indexed(0..surface.num_indices, 0, 0..1);
+            }
+        }
+
+        draws.sort_by(|lhs, rhs| {
+            let lhs_depth = match lhs {
+                TransparentDraw::Surface { depth, .. } | TransparentDraw::Bundle { depth, .. } => {
+                    *depth
+                }
+            };
+            let rhs_depth = match rhs {
+                TransparentDraw::Surface { depth, .. } | TransparentDraw::Bundle { depth, .. } => {
+                    *depth
+                }
+            };
+            rhs_depth.total_cmp(&lhs_depth)
+        });
+
+        let mut using_bundle_pipeline = false;
+        for draw in draws {
+            match draw {
+                TransparentDraw::Surface {
+                    surface,
+                    viewport,
+                    ..
+                } => {
+                    if using_bundle_pipeline {
+                        render_pass.set_pipeline(&self.transparent_pipeline);
+                        using_bundle_pipeline = false;
+                    } else if !using_bundle_pipeline {
+                        render_pass.set_pipeline(&self.transparent_pipeline);
+                    }
+                    render_pass.set_bind_group(0, &surface.bind_groups[viewport], &[]);
+                    render_pass.set_vertex_buffer(0, surface.vertex_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, surface.scalar_buffer.slice(..));
+                    render_pass.set_index_buffer(
+                        surface.transparent_index_buffers[transparent_order].slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    render_pass.draw_indexed(0..surface.num_indices, 0, 0..1);
+                }
+                TransparentDraw::Bundle { surface, .. } => {
+                    if !using_bundle_pipeline {
+                        render_pass.set_pipeline(&self.bundle_transparent_pipeline);
+                        using_bundle_pipeline = true;
+                    }
+                    render_pass.set_bind_group(0, &surface.bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, surface.vertex_buffer.slice(..));
+                    render_pass.set_index_buffer(
+                        surface.transparent_index_buffers[transparent_order].slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    render_pass.draw_indexed(0..surface.num_indices, 0, 0..1);
+                }
             }
         }
     }
@@ -515,7 +621,10 @@ impl MeshResources {
             fill_strength: 0.18,
             headlight_mix: 0.18,
             specular_strength: 0.14,
-            _pad: [0.0; 3],
+            _pad0: [0.0; 7],
+            fog_color: [0.0, 0.0, 0.0, 0.0],
+            fog_params: [0.0, 1.0, 0.0, 0.0],
+            post_params: [1.0, 1.0, 0.12, 0.0],
         };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("bundle_uni_{label}")),
@@ -536,6 +645,7 @@ impl MeshResources {
             index_buffer,
             transparent_index_buffers,
             num_indices: mesh.indices.len() as u32,
+            centroid: compute_centroid(&bundle_positions),
             uniform_buffer,
             bind_group,
         }
@@ -566,6 +676,9 @@ impl MeshResources {
         camera_pos: glam::Vec3,
         opacity: f32,
         scene_lighting: SceneLightingParams,
+        render_3d: &WorkflowRender3D,
+        fog_near: f32,
+        fog_far: f32,
     ) {
         if let Some(surfaces) = self.bundle_surfaces.get(&file_id) {
             let uniforms = BundleUniforms {
@@ -577,7 +690,20 @@ impl MeshResources {
                 fill_strength: scene_lighting.fill_strength(),
                 headlight_mix: scene_lighting.headlight_mix(),
                 specular_strength: scene_lighting.specular_strength(),
-                _pad: [0.0; 3],
+                _pad0: [0.0; 7],
+                fog_color: [
+                    render_3d.fog_color[0],
+                    render_3d.fog_color[1],
+                    render_3d.fog_color[2],
+                    if render_3d.fog_enabled { 1.0 } else { 0.0 },
+                ],
+                fog_params: [fog_near, fog_far.max(fog_near + 0.001), 0.0, 0.0],
+                post_params: [
+                    render_3d.exposure,
+                    render_3d.contrast,
+                    render_3d.vignette_strength,
+                    0.0,
+                ],
             };
             for bs in surfaces {
                 queue.write_buffer(&bs.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -611,38 +737,20 @@ impl MeshResources {
         }
     }
 
-    pub fn paint_bundle_transparent(
-        &self,
-        render_pass: &mut wgpu::RenderPass<'static>,
-        draw_calls: &[(usize, f32)],
-        camera_dir: glam::Vec3,
-    ) {
-        if self.bundle_surfaces.is_empty() || draw_calls.is_empty() {
-            return;
-        }
-        render_pass.set_pipeline(&self.bundle_transparent_pipeline);
-        let transparent_order = transparent_view_bucket(camera_dir);
-        for (file_id, opacity) in draw_calls {
-            if *opacity <= 0.001 || *opacity >= 0.999 {
-                continue;
-            }
-            if let Some(surfaces) = self.bundle_surfaces.get(file_id) {
-                for bs in surfaces {
-                    render_pass.set_bind_group(0, &bs.bind_group, &[]);
-                    render_pass.set_vertex_buffer(0, bs.vertex_buffer.slice(..));
-                    render_pass.set_index_buffer(
-                        bs.transparent_index_buffers[transparent_order].slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    render_pass.draw_indexed(0..bs.num_indices, 0, 0..1);
-                }
-            }
-        }
-    }
-
     pub fn clear_bundle_mesh(&mut self, file_id: usize) {
         self.bundle_surfaces.remove(&file_id);
     }
+}
+
+fn compute_centroid(vertices: &[[f32; 3]]) -> [f32; 3] {
+    if vertices.is_empty() {
+        return [0.0, 0.0, 0.0];
+    }
+    let mut sum = Vec3::ZERO;
+    for vertex in vertices {
+        sum += Vec3::from_array(*vertex);
+    }
+    (sum / vertices.len() as f32).to_array()
 }
 
 fn build_transparent_index_orders(vertices: &[[f32; 3]], indices: &[u32]) -> [Vec<u32>; 6] {

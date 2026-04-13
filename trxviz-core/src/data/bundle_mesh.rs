@@ -1,7 +1,9 @@
 use crate::data::orientation_field::BoundaryContactField;
+use crate::data::trx_data::{TubeMeshVertex, build_tube_vertices_from_data};
 use glam::Vec3;
 use lin_alg::f32::Vec3 as LinVec3;
 use mcubes::{MarchingCubes, MeshSide};
+use std::collections::HashMap;
 
 /// Per-vertex data for a bundle surface mesh.
 #[repr(C)]
@@ -719,11 +721,198 @@ pub fn build_bundle_mesh(
     Some(BundleMesh { vertices, indices })
 }
 
+pub fn build_streamtube_bundle_mesh(
+    positions: &[[f32; 3]],
+    colors: &[[f32; 4]],
+    offsets: &[u32],
+    tube_radius_mm: f32,
+    tube_sides: u32,
+) -> Option<BundleMesh> {
+    let (tube_vertices, tube_indices) = build_tube_vertices_from_data(
+        positions,
+        colors,
+        offsets,
+        tube_radius_mm,
+        tube_sides,
+    );
+    if tube_indices.is_empty() {
+        return None;
+    }
+
+    let union = TubeUnion::build(positions, offsets, tube_radius_mm.max(0.001));
+    let visible_triangles =
+        cull_buried_streamtube_triangles(&tube_vertices, &tube_indices, &union, tube_radius_mm);
+    if visible_triangles.is_empty() {
+        return None;
+    }
+
+    let mut remap = HashMap::<u32, u32>::new();
+    let mut vertices = Vec::<BundleMeshVertex>::new();
+    let mut indices = Vec::<u32>::with_capacity(visible_triangles.len());
+
+    for old_index in visible_triangles {
+        let new_index = if let Some(&mapped) = remap.get(&old_index) {
+            mapped
+        } else {
+            let mapped = vertices.len() as u32;
+            let source = tube_vertices[old_index as usize];
+            vertices.push(BundleMeshVertex {
+                position: source.position,
+                normal: source.normal,
+                color: source.color,
+            });
+            remap.insert(old_index, mapped);
+            mapped
+        };
+        indices.push(new_index);
+    }
+
+    Some(BundleMesh { vertices, indices })
+}
+
+#[derive(Default)]
+struct TubeUnion {
+    cell_size: f32,
+    radius_mm: f32,
+    segments: Vec<([f32; 3], [f32; 3])>,
+    cells: HashMap<(i32, i32, i32), Vec<usize>>,
+}
+
+impl TubeUnion {
+    fn build(positions: &[[f32; 3]], offsets: &[u32], radius_mm: f32) -> Self {
+        let cell_size = (radius_mm * 2.0).max(1e-3);
+        let mut segments = Vec::<([f32; 3], [f32; 3])>::new();
+        let mut cells = HashMap::<(i32, i32, i32), Vec<usize>>::new();
+
+        for window in offsets.windows(2) {
+            let start = window[0] as usize;
+            let end = window[1] as usize;
+            if end <= start + 1 {
+                continue;
+            }
+            for segment in positions[start..end].windows(2) {
+                let p0 = segment[0];
+                let p1 = segment[1];
+                if Vec3::from(p0).distance_squared(Vec3::from(p1)) <= 1e-10 {
+                    continue;
+                }
+
+                let segment_index = segments.len();
+                segments.push((p0, p1));
+
+                let min = [
+                    p0[0].min(p1[0]) - radius_mm,
+                    p0[1].min(p1[1]) - radius_mm,
+                    p0[2].min(p1[2]) - radius_mm,
+                ];
+                let max = [
+                    p0[0].max(p1[0]) + radius_mm,
+                    p0[1].max(p1[1]) + radius_mm,
+                    p0[2].max(p1[2]) + radius_mm,
+                ];
+                let min_key = quantize_grid_point(min, cell_size);
+                let max_key = quantize_grid_point(max, cell_size);
+                for ix in min_key.0..=max_key.0 {
+                    for iy in min_key.1..=max_key.1 {
+                        for iz in min_key.2..=max_key.2 {
+                            cells.entry((ix, iy, iz)).or_default().push(segment_index);
+                        }
+                    }
+                }
+            }
+        }
+
+        Self {
+            cell_size,
+            radius_mm,
+            segments,
+            cells,
+        }
+    }
+
+    fn contains(&self, point: [f32; 3]) -> bool {
+        let key = quantize_grid_point(point, self.cell_size);
+        let radius2 = self.radius_mm * self.radius_mm;
+        self.cells.get(&key).is_some_and(|segments| {
+            segments.iter().copied().any(|segment_index| {
+                let (start, end) = self.segments[segment_index];
+                point_inside_segment_tube(point, start, end, radius2)
+            })
+        })
+    }
+}
+
+fn cull_buried_streamtube_triangles(
+    vertices: &[TubeMeshVertex],
+    indices: &[u32],
+    union: &TubeUnion,
+    tube_radius_mm: f32,
+) -> Vec<u32> {
+    let probe_epsilon = (tube_radius_mm * 0.1).max(0.02);
+    let mut kept = Vec::<u32>::new();
+
+    for tri in indices.chunks_exact(3) {
+        let a = Vec3::from(vertices[tri[0] as usize].position);
+        let b = Vec3::from(vertices[tri[1] as usize].position);
+        let c = Vec3::from(vertices[tri[2] as usize].position);
+        let normal = (b - a).cross(c - a);
+        if normal.length_squared() <= 1e-10 {
+            kept.extend_from_slice(tri);
+            continue;
+        }
+        let normal = normal.normalize();
+        let sample_points = [
+            (a + b + c) / 3.0,
+            a * 0.6 + b * 0.2 + c * 0.2,
+            a * 0.2 + b * 0.6 + c * 0.2,
+            a * 0.2 + b * 0.2 + c * 0.6,
+        ];
+        let visible = sample_points.iter().any(|sample| {
+            let neg = (*sample - normal * probe_epsilon).to_array();
+            let pos = (*sample + normal * probe_epsilon).to_array();
+            let neg_inside = union.contains(neg);
+            let pos_inside = union.contains(pos);
+            neg_inside != pos_inside
+        });
+        if visible {
+            kept.extend_from_slice(tri);
+        }
+    }
+
+    kept
+}
+
+fn quantize_grid_point(point: [f32; 3], cell_size: f32) -> (i32, i32, i32) {
+    (
+        (point[0] / cell_size).floor() as i32,
+        (point[1] / cell_size).floor() as i32,
+        (point[2] / cell_size).floor() as i32,
+    )
+}
+
+fn point_inside_segment_tube(point: [f32; 3], start: [f32; 3], end: [f32; 3], radius2: f32) -> bool {
+    let start = Vec3::from(start);
+    let end = Vec3::from(end);
+    let point = Vec3::from(point);
+    let axis = end - start;
+    let axis_len2 = axis.length_squared();
+    if axis_len2 <= 1e-10 {
+        return false;
+    }
+    let t = (point - start).dot(axis) / axis_len2;
+    if !(0.0..=1.0).contains(&t) {
+        return false;
+    }
+    let closest = start + axis * t;
+    point.distance_squared(closest) <= radius2
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        BundleMeshVertex, TAUBIN_SMOOTHING_ITERS, apply_taubin_smoothing, component_volume_mm3,
-        connected_components, group_neighbors, welded_vertex_groups,
+        BundleMeshVertex, TAUBIN_SMOOTHING_ITERS, apply_taubin_smoothing,
+        build_streamtube_bundle_mesh, component_volume_mm3, connected_components, group_neighbors,
+        welded_vertex_groups,
     };
     use glam::Vec3;
 
@@ -802,5 +991,33 @@ mod tests {
         let cw_volume = component_volume_mm3(&vertices, &cw);
         assert!(ccw_volume > 0.0);
         assert!((ccw_volume - cw_volume).abs() < 1e-6);
+    }
+
+    #[test]
+    fn streamtube_bundle_mesh_preserves_endpoint_colors_and_culls_hidden_faces() {
+        let positions = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+        ];
+        let colors = vec![
+            [1.0, 0.0, 0.0, 1.0],
+            [0.5, 0.5, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [1.0, 0.0, 0.0, 1.0],
+            [0.5, 0.5, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0],
+        ];
+        let offsets = vec![0, 3, 6];
+
+        let mesh =
+            build_streamtube_bundle_mesh(&positions, &colors, &offsets, 0.2, 6).unwrap();
+
+        assert!(!mesh.indices.is_empty());
+        assert!(mesh.vertices.iter().any(|vertex| vertex.color == [1.0, 0.0, 0.0, 1.0]));
+        assert!(mesh.vertices.iter().any(|vertex| vertex.color == [0.0, 0.0, 1.0, 1.0]));
     }
 }

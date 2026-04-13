@@ -3,7 +3,7 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 use crate::data::orientation_field::{BoundaryContactField, BoundaryGlyphColorMode};
-use crate::lighting::SceneLightingParams;
+use crate::lighting::{SceneLightingParams, WorkflowRender3D};
 
 pub struct GlyphResources {
     pipeline: wgpu::RenderPipeline,
@@ -23,6 +23,8 @@ pub struct GlyphResources {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct GlyphUniforms {
     view_proj: [[f32; 4]; 4],
+    camera_pos: [f32; 3],
+    _pad0: f32,
     slab_axis: u32,
     color_mode: u32,
     draw_step: u32,
@@ -34,6 +36,9 @@ struct GlyphUniforms {
     headlight_mix: f32,
     specular_strength: f32,
     _pad1: [f32; 2],
+    fog_color: [f32; 4],
+    fog_params: [f32; 4],
+    post_params: [f32; 4],
 }
 
 #[repr(C)]
@@ -88,6 +93,8 @@ impl GlyphResources {
 
         let uniforms = GlyphUniforms {
             view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(),
+            camera_pos: [0.0, 0.0, 1.0],
+            _pad0: 0.0,
             slab_axis: 3,
             color_mode: 0,
             draw_step: 1,
@@ -99,6 +106,9 @@ impl GlyphResources {
             headlight_mix: 0.18,
             specular_strength: 0.14,
             _pad1: [0.0; 2],
+            fog_color: [0.0, 0.0, 0.0, 0.0],
+            fog_params: [0.0, 1.0, 0.0, 0.0],
+            post_params: [1.0, 1.0, 0.12, 0.0],
         };
         let amplitude_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("glyph_amplitudes_empty"),
@@ -305,15 +315,21 @@ impl GlyphResources {
         queue: &wgpu::Queue,
         viewport: usize,
         view_proj: glam::Mat4,
+        camera_pos: glam::Vec3,
         slab_axis: u32,
         slab_min: f32,
         slab_max: f32,
         color_mode: BoundaryGlyphColorMode,
         draw_step: u32,
         scene_lighting: SceneLightingParams,
+        render_3d: &WorkflowRender3D,
+        fog_near: f32,
+        fog_far: f32,
     ) {
         let uniforms = GlyphUniforms {
             view_proj: view_proj.to_cols_array_2d(),
+            camera_pos: camera_pos.into(),
+            _pad0: 0.0,
             slab_axis,
             color_mode: match color_mode {
                 BoundaryGlyphColorMode::DirectionRgb => 0,
@@ -328,6 +344,19 @@ impl GlyphResources {
             headlight_mix: scene_lighting.headlight_mix(),
             specular_strength: scene_lighting.specular_strength(),
             _pad1: [0.0; 2],
+            fog_color: [
+                render_3d.fog_color[0],
+                render_3d.fog_color[1],
+                render_3d.fog_color[2],
+                if render_3d.fog_enabled { 1.0 } else { 0.0 },
+            ],
+            fog_params: [fog_near, fog_far.max(fog_near + 0.001), 0.0, 0.0],
+            post_params: [
+                render_3d.exposure,
+                render_3d.contrast,
+                render_3d.vignette_strength,
+                0.0,
+            ],
         };
         queue.write_buffer(
             &self.uniform_buffers[viewport],

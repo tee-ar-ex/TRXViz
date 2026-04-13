@@ -7,7 +7,10 @@ use glam::Vec3;
 use petgraph::Directed;
 use petgraph::algo::toposort;
 use petgraph::stable_graph::StableGraph;
-use trx_rs::{ConversionOptions, DType, DataArray, Tractogram, write_tractogram};
+use trx_rs::{
+    ConversionOptions, DType, DataArray, Tractogram, remove_duplicates_tractogram,
+    write_tractogram,
+};
 
 use crate::data::loaded_files::{FileId, LoadedNifti, LoadedTrx, StreamlineBacking};
 use crate::data::parcellation_data::ParcellationVolume;
@@ -417,12 +420,14 @@ fn evaluate_node(
                 .to_string();
             Ok(None)
         }
-        WorkflowNodeKind::RemoveDuplicates => {
+        WorkflowNodeKind::RemoveDuplicates { params } => {
             let flow = expect_streamline_input(inputs, "Remove Duplicates")?;
             let plan = ReactiveStreamlinePlan {
                 node_uuid: node.uuid,
                 label: node.label.clone(),
-                op: ReactiveStreamlineOp::RemoveDuplicates,
+                op: ReactiveStreamlineOp::RemoveDuplicates {
+                    params: params.clone(),
+                },
                 left: flow.clone(),
                 right: flow,
             };
@@ -762,10 +767,13 @@ fn evaluate_node(
         }
         WorkflowNodeKind::BundleSurfaceBuild {
             per_group,
+            build_mode,
             voxel_size_mm,
             threshold,
             smooth_sigma,
             min_component_volume_mm3,
+            tube_radius_mm,
+            tube_sides,
             opacity,
         } => {
             let flow = expect_streamline_input(inputs, "Bundle Surface Build")?;
@@ -774,10 +782,13 @@ fn evaluate_node(
                 label: node.label.clone(),
                 flow,
                 per_group: *per_group,
+                build_mode: *build_mode,
                 voxel_size_mm: *voxel_size_mm,
                 threshold: *threshold,
                 smooth_sigma: *smooth_sigma,
                 min_component_volume_mm3: *min_component_volume_mm3,
+                tube_radius_mm: *tube_radius_mm,
+                tube_sides: *tube_sides,
                 opacity: *opacity,
             };
             let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
@@ -942,6 +953,11 @@ fn evaluate_node(
                     ..Default::default()
                 }
             });
+            let resolved_color_mode = if matches!(bundle.build_mode, BundleSurfaceBuildMode::Streamtubes) {
+                BundleSurfaceColorMode::SourceColors
+            } else {
+                *color_mode
+            };
             let draw = BundleDrawPlan {
                 node_uuid: node.uuid,
                 build_node_uuid: bundle.build_node_uuid,
@@ -952,11 +968,14 @@ fn evaluate_node(
                 label: bundle.label,
                 flow: bundle.flow,
                 per_group: bundle.per_group,
-                color_mode: *color_mode,
+                color_mode: resolved_color_mode,
+                build_mode: bundle.build_mode,
                 voxel_size_mm: bundle.voxel_size_mm,
                 threshold: bundle.threshold,
                 smooth_sigma: bundle.smooth_sigma,
                 min_component_volume_mm3: bundle.min_component_volume_mm3,
+                tube_radius_mm: bundle.tube_radius_mm,
+                tube_sides: bundle.tube_sides,
                 opacity: bundle.opacity,
                 outline_thickness: *outline_thickness,
             };
@@ -972,9 +991,9 @@ fn evaluate_node(
             sync_node_state_from_run_record(node_state, record);
             let boundary_stale = boundary_field.as_ref().is_some_and(|(_, stale)| *stale);
             node_state.summary = if stale || boundary_stale {
-                format!("Displaying stale bundle surface ({})", color_mode.label())
+                format!("Displaying stale bundle surface ({})", resolved_color_mode.label())
             } else {
-                format!("Displaying bundle surface ({})", color_mode.label())
+                format!("Displaying bundle surface ({})", resolved_color_mode.label())
             };
             scene_plan.bundle_draws.push(draw);
             Ok(None)
@@ -1252,7 +1271,9 @@ mod tests {
         );
         let dedupe = make_node(
             &mut document,
-            WorkflowNodeKind::RemoveDuplicates,
+            WorkflowNodeKind::RemoveDuplicates {
+                params: trx_rs::DuplicateRemovalParams::default(),
+            },
             GraphPos::new(200.0, 0.0),
         );
         document.graph.connect(
@@ -1324,15 +1345,6 @@ fn streamline_points(data: &TrxGpuData, streamline_index: usize) -> &[[f32; 3]] 
     let start = data.offsets[streamline_index] as usize;
     let end = data.offsets[streamline_index + 1] as usize;
     &data.positions[start..end]
-}
-
-fn streamline_key(data: &TrxGpuData, streamline_index: usize) -> Vec<u8> {
-    let points = streamline_points(data, streamline_index);
-    let forward = bytemuck::cast_slice(points).to_vec();
-    let mut reversed_points = points.to_vec();
-    reversed_points.reverse();
-    let reverse = bytemuck::cast_slice(reversed_points.as_slice()).to_vec();
-    if reverse < forward { reverse } else { forward }
 }
 
 fn summarize_value(value: &WorkflowValue) -> String {
@@ -1505,20 +1517,11 @@ pub(crate) fn materialize_reactive_streamline_flow(
             let tractogram = materialize_merged_streamlines(&plan.left, &plan.right)?;
             streamline_flow_from_tractogram(plan.label.clone(), &plan.left, tractogram)
         }
-        ReactiveStreamlineOp::RemoveDuplicates => {
-            let mut seen = HashSet::new();
-            let mut keep = Vec::new();
-            for &streamline_index in plan.left.selected_streamlines.iter() {
-                let key =
-                    streamline_key(plan.left.dataset.gpu_data.as_ref(), streamline_index as usize);
-                if seen.insert(key) {
-                    keep.push(streamline_index);
-                }
-            }
-            Ok(StreamlineFlow {
-                selected_streamlines: Arc::new(keep),
-                ..plan.left.clone()
-            })
+        ReactiveStreamlineOp::RemoveDuplicates { params } => {
+            let tractogram = subset_tractogram_from_flow(&plan.left)?;
+            let deduped =
+                remove_duplicates_tractogram(&tractogram, params).map_err(|err| err.to_string())?;
+            streamline_flow_from_tractogram(plan.label.clone(), &plan.left, deduped)
         }
         ReactiveStreamlineOp::ParcelROI {
             parcellation,

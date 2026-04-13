@@ -14,6 +14,7 @@ use trxviz_core::data::nifti_data::NiftiVolume;
 use trxviz_core::data::orientation_field::BoundaryContactField;
 use trxviz_core::data::parcellation_data::{ParcellationVolume, guess_label_table_path};
 use trxviz_core::data::trx_data::TrxGpuData;
+use trxviz_core::renderer::background_renderer::BackgroundResources;
 use trxviz_core::renderer::camera::{OrbitCamera, OrthoSliceCamera};
 use trxviz_core::renderer::glyph_renderer::GlyphResources;
 use trxviz_core::renderer::mesh_renderer::{MeshResources, SurfaceColormap};
@@ -303,6 +304,16 @@ impl super::TrxVizApp {
 
         {
             let mut renderer = rs.renderer.write();
+            if renderer
+                .callback_resources
+                .get::<BackgroundResources>()
+                .is_none()
+            {
+                renderer.callback_resources.insert(BackgroundResources::new(
+                    &rs.device,
+                    rs.target_format,
+                ));
+            }
             if renderer.callback_resources.get::<MeshResources>().is_none() {
                 let mr = MeshResources::new(&rs.device, rs.target_format);
                 renderer.callback_resources.insert(mr);
@@ -484,6 +495,16 @@ impl super::TrxVizApp {
             && self.scene.parcellations.is_empty();
         let id = self.allocate_file_id(explicit_id);
         let mut renderer = rs.renderer.write();
+        if renderer
+            .callback_resources
+            .get::<BackgroundResources>()
+            .is_none()
+        {
+            renderer.callback_resources.insert(BackgroundResources::new(
+                &rs.device,
+                rs.target_format,
+            ));
+        }
         if renderer.callback_resources.get::<MeshResources>().is_none() {
             renderer
                 .callback_resources
