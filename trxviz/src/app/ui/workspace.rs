@@ -4,6 +4,7 @@ use egui_tiles::{Behavior, Tree, UiResponse};
 use trxviz_core::data::loaded_files::VolumeColormap;
 use trxviz_core::data::orientation_field::{BoundaryGlyphColorMode, BoundaryGlyphNormalization};
 use trxviz_core::data::trx_data::RenderStyle;
+use trxviz_core::lighting::SceneLightingPreset;
 use trxviz_core::renderer::mesh_renderer::SurfaceColormap;
 
 use crate::app::workflow::{self, WorkflowGraphViewer, WorkflowSelection, WorkspacePane};
@@ -173,6 +174,14 @@ impl super::super::TrxVizApp {
         ui.heading("Inspector");
         ui.separator();
 
+        let render_changed = self.show_render_settings_section(ui);
+        if render_changed {
+            self.workflow.document.render_3d = Some(self.viewport.workflow_render_3d());
+            self.mark_workflow_semantic_edit(ui.ctx().input(|input| input.time));
+        }
+
+        ui.separator();
+
         match self.workflow.selection {
             Some(WorkflowSelection::Asset(asset_id)) => self.show_asset_inspector(ui, asset_id),
             Some(WorkflowSelection::Node(node_uuid)) => self.show_node_inspector(ui, node_uuid),
@@ -184,6 +193,75 @@ impl super::super::TrxVizApp {
                 }
             }
         }
+    }
+
+    fn show_render_settings_section(&mut self, ui: &mut egui::Ui) -> bool {
+        let original = self.viewport.workflow_render_3d();
+        let render = &mut self.viewport.render_3d;
+
+        ui.collapsing("Render", |ui| {
+            egui::ComboBox::from_id_salt("scene_lighting_preset")
+                .selected_text(render.lighting_preset.label())
+                .show_ui(ui, |ui| {
+                    for preset in SceneLightingPreset::ALL {
+                        ui.selectable_value(&mut render.lighting_preset, preset, preset.label());
+                    }
+                });
+
+            let mut gradient = matches!(
+                render.background,
+                crate::app::state::WorkflowBackground3D::VerticalGradient { .. }
+            );
+            ui.checkbox(&mut gradient, "Vertical gradient");
+            if gradient {
+                let (mut top, mut bottom) = match render.background {
+                    crate::app::state::WorkflowBackground3D::Solid { color } => (color, color),
+                    crate::app::state::WorkflowBackground3D::VerticalGradient { top, bottom } => {
+                        (top, bottom)
+                    }
+                };
+                ui.label("Top color");
+                ui.color_edit_button_rgb(&mut top);
+                ui.label("Bottom color");
+                ui.color_edit_button_rgb(&mut bottom);
+                render.background =
+                    crate::app::state::WorkflowBackground3D::VerticalGradient { top, bottom };
+            } else {
+                let mut color = match render.background {
+                    crate::app::state::WorkflowBackground3D::Solid { color } => color,
+                    crate::app::state::WorkflowBackground3D::VerticalGradient { bottom, .. } => {
+                        bottom
+                    }
+                };
+                ui.label("Background color");
+                ui.color_edit_button_rgb(&mut color);
+                render.background = crate::app::state::WorkflowBackground3D::Solid { color };
+            }
+
+            ui.add(egui::Slider::new(&mut render.vignette_strength, 0.0..=0.5).text("Vignette"));
+            ui.add(egui::Slider::new(&mut render.exposure, 0.5..=1.5).text("Exposure"));
+            ui.add(egui::Slider::new(&mut render.contrast, 0.75..=1.5).text("Contrast"));
+
+            ui.separator();
+            ui.collapsing("Advanced", |ui| {
+                ui.checkbox(&mut render.fog_enabled, "Depth fade");
+                ui.add_enabled_ui(render.fog_enabled, |ui| {
+                    ui.label("Fade color");
+                    ui.color_edit_button_rgb(&mut render.fog_color);
+                    ui.add(
+                        egui::Slider::new(&mut render.fog_start_fraction, 0.0..=0.95)
+                            .text("Fade near"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render.fog_end_fraction, 0.05..=1.0)
+                            .text("Fade far"),
+                    );
+                });
+            });
+        });
+
+        self.viewport.render_3d = self.viewport.workflow_render_3d();
+        self.viewport.workflow_render_3d() != original
     }
 
     fn show_asset_inspector(&mut self, ui: &mut egui::Ui, asset_id: usize) {
@@ -344,6 +422,43 @@ impl super::super::TrxVizApp {
             workflow::WorkflowNodeKind::UniformColor { color } => {
                 ui.color_edit_button_rgba_unmultiplied(color);
             }
+            workflow::WorkflowNodeKind::RemoveDuplicates { params } => {
+                egui::ComboBox::from_id_salt(format!("duplicate_mode_{}", node_uuid.0))
+                    .selected_text(match params.mode {
+                        trx_rs::DuplicateRemovalMode::Exact => "Exact",
+                        trx_rs::DuplicateRemovalMode::Near => "Near",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut params.mode,
+                            trx_rs::DuplicateRemovalMode::Exact,
+                            "Exact",
+                        );
+                        ui.selectable_value(
+                            &mut params.mode,
+                            trx_rs::DuplicateRemovalMode::Near,
+                            "Near",
+                        );
+                    });
+                if matches!(params.mode, trx_rs::DuplicateRemovalMode::Near) {
+                    ui.add(
+                        egui::DragValue::new(&mut params.tolerance_mm)
+                            .speed(0.05)
+                            .range(0.05..=100.0)
+                            .prefix("Tolerance "),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut params.endpoint_tolerance_mm)
+                            .speed(0.05)
+                            .range(0.05..=100.0)
+                            .prefix("Endpoint tol "),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut params.min_shared_voxel_fraction, 0.0..=1.0)
+                            .text("Shared voxels"),
+                    );
+                }
+            }
             workflow::WorkflowNodeKind::StreamlineDisplay {
                 enabled,
                 render_style,
@@ -444,34 +559,66 @@ impl super::super::TrxVizApp {
             }
             workflow::WorkflowNodeKind::BundleSurfaceBuild {
                 per_group,
+                build_mode,
                 voxel_size_mm,
                 threshold,
                 smooth_sigma,
                 min_component_volume_mm3,
+                tube_radius_mm,
+                tube_sides,
                 opacity,
             } => {
                 ui.checkbox(per_group, "Per group");
-                ui.add(
-                    egui::DragValue::new(voxel_size_mm)
-                        .speed(0.1)
-                        .prefix("Voxel "),
-                );
-                ui.add(
-                    egui::DragValue::new(threshold)
-                        .speed(0.1)
-                        .prefix("Threshold "),
-                );
-                ui.add(
-                    egui::DragValue::new(smooth_sigma)
-                        .speed(0.05)
-                        .prefix("Smooth "),
-                );
-                ui.add(
-                    egui::DragValue::new(min_component_volume_mm3)
-                        .speed(1.0)
-                        .range(0.0..=1_000_000.0)
-                        .prefix("Min component mm^3 "),
-                );
+                egui::ComboBox::from_id_salt(format!("bundle_build_mode_{}", node_uuid.0))
+                    .selected_text(build_mode.label())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            build_mode,
+                            workflow::BundleSurfaceBuildMode::MarchingCubes,
+                            workflow::BundleSurfaceBuildMode::MarchingCubes.label(),
+                        );
+                        ui.selectable_value(
+                            build_mode,
+                            workflow::BundleSurfaceBuildMode::Streamtubes,
+                            workflow::BundleSurfaceBuildMode::Streamtubes.label(),
+                        );
+                    });
+                if matches!(*build_mode, workflow::BundleSurfaceBuildMode::MarchingCubes) {
+                    ui.add(
+                        egui::DragValue::new(voxel_size_mm)
+                            .speed(0.1)
+                            .prefix("Voxel "),
+                    );
+                    ui.add(
+                        egui::DragValue::new(threshold)
+                            .speed(0.1)
+                            .prefix("Threshold "),
+                    );
+                    ui.add(
+                        egui::DragValue::new(smooth_sigma)
+                            .speed(0.05)
+                            .prefix("Smooth "),
+                    );
+                    ui.add(
+                        egui::DragValue::new(min_component_volume_mm3)
+                            .speed(1.0)
+                            .range(0.0..=1_000_000.0)
+                            .prefix("Min component mm^3 "),
+                    );
+                } else {
+                    ui.add(
+                        egui::DragValue::new(tube_radius_mm)
+                            .speed(0.05)
+                            .range(0.01..=20.0)
+                            .prefix("Tube radius "),
+                    );
+                    ui.add(
+                        egui::DragValue::new(tube_sides)
+                            .speed(1.0)
+                            .range(3..=64)
+                            .prefix("Tube sides "),
+                    );
+                }
                 ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
             }
             workflow::WorkflowNodeKind::BundleSurfaceDisplay {
@@ -490,6 +637,11 @@ impl super::super::TrxVizApp {
                             color_mode,
                             workflow::BundleSurfaceColorMode::BoundaryField,
                             workflow::BundleSurfaceColorMode::BoundaryField.label(),
+                        );
+                        ui.selectable_value(
+                            color_mode,
+                            workflow::BundleSurfaceColorMode::SourceColors,
+                            workflow::BundleSurfaceColorMode::SourceColors.label(),
                         );
                     });
                 ui.separator();

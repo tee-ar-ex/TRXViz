@@ -2,7 +2,9 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::data::bundle_mesh::{BundleMesh, BundleMeshColorStrategy, build_bundle_mesh};
+use crate::data::bundle_mesh::{
+    BundleMesh, BundleMeshColorStrategy, build_bundle_mesh, build_streamtube_bundle_mesh,
+};
 use crate::data::orientation_field::{BoundaryContactField, StreamlineSet};
 use crate::data::trx_data::{TrxGpuData, build_tube_vertices_from_data, group_name_color};
 
@@ -222,32 +224,50 @@ fn build_bundle_surface_meshes_with_color_mode(
                 return None;
             }
             let selected = (0..subset.nb_streamlines as u32).collect::<Vec<_>>();
-            let (positions, colors) = subset.selected_vertex_data(&selected);
-            let solid_color = bundle_surface_solid_color(&plan.flow, &label, plan.per_group);
-            let (strategy, boundary_field) = match color_mode {
-                BundleSurfaceColorMode::Solid => {
-                    (BundleMeshColorStrategy::Constant(solid_color), None)
+            match plan.build_mode {
+                BundleSurfaceBuildMode::MarchingCubes => {
+                    let (positions, colors) = subset.selected_vertex_data(&selected);
+                    let solid_color = bundle_surface_solid_color(&plan.flow, &label, plan.per_group);
+                    let (strategy, boundary_field) = match color_mode {
+                        BundleSurfaceColorMode::Solid => {
+                            (BundleMeshColorStrategy::Constant(solid_color), None)
+                        }
+                        BundleSurfaceColorMode::BoundaryField => (
+                            if boundary_field.is_some() {
+                                BundleMeshColorStrategy::BoundaryField
+                            } else {
+                                BundleMeshColorStrategy::Constant(solid_color)
+                            },
+                            boundary_field,
+                        ),
+                        BundleSurfaceColorMode::SourceColors => {
+                            (BundleMeshColorStrategy::SampledRgb, None)
+                        }
+                    };
+                    build_bundle_mesh(
+                        &positions,
+                        &colors,
+                        plan.voxel_size_mm,
+                        plan.threshold,
+                        plan.smooth_sigma,
+                        plan.min_component_volume_mm3,
+                        strategy,
+                        boundary_field,
+                    )
+                    .map(|mesh| (mesh, label))
                 }
-                BundleSurfaceColorMode::BoundaryField => (
-                    if boundary_field.is_some() {
-                        BundleMeshColorStrategy::BoundaryField
-                    } else {
-                        BundleMeshColorStrategy::Constant(solid_color)
-                    },
-                    boundary_field,
-                ),
-            };
-            build_bundle_mesh(
-                &positions,
-                &colors,
-                plan.voxel_size_mm,
-                plan.threshold,
-                plan.smooth_sigma,
-                plan.min_component_volume_mm3,
-                strategy,
-                boundary_field,
-            )
-            .map(|mesh| (mesh, label))
+                BundleSurfaceBuildMode::Streamtubes => {
+                    let (positions, colors, offsets) = subset.selected_tube_data(&selected);
+                    build_streamtube_bundle_mesh(
+                        &positions,
+                        &colors,
+                        &offsets,
+                        plan.tube_radius_mm,
+                        plan.tube_sides,
+                    )
+                    .map(|mesh| (mesh, label))
+                }
+            }
         })
         .collect()
 }

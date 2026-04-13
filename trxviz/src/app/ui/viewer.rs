@@ -600,6 +600,10 @@ impl super::super::TrxVizApp {
 
         let aspect = rect.width() / rect.height().max(1.0);
         let vp = self.viewport.camera_3d.view_projection(aspect);
+        let fog_span = (self.viewport.camera_3d.distance + self.viewport.volume_extent).max(1.0);
+        let render_3d = self.viewport.workflow_render_3d();
+        let fog_near = fog_span * render_3d.fog_start_fraction;
+        let fog_far = fog_span * render_3d.fog_end_fraction;
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
             callbacks::Scene3DCallback {
@@ -615,7 +619,10 @@ impl super::super::TrxVizApp {
                 show_boundary_glyphs: render_data.glyph_visible,
                 boundary_glyph_color_mode: render_data.glyph_color_mode,
                 boundary_glyph_draw_step: render_data.glyph_density_3d_step,
-                scene_lighting: self.viewport.scene_lighting,
+                scene_lighting: self.viewport.scene_lighting(),
+                render_3d,
+                fog_near,
+                fog_far,
             },
         ));
         self.draw_3d_axes(ui, rect, vp);
@@ -688,7 +695,7 @@ impl super::super::TrxVizApp {
                 show_boundary_glyphs: render_data.glyph_visible,
                 boundary_glyph_color_mode: render_data.glyph_color_mode,
                 boundary_glyph_draw_step: render_data.glyph_slice_density_step,
-                scene_lighting: self.viewport.scene_lighting,
+                scene_lighting: self.viewport.scene_lighting(),
             },
         ));
 

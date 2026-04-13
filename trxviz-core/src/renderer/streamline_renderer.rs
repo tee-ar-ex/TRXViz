@@ -1,7 +1,7 @@
 use wgpu::util::DeviceExt;
 
 use crate::data::trx_data::{TrxGpuData, TubeMeshVertex};
-use crate::lighting::SceneLightingParams;
+use crate::lighting::{SceneLightingParams, WorkflowRender3D};
 
 /// Holds StreamlineResources for all loaded TRX files, keyed by FileId.
 pub struct AllStreamlineResources {
@@ -50,7 +50,10 @@ struct Uniforms {
     fill_strength: f32,
     headlight_mix: f32,
     specular_strength: f32,
-    _pad: [f32; 3],
+    _pad0: [f32; 3],
+    fog_color: [f32; 4],
+    fog_params: [f32; 4],
+    post_params: [f32; 4],
 }
 
 impl StreamlineResources {
@@ -96,7 +99,10 @@ impl StreamlineResources {
             fill_strength: 0.18,
             headlight_mix: 0.18,
             specular_strength: 0.14,
-            _pad: [0.0; 3],
+            _pad0: [0.0; 3],
+            fog_color: [0.0, 0.0, 0.0, 0.0],
+            fog_params: [0.0, 1.0, 0.0, 0.0],
+            post_params: [1.0, 1.0, 0.12, 0.0],
         };
 
         let uniform_buffers: [wgpu::Buffer; 4] = std::array::from_fn(|i| {
@@ -358,6 +364,9 @@ impl StreamlineResources {
         slab_max: f32,
         tube_radius: f32,
         scene_lighting: SceneLightingParams,
+        render_3d: &WorkflowRender3D,
+        fog_near: f32,
+        fog_far: f32,
     ) {
         let uniforms = Uniforms {
             view_proj: view_proj.to_cols_array_2d(),
@@ -372,7 +381,20 @@ impl StreamlineResources {
             fill_strength: scene_lighting.fill_strength(),
             headlight_mix: scene_lighting.headlight_mix(),
             specular_strength: scene_lighting.specular_strength(),
-            _pad: [0.0; 3],
+            _pad0: [0.0; 3],
+            fog_color: [
+                render_3d.fog_color[0],
+                render_3d.fog_color[1],
+                render_3d.fog_color[2],
+                if render_3d.fog_enabled { 1.0 } else { 0.0 },
+            ],
+            fog_params: [fog_near, fog_far.max(fog_near + 0.001), 0.0, 0.0],
+            post_params: [
+                render_3d.exposure,
+                render_3d.contrast,
+                render_3d.vignette_strength,
+                0.0,
+            ],
         };
         queue.write_buffer(
             &self.uniform_buffers[viewport],

@@ -11,7 +11,9 @@ use crate::data::orientation_field::{
 };
 use crate::data::parcellation_data::ParcellationVolume;
 use crate::data::trx_data::{ColorMode, RenderStyle, TrxGpuData};
+use crate::lighting::WorkflowRender3D;
 use crate::renderer::mesh_renderer::SurfaceColormap;
+use trx_rs::DuplicateRemovalParams;
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -58,7 +60,9 @@ pub enum WorkflowNodeKind {
     SurfaceDepthQuery {
         depth_mm: f32,
     },
-    RemoveDuplicates,
+    RemoveDuplicates {
+        params: DuplicateRemovalParams,
+    },
     Merge,
     AddGroupsFromParcellation,
     ParcelSelect {
@@ -93,11 +97,14 @@ pub enum WorkflowNodeKind {
     BundleSurfaceBuild {
         #[serde(default)]
         per_group: bool,
+        build_mode: BundleSurfaceBuildMode,
         voxel_size_mm: f32,
         threshold: f32,
         smooth_sigma: f32,
         #[serde(default = "default_bundle_surface_min_component_volume_mm3")]
         min_component_volume_mm3: f32,
+        tube_radius_mm: f32,
+        tube_sides: u32,
         opacity: f32,
     },
     BoundaryFieldBuild {
@@ -216,6 +223,8 @@ pub struct WorkflowDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera_3d: Option<WorkflowCamera3D>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_3d: Option<WorkflowRender3D>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slice_view_3d: Option<WorkflowSliceView3D>,
     // Backward compatibility for projects saved before slice positions were persisted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -333,6 +342,16 @@ pub enum BundleSurfaceColorMode {
     #[default]
     Solid,
     BoundaryField,
+    SourceColors,
+}
+
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum BundleSurfaceBuildMode {
+    #[default]
+    MarchingCubes,
+    Streamtubes,
 }
 
 impl BundleSurfaceColorMode {
@@ -340,6 +359,16 @@ impl BundleSurfaceColorMode {
         match self {
             Self::Solid => "Solid",
             Self::BoundaryField => "Boundary field",
+            Self::SourceColors => "Source colors",
+        }
+    }
+}
+
+impl BundleSurfaceBuildMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MarchingCubes => "Marching Cubes",
+            Self::Streamtubes => "Streamtubes",
         }
     }
 }
@@ -510,10 +539,13 @@ pub struct BundleDrawPlan {
     pub flow: StreamlineFlow,
     pub per_group: bool,
     pub color_mode: BundleSurfaceColorMode,
+    pub build_mode: BundleSurfaceBuildMode,
     pub voxel_size_mm: f32,
     pub threshold: f32,
     pub smooth_sigma: f32,
     pub min_component_volume_mm3: f32,
+    pub tube_radius_mm: f32,
+    pub tube_sides: u32,
     pub opacity: f32,
     pub outline_thickness: f32,
 }
@@ -600,7 +632,9 @@ pub struct SurfaceMapPlan {
 #[derive(Clone)]
 pub enum ReactiveStreamlineOp {
     Merge,
-    RemoveDuplicates,
+    RemoveDuplicates {
+        params: DuplicateRemovalParams,
+    },
     ParcelROI {
         parcellation: Arc<ParcellationVolume>,
         labels: BTreeSet<u32>,
@@ -640,10 +674,13 @@ pub struct BundleSurfacePlan {
     pub label: String,
     pub flow: StreamlineFlow,
     pub per_group: bool,
+    pub build_mode: BundleSurfaceBuildMode,
     pub voxel_size_mm: f32,
     pub threshold: f32,
     pub smooth_sigma: f32,
     pub min_component_volume_mm3: f32,
+    pub tube_radius_mm: f32,
+    pub tube_sides: u32,
     pub opacity: f32,
 }
 
@@ -821,6 +858,7 @@ pub fn default_document() -> WorkflowDocument {
         graph: WorkflowGraph::new(),
         assets: Vec::new(),
         camera_3d: None,
+        render_3d: None,
         slice_view_3d: None,
         slice_visible_3d: None,
     }
@@ -848,7 +886,7 @@ impl WorkflowNodeKind {
             Self::RandomSubset { .. } => "Random Subset",
             Self::SphereQuery { .. } => "Sphere Query",
             Self::SurfaceDepthQuery { .. } => "Surface Depth Query",
-            Self::RemoveDuplicates => "Remove Duplicates",
+            Self::RemoveDuplicates { .. } => "Remove Duplicates",
             Self::Merge => "Merge",
             Self::AddGroupsFromParcellation => "Add Groups From Parcellation",
             Self::ParcelSelect { .. } => "Parcel Select",
@@ -887,7 +925,7 @@ impl WorkflowNodeKind {
             | Self::GroupSelect { .. }
             | Self::RandomSubset { .. }
             | Self::SphereQuery { .. }
-            | Self::RemoveDuplicates
+            | Self::RemoveDuplicates { .. }
             | Self::ColorByDirection
             | Self::ColorByGroup
             | Self::ColorByDPV { .. }
@@ -933,7 +971,7 @@ impl WorkflowNodeKind {
             | Self::RandomSubset { .. }
             | Self::SphereQuery { .. }
             | Self::SurfaceDepthQuery { .. }
-            | Self::RemoveDuplicates
+            | Self::RemoveDuplicates { .. }
             | Self::Merge
             | Self::AddGroupsFromParcellation
             | Self::ParcelROI
@@ -994,6 +1032,7 @@ mod tests {
         WorkflowCamera3D, WorkflowDocument, WorkflowOrthoSliceCamera, WorkflowProject,
         WorkflowSliceView3D, WorkflowSliceViewKind, WorkflowSliceViewUi, WorkflowView2DMode,
     };
+    use crate::lighting::{SceneLightingPreset, WorkflowBackground3D, WorkflowRender3D};
 
     #[test]
     fn workflow_document_camera_round_trips() {
@@ -1004,6 +1043,19 @@ mod tests {
             elevation_deg: 25.0,
             distance: 180.0,
         });
+        document.render_3d = Some(WorkflowRender3D {
+            lighting_preset: SceneLightingPreset::Studio,
+            background: WorkflowBackground3D::Solid {
+                color: [0.1, 0.2, 0.3],
+            },
+            fog_enabled: true,
+            fog_color: [0.2, 0.3, 0.4],
+            fog_start_fraction: 0.6,
+            fog_end_fraction: 0.95,
+            vignette_strength: 0.2,
+            exposure: 1.1,
+            contrast: 1.05,
+        });
         document.slice_view_3d = Some(WorkflowSliceView3D {
             visible: [true, false, true],
             positions_ras: [10.0, 20.0, 30.0],
@@ -1013,6 +1065,7 @@ mod tests {
         let json = serde_json::to_string(&document).unwrap();
         let restored: WorkflowDocument = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.camera_3d, document.camera_3d);
+        assert_eq!(restored.render_3d, document.render_3d);
         assert_eq!(restored.slice_view_3d, document.slice_view_3d);
         assert_eq!(restored.slice_visible_3d, document.slice_visible_3d);
     }
@@ -1022,6 +1075,7 @@ mod tests {
         let json = r#"{"next_node_uuid":1,"graph":{"nodes":{},"wires":[]},"assets":[]}"#;
         let restored: WorkflowDocument = serde_json::from_str(json).unwrap();
         assert!(restored.camera_3d.is_none());
+        assert!(restored.render_3d.is_none());
         assert!(restored.slice_view_3d.is_none());
         assert!(restored.slice_visible_3d.is_none());
     }

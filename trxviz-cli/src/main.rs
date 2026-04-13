@@ -4,7 +4,8 @@ use anyhow::{Context, bail};
 use clap::{Args, Parser, Subcommand};
 use glam::Vec3;
 use trxviz_core::headless::{
-    AssetArgs, HeadlessRenderOptions, HeadlessView, render_assets_png, render_project_png,
+    AssetArgs, HeadlessRenderOptions, HeadlessSceneExportFormat, HeadlessSceneExportOptions,
+    HeadlessView, export_assets_glb, export_project_glb, render_assets_png, render_project_png,
 };
 
 #[derive(Parser)]
@@ -18,6 +19,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Render(RenderArgs),
+    ExportScene(ExportSceneArgs),
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -58,6 +60,40 @@ struct RenderArgs {
     distance: Option<f32>,
 }
 
+#[derive(Args)]
+struct ExportSceneArgs {
+    #[arg(long)]
+    project: Option<PathBuf>,
+    #[arg(long = "tractogram")]
+    tractogram_paths: Vec<PathBuf>,
+    #[arg(long = "nifti")]
+    nifti_paths: Vec<PathBuf>,
+    #[arg(long = "surface")]
+    surface_paths: Vec<PathBuf>,
+    #[arg(long = "parcellation")]
+    parcellation_paths: Vec<PathBuf>,
+    #[arg(long)]
+    out: PathBuf,
+    #[arg(long, default_value_t = 1920)]
+    width: u32,
+    #[arg(long, default_value_t = 1080)]
+    height: u32,
+    #[arg(long, value_parser = parse_vec3)]
+    target: Option<Vec3>,
+    #[arg(long)]
+    azimuth: Option<f32>,
+    #[arg(long)]
+    elevation: Option<f32>,
+    #[arg(long)]
+    distance: Option<f32>,
+    #[arg(long, default_value_t = true)]
+    include_camera: bool,
+    #[arg(long, default_value_t = true)]
+    include_lights: bool,
+    #[arg(long, default_value_t = true)]
+    include_slices: bool,
+}
+
 fn main() {
     if let Err(err) = run() {
         eprintln!("{err:#}");
@@ -69,6 +105,7 @@ fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Render(args) => run_render(args),
+        Command::ExportScene(args) => run_export_scene(args),
     }
 }
 
@@ -111,6 +148,44 @@ fn run_render(args: RenderArgs) -> anyhow::Result<()> {
     };
     render_assets_png(&assets, &args.out, &options)
         .with_context(|| format!("rendering scene to {}", args.out.display()))?;
+    Ok(())
+}
+
+fn run_export_scene(args: ExportSceneArgs) -> anyhow::Result<()> {
+    let options = HeadlessSceneExportOptions {
+        format: HeadlessSceneExportFormat::Glb,
+        include_camera: args.include_camera,
+        include_lights: args.include_lights,
+        include_slices: args.include_slices,
+        width: args.width,
+        height: args.height,
+        target: args.target,
+        azimuth_deg: args.azimuth,
+        elevation_deg: args.elevation,
+        distance: args.distance,
+    };
+
+    if let Some(project_path) = args.project {
+        if !(args.tractogram_paths.is_empty()
+            && args.nifti_paths.is_empty()
+            && args.surface_paths.is_empty()
+            && args.parcellation_paths.is_empty())
+        {
+            bail!("cannot combine --project with loose asset arguments");
+        }
+        export_project_glb(&project_path, &args.out, &options)
+            .with_context(|| format!("exporting project {}", project_path.display()))?;
+        return Ok(());
+    }
+
+    let assets = AssetArgs {
+        tractogram_paths: args.tractogram_paths,
+        nifti_paths: args.nifti_paths,
+        surface_paths: args.surface_paths,
+        parcellation_paths: args.parcellation_paths,
+    };
+    export_assets_glb(&assets, &args.out, &options)
+        .with_context(|| format!("exporting scene to {}", args.out.display()))?;
     Ok(())
 }
 
@@ -181,6 +256,7 @@ mod tests {
                 assert!(matches!(args.view, ViewArg::View3d));
                 assert_eq!(args.target, Some(Vec3::new(1.0, 2.0, 3.0)));
             }
+            Command::ExportScene(_) => panic!("expected render command"),
         }
     }
 
@@ -199,6 +275,7 @@ mod tests {
             Command::Render(args) => {
                 assert_eq!(args.tractogram_paths, vec![PathBuf::from("bundle.tck.gz")]);
             }
+            Command::ExportScene(_) => panic!("expected render command"),
         }
     }
 
@@ -219,6 +296,33 @@ mod tests {
             Command::Render(args) => {
                 assert!(matches!(args.view, ViewArg::View2d));
             }
+            Command::ExportScene(_) => panic!("expected render command"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_export_scene_command() {
+        let cli = Cli::parse_from([
+            "trxviz-cli",
+            "export-scene",
+            "--project",
+            "workflow.json",
+            "--out",
+            "scene.glb",
+            "--width",
+            "1600",
+        ]);
+
+        match cli.command {
+            Command::ExportScene(args) => {
+                assert_eq!(args.project, Some(PathBuf::from("workflow.json")));
+                assert_eq!(args.out, PathBuf::from("scene.glb"));
+                assert_eq!(args.width, 1600);
+                assert!(args.include_camera);
+                assert!(args.include_lights);
+                assert!(args.include_slices);
+            }
+            Command::Render(_) => panic!("expected export-scene command"),
         }
     }
 }
