@@ -1113,7 +1113,7 @@ mod tests {
 
     fn sample_path(file_name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../CiftiLib/example/data")
+            .join("test-data/cifti")
             .join(file_name)
     }
 

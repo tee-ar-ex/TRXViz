@@ -217,6 +217,9 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                     if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == sd.file_id) {
                         render_pass.set_bind_group(0, &sr.bind_groups[0], &[]);
                         if sd.render_style == RenderStyle::Tubes {
+                            if sr.num_tube_indices == 0 {
+                                continue;
+                            }
                             if let (Some(tvb), Some(tib)) =
                                 (&sr.tube_vertex_buffer, &sr.tube_index_buffer)
                             {
@@ -227,6 +230,9 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                                 render_pass.draw_indexed(0..sr.num_tube_indices, 0, 0..1);
                             }
                         } else {
+                            if sr.num_indices == 0 {
+                                continue;
+                            }
                             render_pass.set_pipeline(&sr.pipeline);
                             render_pass.set_vertex_buffer(0, sr.position_buffer.slice(..));
                             render_pass.set_vertex_buffer(1, sr.color_buffer.slice(..));
@@ -415,6 +421,9 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                         continue;
                     }
                     if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == sd.file_id) {
+                        if sr.num_indices == 0 {
+                            continue;
+                        }
                         render_pass.set_pipeline(&sr.slice_pipeline);
                         render_pass.set_bind_group(0, &sr.bind_groups[self.bind_group_index], &[]);
                         render_pass.set_vertex_buffer(0, sr.position_buffer.slice(..));
