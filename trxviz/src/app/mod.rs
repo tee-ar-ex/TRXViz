@@ -499,6 +499,9 @@ impl eframe::App for TrxVizApp {
                 false
             }
         };
+        if self.workflow.document_revision != self.workflow.last_interactive_revision {
+            ctx.request_repaint();
+        }
         if open_files_after_ui {
             self.open_files_dialog();
         }

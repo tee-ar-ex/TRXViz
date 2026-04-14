@@ -237,8 +237,10 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
         ui: &mut egui::Ui,
         snarl: &mut Snarl<WorkflowNode>,
     ) -> impl egui_snarl::ui::SnarlPin + 'static {
-        ui.label(port_name(snarl[pin.id.node].kind.inputs()[pin.id.input]));
-        pin_info_for_port(snarl[pin.id.node].kind.inputs()[pin.id.input])
+        let node_kind = &snarl[pin.id.node].kind;
+        let port = node_kind.inputs()[pin.id.input];
+        ui.label(input_port_label(node_kind, pin.id.input, port));
+        pin_info_for_port(port)
     }
 
     fn show_output(
@@ -698,6 +700,34 @@ fn port_name(port: PortKind) -> &'static str {
         PortKind::SurfaceAppearance => "Surface Appearance",
         PortKind::BundleSurface => "Bundle Surface",
         PortKind::BoundaryField => "Boundary Field",
+    }
+}
+
+fn input_port_label(node_kind: &WorkflowNodeKind, input_index: usize, port: PortKind) -> String {
+    match node_kind {
+        WorkflowNodeKind::SurfaceOverlayStack { layers } => {
+            if input_index == 0 {
+                "Surface".to_string()
+            } else {
+                let layer_index = input_index - 1;
+                let layer_name = if layer_index == 0 {
+                    "Layer 0: Base".to_string()
+                } else {
+                    format!("Layer {layer_index}")
+                };
+                let legend = layers
+                    .get(layer_index)
+                    .map(|layer| layer.legend_label.trim())
+                    .filter(|legend| !legend.is_empty())
+                    .unwrap_or("");
+                if legend.is_empty() {
+                    format!("{layer_name} Scalars")
+                } else {
+                    format!("{layer_name} Scalars ({legend})")
+                }
+            }
+        }
+        _ => port_name(port).to_string(),
     }
 }
 
