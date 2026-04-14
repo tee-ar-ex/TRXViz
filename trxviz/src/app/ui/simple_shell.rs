@@ -135,7 +135,7 @@ impl super::super::TrxVizApp {
                 ui.centered_and_justified(|ui| {
                     ui.vertical(|ui| {
                         ui.heading("Drop files to start");
-                        ui.small("TRX, TRK, TCK, VTK, TinyTrack, NIfTI, GIFTI, and parcellations are supported.");
+                        ui.small("TRX, TRK, TCK, VTK, TinyTrack, NIfTI, GIFTI, CIFTI (.dscalar/.dtseries/.dlabel/.pscalar), and parcellations are supported.");
                         ui.add_space(12.0);
                         if ui.button("Open Files...").clicked() {
                             open_files_requested = true;

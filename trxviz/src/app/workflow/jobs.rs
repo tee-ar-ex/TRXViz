@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tempfile::tempdir;
 use trx_rs::{AnyTrxFile, ConversionOptions};
 use trxviz_core::data::gifti_data::GiftiSurfaceData;
 use trxviz_core::data::loaded_files::{FileId, StreamlineBacking};
@@ -10,8 +9,9 @@ use trxviz_core::data::nifti_data::NiftiVolume;
 use trxviz_core::data::parcellation_data::ParcellationVolume;
 use trxviz_core::data::trx_data::{RenderStyle, TrxGpuData};
 use trxviz_core::headless::{
-    HeadlessSceneExportFormat, HeadlessSceneExportOptions, HeadlessView, export_project_glb,
+    HeadlessSceneExportFormat, HeadlessSceneExportOptions, HeadlessView, export_state_glb,
 };
+use trxviz_core::scene::HeadlessWorkflowState;
 use trxviz_core::renderer::background_renderer::BackgroundResources;
 use trxviz_core::renderer::glyph_renderer::GlyphResources;
 use trxviz_core::renderer::mesh_renderer::MeshResources;
@@ -876,26 +876,6 @@ impl crate::app::TrxVizApp {
             return;
         };
 
-        let temp_dir = match tempdir() {
-            Ok(dir) => dir,
-            Err(err) => {
-                self.error_msg = Some(format!(
-                    "Failed to create temporary export directory: {err}"
-                ));
-                return;
-            }
-        };
-        let project_path = temp_dir.path().join("export_project.json");
-        if let Err(err) = gui_save_project(
-            &self.workflow.document,
-            &self.workflow.workspace,
-            crate::app::workflow::capture_gui_slice_view_state(&self.viewport),
-            &project_path,
-        ) {
-            self.error_msg = Some(format!("Failed to prepare Blender export: {err}"));
-            return;
-        }
-
         let (width, height, include_slices, target, azimuth_deg, elevation_deg, distance) =
             match view {
                 HeadlessView::View3D => (
@@ -932,7 +912,19 @@ impl crate::app::TrxVizApp {
             distance,
         };
 
-        match export_project_glb(&project_path, &output_path, &options) {
+        let workflow = HeadlessWorkflowState {
+            document: self.workflow.document.clone(),
+            slice_view_ui: Some(crate::app::workflow::capture_gui_slice_view_state(
+                &self.viewport,
+            )),
+            runtime: self.workflow.runtime.clone(),
+            display_runtimes: self.workflow.display_runtimes.clone(),
+            next_draw_id: self.workflow.next_draw_id,
+            execution_cache: self.workflow.execution_cache.clone(),
+            project_path: self.workflow.project_path.clone(),
+        };
+
+        match export_state_glb(&self.scene, workflow, &output_path, &options) {
             Ok(()) => {
                 self.status_msg = Some(format!(
                     "Exported Blender scene to {}",

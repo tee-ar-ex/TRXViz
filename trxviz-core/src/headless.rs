@@ -216,7 +216,7 @@ pub fn export_project_glb(
     options: &HeadlessSceneExportOptions,
 ) -> anyhow::Result<()> {
     let (scene, workflow) = load_project_state(project_path)?;
-    export_loaded_scene(scene, workflow, output_path, options)
+    export_loaded_scene(&scene, workflow, output_path, options)
 }
 
 /// Build a default scene from loose assets and export the visible 3D scene to a GLB.
@@ -226,6 +226,16 @@ pub fn export_assets_glb(
     options: &HeadlessSceneExportOptions,
 ) -> anyhow::Result<()> {
     let (scene, workflow) = load_asset_args_state(args)?;
+    export_loaded_scene(&scene, workflow, output_path, options)
+}
+
+/// Export an already-loaded GUI/headless scene state to GLB without going through project JSON.
+pub fn export_state_glb(
+    scene: &HeadlessScene,
+    workflow: HeadlessWorkflowState,
+    output_path: &Path,
+    options: &HeadlessSceneExportOptions,
+) -> anyhow::Result<()> {
     export_loaded_scene(scene, workflow, output_path, options)
 }
 
@@ -299,7 +309,7 @@ fn render_loaded_scene(
 }
 
 fn export_loaded_scene(
-    scene: HeadlessScene,
+    scene: &HeadlessScene,
     mut workflow: HeadlessWorkflowState,
     output_path: &Path,
     options: &HeadlessSceneExportOptions,
@@ -308,13 +318,13 @@ fn export_loaded_scene(
         bail!("unsupported scene export format");
     }
 
-    execute_workflow_to_completion(&scene, &mut workflow)?;
+    execute_workflow_to_completion(scene, &mut workflow)?;
     ensure_export_tube_geometry(&mut workflow)?;
-    let render_data = build_render_data(&scene, &workflow, options.view);
+    let render_data = build_render_data(scene, &workflow, options.view);
     let bounds = if options.view == HeadlessView::InflatedStage {
-        compute_render_bounds(&scene, &render_data)
+        compute_render_bounds(scene, &render_data)
     } else {
-        compute_scene_bounds(&scene, &workflow)
+        compute_scene_bounds(scene, &workflow)
     };
     let camera = build_camera(
         &bounds,
@@ -332,7 +342,7 @@ fn export_loaded_scene(
     );
     let render_3d = workflow.document.render_3d.clone().unwrap_or_default();
     let bytes = build_glb_scene(
-        &scene,
+        scene,
         &workflow,
         &render_data,
         &camera,
@@ -2398,12 +2408,10 @@ fn build_glb_scene(
                     .iter()
                     .map(|normal| gltf_vector(*normal))
                     .collect::<Vec<_>>();
-                let material = builder.add_vertex_color_material(
+                let material = builder.add_unlit_vertex_color_material(
                     format!("stage_surface_material_{draw_index}"),
                     draw.opacity,
                     false,
-                    gloss_to_roughness(draw.gloss).max(0.22),
-                    if draw.opacity < 0.999 { 0.12 } else { 0.08 },
                 );
                 let mesh = builder.add_mesh(
                     format!("stage_surface_mesh_{}", surface.name),
@@ -2426,7 +2434,7 @@ fn build_glb_scene(
                     builder.add_mesh_node(
                         format!("stage_surface_{}_{}_{}", surface.name, draw_index, panel_index),
                         mesh,
-                        model_matrix,
+                        gltf_transform(model_matrix),
                     );
                 }
             }
@@ -2473,7 +2481,7 @@ fn build_glb_scene(
                 builder.add_mesh_node(
                     format!("surface_{}_{}", surface.name, draw_index),
                     mesh,
-                    Mat4::from_cols_array_2d(&draw.model_matrix),
+                    gltf_transform(Mat4::from_cols_array_2d(&draw.model_matrix)),
                 );
             }
         }
@@ -2918,6 +2926,11 @@ fn gltf_vector(vector: [f32; 3]) -> [f32; 3] {
 
 fn gltf_axis_conversion() -> glam::Mat3 {
     GLTF_AXIS_CONVERSION
+}
+
+fn gltf_transform(transform: Mat4) -> Mat4 {
+    let basis = Mat4::from_mat3(gltf_axis_conversion());
+    basis * transform * basis.inverse()
 }
 
 fn add_lighting_rig_to_glb(

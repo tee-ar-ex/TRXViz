@@ -17,17 +17,18 @@ trxviz/                (workspace root)
 
 All of the non-UI logic lives here:
 
-- **Data layer** (`src/data/`): readers for TRX, NIfTI, GIFTI, and parcellation
-  files. Pure CPU-side representations with no GPU or windowing dependencies.
+- **Data layer** (`src/data/`): readers for TRX, NIfTI, GIFTI, CIFTI, and
+  parcellation files. Pure CPU-side representations with no GPU or windowing
+  dependencies.
 - **Renderer** (`src/renderer/`): wgpu pipelines for streamlines, meshes,
   slices, and glyphs. Camera math. Shader sources.
 - **Workflow** (`src/workflow/`): the DAG data model (`WorkflowGraph`,
   `WorkflowNode`), the `WorkflowRuntime` that evaluates it with fingerprint
   caching, and the per-node evaluation logic.
-- **Headless entry point** (`src/headless.rs`): `render_project_png` and
-  `render_assets_png` drive the full pipeline — load a project, run the
-  workflow, render a frame, write a PNG — without ever touching winit, eframe,
-  or a display server.
+- **Headless entry point** (`src/headless.rs`): project and loose-asset
+  render/export helpers drive the full pipeline for anatomical 3D, saved 2D
+  project views, and inflated-stage rendering/export without ever touching
+  winit, eframe, or a display server.
 
 ### `trxviz` — the desktop GUI
 

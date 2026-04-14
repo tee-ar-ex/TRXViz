@@ -2,11 +2,11 @@
 
 <div class="hero">
   <div class="hero-copy">
-    <p class="eyebrow">Desktop visualization and headless rendering for streamlines, volumes and surfaces</p>
+    <p class="eyebrow">Desktop visualization and headless rendering for streamlines, volumes, surfaces, and CIFTI scalar data</p>
     <h1>Explore tractography, volumes, surfaces, and workflow outputs in one toolchain.</h1>
     <p class="lead">
       TRXViz combines an interactive desktop viewer, a workflow editor, and a headless rendering
-      path for reproducible figure generation.
+      path for reproducible figure generation across tractograms, volumes, surfaces, and CIFTI.
     </p>
     <div class="hero-actions">
       <a class="md-button md-button--primary" href="getting-started/">Get Started</a>
@@ -28,7 +28,7 @@
   </a>
   <a class="card" href="workflows/">
     <h3>Workflows</h3>
-    <p>Graph-based processing for selection, coloring, querying, bundle surfaces, and export.</p>
+    <p>Graph-based processing for selection, coloring, querying, bundle surfaces, CIFTI overlays, and export.</p>
   </a>
   <a class="card" href="cli/">
     <h3>Headless Rendering</h3>
@@ -46,5 +46,4 @@
 - Workflow authors: go from [Getting Started](getting-started.md) to [Workflows](workflows.md).
 - Batch rendering users: jump directly to [Command Line](cli.md).
 - Developers: read [Developer Notes](developer.md) and the `trxviz-core` rustdoc.
-
 

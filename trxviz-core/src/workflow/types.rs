@@ -290,6 +290,7 @@ pub fn default_surface_overlay_layers() -> Vec<SurfaceOverlayLayerConfig> {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WorkflowDocument {
+    #[serde(default = "default_next_node_uuid")]
     pub next_node_uuid: u64,
     pub graph: WorkflowGraph,
     pub assets: Vec<WorkflowAssetDocument>,
@@ -936,9 +937,13 @@ pub struct SeededWorkflowBranch {
     pub primary_selection: WorkflowSelection,
 }
 
+pub fn default_next_node_uuid() -> u64 {
+    1
+}
+
 pub fn default_document() -> WorkflowDocument {
     WorkflowDocument {
-        next_node_uuid: 1,
+        next_node_uuid: default_next_node_uuid(),
         graph: WorkflowGraph::new(),
         assets: Vec::new(),
         camera_3d: None,
@@ -1188,6 +1193,13 @@ mod tests {
         assert!(restored.render_3d.is_none());
         assert!(restored.slice_view_3d.is_none());
         assert!(restored.slice_visible_3d.is_none());
+    }
+
+    #[test]
+    fn workflow_document_defaults_next_node_uuid_when_missing() {
+        let json = r#"{"graph":{"nodes":{},"wires":[]},"assets":[]}"#;
+        let restored: WorkflowDocument = serde_json::from_str(json).unwrap();
+        assert_eq!(restored.next_node_uuid, 1);
     }
 
     #[test]

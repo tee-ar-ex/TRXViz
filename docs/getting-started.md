@@ -86,14 +86,34 @@ cargo run -p trxviz-cli -- render \
   --out scene.png
 ```
 
+To render a saved inflated-stage layout instead of the anatomical 3D scene:
+
+```bash
+cargo run -p trxviz-cli -- render --project workflow.json --view stage --out stage.png
+```
+
 ## Input Types
 
 - TRX tractograms
 - Imported tractogram formats including TRK, TCK/TCK.GZ, VTK, and TT.GZ
 - NIfTI volumes
 - GIFTI surfaces
+- CIFTI scalar files: `.dscalar.nii`, `.dtseries.nii`, `.dlabel.nii`, `.pscalar.nii`
 - Parcellation volumes
 - Workflow project JSON
+
+## First CIFTI Workflow
+
+For a cortical CIFTI visualization:
+
+1. Open the CIFTI file.
+2. Open compatible GIFTI surface meshes for the left and right cortex.
+3. Switch to Advanced mode.
+4. Connect the CIFTI cortex outputs into a `SurfaceOverlayStack` on the target surfaces.
+5. Route the surface display to `Stage` if you want a non-anatomical inflated layout.
+
+CIFTI files can be loaded in the app generally, but Simple mode does not expose editable CIFTI
+workflow branches.
 
 ## Where To Go Next
 

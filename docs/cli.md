@@ -9,7 +9,7 @@ Use it when you need:
 - PNG output without opening the GUI
 - Blender-oriented scene export as `GLB`
 - automation in scripts or batch jobs
-- stable renders from saved workflow project files
+- stable renders from saved workflow project files, including inflated-stage layouts
 
 ## Core Command
 
@@ -43,6 +43,14 @@ Project-driven 2D rendering reads:
 If `slice_view_ui` is missing, `--view 2d` exits with an error telling the user to open and save
 the project from the GUI first.
 
+To render the saved inflated-stage layout instead of the anatomical 3D scene:
+
+```bash
+trxviz-cli render --project workflow.json --view stage --out stage.png
+```
+
+Stage rendering is project-driven and reflects the surfaces currently routed to `Stage`.
+
 ## Loose Asset Rendering
 
 ```bash
@@ -59,7 +67,7 @@ imported according to their extension before rendering.
 
 ## Camera and Output Controls
 
-- `--view`: choose `3d` or `2d` project rendering; defaults to `3d`
+- `--view`: choose `3d`, `2d`, or `stage` project rendering; defaults to `3d`
 - `--width` / `--height`: output image size
 - `--target`: override camera target
 - `--azimuth`, `--elevation`, `--distance`: camera placement controls
@@ -73,6 +81,15 @@ trxviz-cli export-scene --project workflow.json --out scene.glb
 This exports the visible 3D scene as a Blender-oriented `GLB`, including visible surfaces, bundle
 meshes, streamline tubes, visible slice planes, the saved 3D camera, and an approximate lighting
 rig.
+
+To export the saved inflated-stage layout instead:
+
+```bash
+trxviz-cli export-scene --project workflow.json --view stage --out stage.glb
+```
+
+Stage export is project-driven and reflects the surfaces currently routed to `Stage`. `--view 2d`
+is render-only and is not supported by `export-scene`.
 
 The export writes only the `GLB`. For Blender-side presentation styling, use one of the scripts in
 the separate `trxviz-blender-styles` repo after import.
