@@ -86,6 +86,13 @@ impl super::super::TrxVizApp {
                                     self.show_simple_parcellation_summary(ui, id);
                                 }
                             }
+                            (_, WorkflowAssetDocument::Cifti { id, path, .. }) => {
+                                ui.group(|ui| {
+                                    ui.strong(format!("CIFTI {}", id));
+                                    ui.small(path.display().to_string());
+                                    ui.small("CIFTI assets are available in Advanced mode.");
+                                });
+                            }
                             (_, WorkflowAssetDocument::Streamlines { id, .. }) => {
                                 self.show_simple_streamline_asset(
                                     ui,
@@ -128,7 +135,7 @@ impl super::super::TrxVizApp {
                 ui.centered_and_justified(|ui| {
                     ui.vertical(|ui| {
                         ui.heading("Drop files to start");
-                        ui.small("TRX, TRK, TCK, VTK, TinyTrack, NIfTI, GIFTI, and parcellations are supported.");
+                        ui.small("TRX, TRK, TCK, VTK, TinyTrack, NIfTI, GIFTI, CIFTI (.dscalar/.dtseries/.dlabel/.pscalar), and parcellations are supported.");
                         ui.add_space(12.0);
                         if ui.button("Open Files...").clicked() {
                             open_files_requested = true;

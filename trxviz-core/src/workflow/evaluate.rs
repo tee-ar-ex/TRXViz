@@ -11,9 +11,11 @@ use trx_rs::{
     ConversionOptions, DType, DataArray, Tractogram, remove_duplicates_tractogram, write_tractogram,
 };
 
-use crate::data::loaded_files::{FileId, LoadedNifti, LoadedTrx, StreamlineBacking};
+use crate::data::cifti::{CiftiStructure, ScalarKind, SurfaceScalars, VolumeScalars};
+use crate::data::loaded_files::{FileId, LoadedCifti, LoadedNifti, LoadedTrx, StreamlineBacking};
 use crate::data::parcellation_data::ParcellationVolume;
 use crate::data::trx_data::{ColorMode, RenderStyle, TrxGpuData};
+use crate::renderer::mesh_renderer::SurfaceColormap;
 use crate::scene::LoadedGiftiSurface;
 
 use super::jobs::{prime_expensive_record, sync_node_state_from_run_record};
@@ -23,6 +25,7 @@ pub fn evaluate_scene_plan(
     document: &WorkflowDocument,
     streamline_assets: &[LoadedTrx],
     volume_assets: &[LoadedNifti],
+    cifti_assets: &[LoadedCifti],
     surface_assets: &[LoadedGiftiSurface],
     parcellation_assets: &[LoadedParcellation],
     display_ids: &mut HashMap<WorkflowNodeUuid, StreamlineDisplayRuntime>,
@@ -39,6 +42,7 @@ pub fn evaluate_scene_plan(
         document,
         streamline_assets,
         volume_assets,
+        cifti_assets,
         surface_assets,
         parcellation_assets,
         display_ids,
@@ -52,6 +56,7 @@ pub fn evaluate_scene_plan_with_mode(
     document: &WorkflowDocument,
     streamline_assets: &[LoadedTrx],
     volume_assets: &[LoadedNifti],
+    cifti_assets: &[LoadedCifti],
     surface_assets: &[LoadedGiftiSurface],
     parcellation_assets: &[LoadedParcellation],
     display_ids: &mut HashMap<WorkflowNodeUuid, StreamlineDisplayRuntime>,
@@ -74,6 +79,10 @@ pub fn evaluate_scene_plan_with_mode(
         .iter()
         .map(|asset| (asset.id, asset))
         .collect();
+    let cifti_map: HashMap<FileId, &LoadedCifti> = cifti_assets
+        .iter()
+        .map(|asset| (asset.id, asset))
+        .collect();
     let surface_map: HashMap<FileId, &LoadedGiftiSurface> = surface_assets
         .iter()
         .map(|asset| (asset.id, asset))
@@ -84,7 +93,7 @@ pub fn evaluate_scene_plan_with_mode(
         .collect();
 
     let mut values = HashMap::<WorkflowNodeUuid, EvaluatedValue>::new();
-    let mut projection_by_surface = HashMap::<FileId, SurfaceStreamlineMap>::new();
+    let mut projection_by_surface = HashMap::<FileId, SurfaceScalars>::new();
 
     for node_uuid in order {
         let Some(node) = document.graph.get(node_uuid) else {
@@ -115,6 +124,7 @@ pub fn evaluate_scene_plan_with_mode(
             &input_values,
             &streamline_map,
             &volume_map,
+            &cifti_map,
             &surface_map,
             &parcellation_map,
             display_ids,
@@ -168,9 +178,10 @@ pub fn evaluate_scene_plan_with_mode(
         .for_each(|draw| {
             if let Some(projection) = projection_by_surface.get(&draw.source_id) {
                 draw.show_projection_map = true;
-                draw.range_min = projection.range_min;
-                draw.range_max = projection.range_max;
-                draw.projection_scalars = Some(projection.scalars.clone());
+                let range = projection.metadata.suggested_range.unwrap_or((0.0, 1.0));
+                draw.range_min = range.0;
+                draw.range_max = range.1;
+                draw.projection_scalars = Some(projection.values.clone());
             }
         });
 
@@ -222,12 +233,13 @@ fn evaluate_node(
     inputs: &[Option<EvaluatedValue>],
     streamline_assets: &HashMap<FileId, &LoadedTrx>,
     volume_assets: &HashMap<FileId, &LoadedNifti>,
+    cifti_assets: &HashMap<FileId, &LoadedCifti>,
     surface_assets: &HashMap<FileId, &LoadedGiftiSurface>,
     parcellation_assets: &HashMap<FileId, &LoadedParcellation>,
     display_ids: &mut HashMap<WorkflowNodeUuid, StreamlineDisplayRuntime>,
     next_draw_id: &mut FileId,
     scene_plan: &mut SceneFramePlan,
-    projection_by_surface: &mut HashMap<FileId, SurfaceStreamlineMap>,
+    projection_by_surface: &mut HashMap<FileId, SurfaceScalars>,
     save_targets: &mut HashMap<WorkflowNodeUuid, SaveStreamlinePlan>,
     execution_cache: &mut WorkflowExecutionCache,
     _mode: WorkflowEvalMode,
@@ -267,11 +279,55 @@ fn evaluate_node(
                 .ok_or_else(|| format!("Missing volume source {source_id}"))?;
             Ok(Some(WorkflowValue::Volume(*source_id).into()))
         }
+        WorkflowNodeKind::CiftiSource { source_id } => {
+            cifti_assets
+                .get(source_id)
+                .ok_or_else(|| format!("Missing CIFTI source {source_id}"))?;
+            Ok(Some(WorkflowValue::Cifti(*source_id).into()))
+        }
         WorkflowNodeKind::SurfaceSource { source_id } => {
             surface_assets
                 .get(source_id)
                 .ok_or_else(|| format!("Missing surface source {source_id}"))?;
             Ok(Some(WorkflowValue::Surface(*source_id).into()))
+        }
+        WorkflowNodeKind::CiftiStructure {
+            structure,
+            map_index,
+        } => {
+            let cifti_id = expect_cifti_input(inputs, "CIFTI Structure")?;
+            let cifti = cifti_assets
+                .get(&cifti_id)
+                .ok_or_else(|| format!("Missing CIFTI asset {cifti_id}"))?;
+            match structure {
+                CiftiStructure::CortexLeft => cifti
+                    .data
+                    .left_scalars
+                    .get(*map_index)
+                    .cloned()
+                    .flatten()
+                    .map(|value| WorkflowValue::SurfaceScalars(value).into())
+                    .ok_or_else(|| format!("CIFTI left cortex map {} is unavailable", map_index + 1))
+                    .map(Some),
+                CiftiStructure::CortexRight => cifti
+                    .data
+                    .right_scalars
+                    .get(*map_index)
+                    .cloned()
+                    .flatten()
+                    .map(|value| WorkflowValue::SurfaceScalars(value).into())
+                    .ok_or_else(|| format!("CIFTI right cortex map {} is unavailable", map_index + 1))
+                    .map(Some),
+                CiftiStructure::Subcortical => cifti
+                    .data
+                    .subcortical_scalars
+                    .get(*map_index)
+                    .cloned()
+                    .flatten()
+                    .map(|value| WorkflowValue::VolumeScalars(value).into())
+                    .ok_or_else(|| format!("CIFTI subcortical map {} is unavailable", map_index + 1))
+                    .map(Some),
+            }
         }
         WorkflowNodeKind::ParcellationSource { source_id } => {
             parcellation_assets
@@ -661,11 +717,13 @@ fn evaluate_node(
 
             sync_node_state_from_run_record(node_state, record);
             if let Some(cache) = execution_cache.surface_streamline_map_cache.get(&node.uuid) {
-                projection_by_surface.insert(cache.map.surface_id, cache.map.clone());
+                if let Some(surface_id) = cache.map.source_surface_id {
+                    projection_by_surface.insert(surface_id, cache.map.clone());
+                }
                 node_state.summary =
-                    summarize_value(&WorkflowValue::SurfaceStreamlineMap(cache.map.clone()));
+                    summarize_value(&WorkflowValue::SurfaceScalars(cache.map.clone()));
                 return Ok(Some(EvaluatedValue {
-                    value: WorkflowValue::SurfaceStreamlineMap(cache.map.clone()),
+                    value: WorkflowValue::SurfaceScalars(cache.map.clone()),
                     stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
                 }));
             }
@@ -700,11 +758,13 @@ fn evaluate_node(
 
             sync_node_state_from_run_record(node_state, record);
             if let Some(cache) = execution_cache.surface_streamline_map_cache.get(&node.uuid) {
-                projection_by_surface.insert(cache.map.surface_id, cache.map.clone());
+                if let Some(surface_id) = cache.map.source_surface_id {
+                    projection_by_surface.insert(surface_id, cache.map.clone());
+                }
                 node_state.summary =
-                    summarize_value(&WorkflowValue::SurfaceStreamlineMap(cache.map.clone()));
+                    summarize_value(&WorkflowValue::SurfaceScalars(cache.map.clone()));
                 return Ok(Some(EvaluatedValue {
-                    value: WorkflowValue::SurfaceStreamlineMap(cache.map.clone()),
+                    value: WorkflowValue::SurfaceScalars(cache.map.clone()),
                     stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
                 }));
             }
@@ -820,6 +880,24 @@ fn evaluate_node(
             });
             Ok(None)
         }
+        WorkflowNodeKind::VolumeScalarsDisplay { colormap, opacity } => {
+            let scalars = expect_volume_scalars_input(inputs, "Volume Scalars Display")?;
+            scene_plan.volume_scalar_draws.push(VolumeScalarDrawPlan {
+                dims: scalars.dims,
+                voxel_to_ras: scalars.voxel_to_ras.to_cols_array_2d(),
+                colormap: *colormap,
+                opacity: *opacity,
+            });
+            Ok(None)
+        }
+        WorkflowNodeKind::SurfaceOverlayStack { layers } => {
+            let surface_id = expect_surface_input(inputs, "Surface Overlay Stack")?;
+            let surface = surface_assets
+                .get(&surface_id)
+                .ok_or_else(|| format!("Missing surface {surface_id}"))?;
+            let appearance = compose_surface_appearance(surface_id, surface, layers, &inputs[1..])?;
+            Ok(Some(WorkflowValue::SurfaceAppearance(appearance).into()))
+        }
         WorkflowNodeKind::SurfaceDisplay {
             color,
             opacity,
@@ -832,37 +910,35 @@ fn evaluate_node(
             projection_colormap,
             range_min,
             range_max,
+            space,
         } => {
-            let source_id = expect_surface_input(inputs, "Surface Display")?;
+            let appearance = expect_surface_appearance_input(inputs, "Surface Display")?;
+            let source_id = appearance.source_id;
             let _surface = surface_assets
                 .get(&source_id)
                 .ok_or_else(|| format!("Missing surface {source_id}"))?;
-            let projection = inputs
-                .get(1)
-                .and_then(|value| value.as_ref())
-                .and_then(|value| {
-                    if let WorkflowValue::SurfaceStreamlineMap(value) = &value.value {
-                        Some(value.clone())
-                    } else {
-                        None
-                    }
-                });
+            let projection = None::<SurfaceScalars>;
             let projection_enabled = *show_projection_map || projection.is_some();
             let final_range = projection
                 .as_ref()
-                .map(|p| (p.range_min, p.range_max))
+                .and_then(|p| p.metadata.suggested_range)
                 .unwrap_or((*range_min, *range_max));
-            let projection_scalars = projection.as_ref().map(|value| value.scalars.clone());
+            let projection_scalars = projection.as_ref().map(|value| value.values.clone());
             projection_by_surface.extend(
                 projection
                     .as_ref()
                     .cloned()
                     .into_iter()
-                    .map(|projection| (projection.surface_id, projection)),
+                    .filter_map(|projection| {
+                        projection
+                            .source_surface_id
+                            .map(|surface_id| (surface_id, projection))
+                    }),
             );
-            scene_plan.surface_draws.push(SurfaceDrawPlan {
+            let draw = SurfaceDrawPlan {
                 node_uuid: node.uuid,
                 source_id,
+                structure: appearance.structure,
                 color: *color,
                 opacity: *opacity,
                 outline_color: *outline_color,
@@ -875,7 +951,15 @@ fn evaluate_node(
                 range_min: final_range.0,
                 range_max: final_range.1,
                 projection_scalars,
-            });
+                vertex_rgba: appearance.vertex_rgba,
+                space: *space,
+                model_matrix: surface_display_model_matrix(_surface, appearance.structure, *space)
+                    .to_cols_array_2d(),
+            };
+            match space {
+                SurfaceDisplaySpace::Anatomical => scene_plan.surface_draws.push(draw),
+                SurfaceDisplaySpace::Stage => scene_plan.stage_surface_draws.push(draw),
+            }
             Ok(None)
         }
         WorkflowNodeKind::ParcellationDisplay {
@@ -1077,6 +1161,16 @@ fn expect_surface_input(inputs: &[Option<EvaluatedValue>], label: &str) -> Resul
         .ok_or_else(|| format!("{label} needs a surface input"))
 }
 
+fn expect_cifti_input(inputs: &[Option<EvaluatedValue>], label: &str) -> Result<FileId, String> {
+    match inputs.first().cloned().flatten() {
+        Some(EvaluatedValue {
+            value: WorkflowValue::Cifti(source_id),
+            ..
+        }) => Ok(source_id),
+        _ => Err(format!("{label} needs a CIFTI input")),
+    }
+}
+
 fn expect_bundle_surface_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
@@ -1088,6 +1182,32 @@ fn expect_bundle_surface_input(
         }) => Ok((bundle, stale)),
         Some(_) => Err(format!("{label} needs a bundle surface input")),
         None => Err(format!("{label} is missing an input")),
+    }
+}
+
+fn expect_volume_scalars_input(
+    inputs: &[Option<EvaluatedValue>],
+    label: &str,
+) -> Result<VolumeScalars, String> {
+    match inputs.first().cloned().flatten() {
+        Some(EvaluatedValue {
+            value: WorkflowValue::VolumeScalars(value),
+            ..
+        }) => Ok(value),
+        _ => Err(format!("{label} needs volume scalars")),
+    }
+}
+
+fn expect_surface_appearance_input(
+    inputs: &[Option<EvaluatedValue>],
+    label: &str,
+) -> Result<SurfaceAppearance, String> {
+    match inputs.first().cloned().flatten() {
+        Some(EvaluatedValue {
+            value: WorkflowValue::SurfaceAppearance(value),
+            ..
+        }) => Ok(value),
+        _ => Err(format!("{label} needs a surface appearance input")),
     }
 }
 
@@ -1218,15 +1338,219 @@ fn evaluate_derived_streamline_plan(
     Ok(None)
 }
 
+fn compose_surface_appearance(
+    surface_id: FileId,
+    surface: &LoadedGiftiSurface,
+    layers: &[SurfaceOverlayLayerConfig],
+    scalar_inputs: &[Option<EvaluatedValue>],
+) -> Result<SurfaceAppearance, String> {
+    let mut vertex_rgba = vec![DEFAULT_SURFACE_BASE_RGBA; surface.data.vertices.len()];
+    let mut appearance_structure = None;
+    if let Some(base) = layers.first() {
+        for color in &mut vertex_rgba {
+            *color = base.solid_color;
+            color[3] = base.opacity.clamp(0.0, 1.0);
+        }
+    }
+    let mut legend_labels = Vec::new();
+    for (layer_index, layer) in layers.iter().enumerate() {
+        if !layer.enabled {
+            continue;
+        }
+        let Some(Some(EvaluatedValue {
+            value: WorkflowValue::SurfaceScalars(scalars),
+            ..
+        })) = scalar_inputs.get(layer_index)
+        else {
+            if !layer.legend_label.trim().is_empty() {
+                legend_labels.push(layer.legend_label.clone());
+            }
+            continue;
+        };
+        validate_surface_scalars(surface_id, surface, scalars)?;
+        if appearance_structure.is_none() {
+            appearance_structure = scalars.structure;
+        }
+        overlay_surface_scalars(&mut vertex_rgba, scalars, layer);
+        if !layer.legend_label.trim().is_empty() {
+            legend_labels.push(layer.legend_label.clone());
+        } else if !scalars.metadata.map_name.trim().is_empty() {
+            legend_labels.push(scalars.metadata.map_name.clone());
+        }
+    }
+    Ok(SurfaceAppearance {
+        source_id: surface_id,
+        structure: appearance_structure,
+        vertex_rgba,
+        legend_labels,
+    })
+}
+
+fn surface_display_model_matrix(
+    surface: &LoadedGiftiSurface,
+    structure: Option<CiftiStructure>,
+    space: SurfaceDisplaySpace,
+) -> glam::Mat4 {
+    if space == SurfaceDisplaySpace::Anatomical {
+        return glam::Mat4::IDENTITY;
+    }
+    let center = (surface.data.bbox_min + surface.data.bbox_max) * 0.5;
+    let extents = surface.data.bbox_max - surface.data.bbox_min;
+    let span = extents.x.abs().max(extents.y.abs()).max(extents.z.abs()).max(1.0);
+    let separation = span * 0.8;
+    let (x_shift, turn_deg): (f32, f32) = match structure {
+        Some(CiftiStructure::CortexLeft) => (separation, -90.0),
+        Some(CiftiStructure::CortexRight) => (-separation, 90.0),
+        _ => (0.0, 0.0),
+    };
+    glam::Mat4::from_translation(glam::Vec3::new(x_shift, 0.0, 0.0))
+        * glam::Mat4::from_rotation_z(turn_deg.to_radians())
+        * glam::Mat4::from_translation(-center)
+}
+
+fn validate_surface_scalars(
+    surface_id: FileId,
+    surface: &LoadedGiftiSurface,
+    scalars: &SurfaceScalars,
+) -> Result<(), String> {
+    if scalars.vertex_count != surface.data.vertices.len() {
+        return Err(format!(
+            "Surface scalars have {} vertices but surface {} has {}",
+            scalars.vertex_count,
+            surface_id,
+            surface.data.vertices.len()
+        ));
+    }
+    if let Some(bound_surface_id) = scalars.source_surface_id
+        && bound_surface_id != surface_id
+    {
+        return Err(format!(
+            "Surface scalars are bound to surface {} and cannot be applied to surface {}",
+            bound_surface_id, surface_id
+        ));
+    }
+    Ok(())
+}
+
+fn overlay_surface_scalars(
+    vertex_rgba: &mut [[f32; 4]],
+    scalars: &SurfaceScalars,
+    layer: &SurfaceOverlayLayerConfig,
+) {
+    let (range_min, range_max) = scalars
+        .metadata
+        .suggested_range
+        .unwrap_or((layer.range_min, layer.range_max));
+    let denom = (range_max - range_min).max(1e-6);
+    for (dst, scalar) in vertex_rgba.iter_mut().zip(scalars.values.iter()) {
+        if !scalar.is_finite() {
+            continue;
+        }
+        let src = match scalars.kind {
+            ScalarKind::Label if layer.use_label_colors => label_rgba(*scalar as i32, &scalars.metadata),
+            _ => {
+                if *scalar < layer.threshold_min || *scalar > layer.threshold_max {
+                    continue;
+                }
+                let t = ((*scalar - range_min) / denom).clamp(0.0, 1.0);
+                let rgb = surface_colormap_rgb(t, layer.colormap);
+                [rgb[0], rgb[1], rgb[2], layer.opacity.clamp(0.0, 1.0)]
+            }
+        };
+        alpha_blend(dst, src);
+    }
+}
+
+fn label_rgba(label: i32, metadata: &crate::data::cifti::ScalarMetadata) -> [f32; 4] {
+    metadata
+        .label_table
+        .iter()
+        .find(|entry| entry.key == label)
+        .map(|entry| entry.rgba)
+        .unwrap_or([0.0, 0.0, 0.0, 0.0])
+}
+
+fn alpha_blend(dst: &mut [f32; 4], src: [f32; 4]) {
+    let src_a = src[3].clamp(0.0, 1.0);
+    if src_a <= 0.0 {
+        return;
+    }
+    let inv = 1.0 - src_a;
+    dst[0] = dst[0] * inv + src[0] * src_a;
+    dst[1] = dst[1] * inv + src[1] * src_a;
+    dst[2] = dst[2] * inv + src[2] * src_a;
+    dst[3] = (dst[3] + src_a).clamp(0.0, 1.0);
+}
+
+fn surface_colormap_rgb(t: f32, colormap: SurfaceColormap) -> [f32; 3] {
+    match colormap {
+        SurfaceColormap::BlueWhiteRed => {
+            if t < 0.5 {
+                let s = t * 2.0;
+                [s, s, 1.0]
+            } else {
+                let s = (1.0 - t) * 2.0;
+                [1.0, s, s]
+            }
+        }
+        SurfaceColormap::Viridis => {
+            let anchors = [
+                [0.267, 0.005, 0.329],
+                [0.283, 0.141, 0.458],
+                [0.254, 0.265, 0.530],
+                [0.207, 0.372, 0.553],
+                [0.164, 0.471, 0.558],
+                [0.128, 0.567, 0.551],
+                [0.135, 0.659, 0.518],
+                [0.267, 0.749, 0.441],
+                [0.478, 0.821, 0.318],
+                [0.741, 0.873, 0.150],
+            ];
+            lerp_colormap(&anchors, t)
+        }
+        SurfaceColormap::Inferno => {
+            let anchors = [
+                [0.001, 0.000, 0.014],
+                [0.125, 0.047, 0.290],
+                [0.302, 0.073, 0.488],
+                [0.511, 0.121, 0.561],
+                [0.709, 0.212, 0.486],
+                [0.865, 0.316, 0.347],
+                [0.962, 0.471, 0.212],
+                [0.988, 0.683, 0.139],
+                [0.978, 0.893, 0.306],
+            ];
+            lerp_colormap(&anchors, t)
+        }
+    }
+}
+
+fn lerp_colormap(anchors: &[[f32; 3]], t: f32) -> [f32; 3] {
+    if anchors.len() == 1 {
+        return anchors[0];
+    }
+    let x = t.clamp(0.0, 1.0) * (anchors.len() as f32 - 1.0);
+    let i = x.floor() as usize;
+    let j = (i + 1).min(anchors.len() - 1);
+    let f = x - i as f32;
+    [
+        anchors[i][0] * (1.0 - f) + anchors[j][0] * f,
+        anchors[i][1] * (1.0 - f) + anchors[j][1] * f,
+        anchors[i][2] * (1.0 - f) + anchors[j][2] * f,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
 
+    use glam::Vec3;
     use trx_rs::Tractogram;
 
     use super::*;
+    use crate::data::gifti_data::GiftiSurfaceData;
     use crate::data::loaded_files::{LoadedTrx, StreamlineBacking};
 
     #[test]
@@ -1299,6 +1623,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
             &mut HashMap::new(),
             &mut 1_000_000usize,
             &mut WorkflowExecutionCache::default(),
@@ -1332,6 +1657,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
             &mut HashMap::new(),
             &mut 1_000_000usize,
             &mut WorkflowExecutionCache::default(),
@@ -1344,6 +1670,68 @@ mod tests {
             state.error.as_deref(),
             Some("Surface Depth Query needs a streamline input")
         );
+    }
+
+    #[test]
+    fn first_surface_overlay_input_uses_base_layer_config() {
+        let surface = LoadedGiftiSurface {
+            id: 7,
+            name: "surface".to_string(),
+            path: PathBuf::from("surface.gii"),
+            data: Arc::new(GiftiSurfaceData {
+                vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                normals: vec![[0.0, 0.0, 1.0]; 2],
+                indices: vec![0, 1, 1],
+                bbox_min: Vec3::ZERO,
+                bbox_max: Vec3::new(1.0, 0.0, 0.0),
+            }),
+            visible: true,
+            opacity: 1.0,
+            color: [0.72, 0.72, 0.72],
+            outline_color: [0.0, 0.0, 0.0],
+            outline_thickness: 1.0,
+            show_projection_map: false,
+            map_opacity: 1.0,
+            map_threshold: 0.0,
+            surface_gloss: 0.25,
+            projection_colormap: SurfaceColormap::Inferno,
+            auto_range: false,
+            range_min: 0.0,
+            range_max: 1.0,
+        };
+        let scalars = SurfaceScalars {
+            structure: Some(CiftiStructure::CortexLeft),
+            source_surface_id: None,
+            vertex_count: 2,
+            values: vec![1.0, 1.0],
+            kind: ScalarKind::Continuous,
+            metadata: crate::data::cifti::ScalarMetadata {
+                map_name: "stat".to_string(),
+                suggested_range: Some((0.0, 1.0)),
+                series_index: None,
+                series_value: None,
+                label_table: Vec::new(),
+            },
+        };
+        let layers = default_surface_overlay_layers();
+
+        let appearance = compose_surface_appearance(
+            surface.id,
+            &surface,
+            &layers,
+            &[Some(EvaluatedValue {
+                value: WorkflowValue::SurfaceScalars(scalars),
+                stale: false,
+            })],
+        )
+        .expect("appearance");
+
+        assert_eq!(appearance.structure, Some(CiftiStructure::CortexLeft));
+        assert!(appearance
+            .vertex_rgba
+            .iter()
+            .any(|rgba| *rgba != DEFAULT_SURFACE_BASE_RGBA));
+        assert_eq!(appearance.legend_labels, vec!["Base".to_string()]);
     }
 }
 
@@ -1364,12 +1752,19 @@ fn summarize_value(value: &WorkflowValue) -> String {
         WorkflowValue::ParcelSelection(selection) => {
             format!("{} parcel labels", selection.labels.len())
         }
-        WorkflowValue::SurfaceStreamlineMap(projection) => {
+        WorkflowValue::SurfaceScalars(projection) => {
+            format!("Surface scalars ({} values)", projection.values.len())
+        }
+        WorkflowValue::VolumeScalars(volume) => {
             format!(
-                "Surface streamline map for surface {}",
-                projection.surface_id
+                "Volume scalars {}x{}x{}",
+                volume.dims[0], volume.dims[1], volume.dims[2]
             )
         }
+        WorkflowValue::SurfaceAppearance(appearance) => {
+            format!("Surface appearance for surface {}", appearance.source_id)
+        }
+        WorkflowValue::Cifti(_) => "CIFTI ready".to_string(),
         WorkflowValue::BundleSurface(bundle) => {
             if bundle.per_group {
                 "Bundle surfaces split by group".to_string()

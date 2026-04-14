@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow, bail};
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 use image::{ColorType, ImageEncoder};
 use pollster::block_on;
 use serde_json::{Map, Value, json};
@@ -55,6 +55,7 @@ const GLTF_AXIS_CONVERSION: glam::Mat3 = glam::Mat3::from_cols_array(&[
 pub enum HeadlessView {
     View3D,
     View2D,
+    InflatedStage,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +70,7 @@ pub struct HeadlessSceneExportOptions {
     pub include_slices: bool,
     pub width: u32,
     pub height: u32,
+    pub view: HeadlessView,
     pub target: Option<Vec3>,
     pub azimuth_deg: Option<f32>,
     pub elevation_deg: Option<f32>,
@@ -84,6 +86,7 @@ impl Default for HeadlessSceneExportOptions {
             include_slices: true,
             width: 1920,
             height: 1080,
+            view: HeadlessView::View3D,
             target: None,
             azimuth_deg: None,
             elevation_deg: None,
@@ -125,7 +128,7 @@ pub struct AssetArgs {
 }
 
 struct HeadlessRenderData {
-    surface_draws: Vec<(usize, MeshDrawStyle)>,
+    surface_draws: Vec<(usize, usize, MeshDrawStyle)>,
     volume_draws: Vec<VolumeDrawInfo>,
     streamline_draws: Vec<StreamlineDrawInfo>,
     bundle_draws: Vec<BundleDrawInfo>,
@@ -156,6 +159,7 @@ struct BundleDrawInfo {
     opacity: f32,
 }
 
+#[derive(Clone, Copy)]
 struct SceneBounds {
     min: Vec3,
     max: Vec3,
@@ -212,7 +216,7 @@ pub fn export_project_glb(
     options: &HeadlessSceneExportOptions,
 ) -> anyhow::Result<()> {
     let (scene, workflow) = load_project_state(project_path)?;
-    export_loaded_scene(scene, workflow, output_path, options)
+    export_loaded_scene(&scene, workflow, output_path, options)
 }
 
 /// Build a default scene from loose assets and export the visible 3D scene to a GLB.
@@ -222,6 +226,16 @@ pub fn export_assets_glb(
     options: &HeadlessSceneExportOptions,
 ) -> anyhow::Result<()> {
     let (scene, workflow) = load_asset_args_state(args)?;
+    export_loaded_scene(&scene, workflow, output_path, options)
+}
+
+/// Export an already-loaded GUI/headless scene state to GLB without going through project JSON.
+pub fn export_state_glb(
+    scene: &HeadlessScene,
+    workflow: HeadlessWorkflowState,
+    output_path: &Path,
+    options: &HeadlessSceneExportOptions,
+) -> anyhow::Result<()> {
     export_loaded_scene(scene, workflow, output_path, options)
 }
 
@@ -236,7 +250,7 @@ fn render_loaded_scene(
     let mut resources = build_gpu_resources(&gpu.device, &gpu.queue, &scene, &workflow)
         .context("building GPU resources")?;
     let render_3d = workflow.document.render_3d.clone().unwrap_or_default();
-    let render_data = build_render_data(&scene, &workflow);
+    let render_data = build_render_data(&scene, &workflow, options.view);
     if render_data.glyph_visible {
         scene.boundary_field = workflow
             .runtime
@@ -265,8 +279,13 @@ fn render_loaded_scene(
             output_path,
         );
     }
+    let camera_bounds = if options.view == HeadlessView::InflatedStage {
+        compute_render_bounds(&scene, &render_data)
+    } else {
+        resources.bounds
+    };
     let camera = build_camera(
-        &resources.bounds,
+        &camera_bounds,
         workflow.document.camera_3d,
         options,
         options.width as f32 / options.height as f32,
@@ -278,7 +297,11 @@ fn render_loaded_scene(
         &render_data,
         &camera,
         &render_3d,
-        scene.slice_visible,
+        if options.view == HeadlessView::InflatedStage {
+            [false; 3]
+        } else {
+            scene.slice_visible
+        },
         options.width,
         options.height,
         output_path,
@@ -286,7 +309,7 @@ fn render_loaded_scene(
 }
 
 fn export_loaded_scene(
-    scene: HeadlessScene,
+    scene: &HeadlessScene,
     mut workflow: HeadlessWorkflowState,
     output_path: &Path,
     options: &HeadlessSceneExportOptions,
@@ -295,17 +318,21 @@ fn export_loaded_scene(
         bail!("unsupported scene export format");
     }
 
-    execute_workflow_to_completion(&scene, &mut workflow)?;
+    execute_workflow_to_completion(scene, &mut workflow)?;
     ensure_export_tube_geometry(&mut workflow)?;
-    let render_data = build_render_data(&scene, &workflow);
-    let bounds = compute_scene_bounds(&scene, &workflow);
+    let render_data = build_render_data(scene, &workflow, options.view);
+    let bounds = if options.view == HeadlessView::InflatedStage {
+        compute_render_bounds(scene, &render_data)
+    } else {
+        compute_scene_bounds(scene, &workflow)
+    };
     let camera = build_camera(
         &bounds,
         workflow.document.camera_3d,
         &HeadlessRenderOptions {
             width: options.width,
             height: options.height,
-            view: HeadlessView::View3D,
+            view: options.view,
             target: options.target,
             azimuth_deg: options.azimuth_deg,
             elevation_deg: options.elevation_deg,
@@ -315,7 +342,7 @@ fn export_loaded_scene(
     );
     let render_3d = workflow.document.render_3d.clone().unwrap_or_default();
     let bytes = build_glb_scene(
-        &scene,
+        scene,
         &workflow,
         &render_data,
         &camera,
@@ -363,6 +390,7 @@ fn load_project_state(
                 let volume = NiftiVolume::load(&path).map_err(|err| anyhow!(err.to_string()))?;
                 apply_loaded_nifti(&mut scene, path, volume, Some(id));
             }
+            WorkflowAssetDocument::Cifti { .. } => {}
             WorkflowAssetDocument::Surface { id, path } => {
                 let surface =
                     GiftiSurfaceData::load(&path).map_err(|err| anyhow!(err.to_string()))?;
@@ -717,6 +745,7 @@ fn refresh_workflow_runtime(scene: &HeadlessScene, workflow: &mut HeadlessWorkfl
         &workflow.document,
         &scene.trx_files,
         &scene.nifti_files,
+        &scene.cifti_files,
         &scene.gifti_surfaces,
         &scene.parcellations,
         &mut workflow.display_runtimes,
@@ -1097,6 +1126,9 @@ fn build_gpu_resources(
         expand(surface.data.bbox_max);
     }
     for draw in &workflow.runtime.scene_plan.surface_draws {
+        if !draw.vertex_rgba.is_empty() {
+            meshes.update_surface_colors(queue, draw.source_id, &draw.vertex_rgba);
+        }
         if let Some(scalars) = &draw.projection_scalars {
             meshes.update_surface_scalars(queue, draw.source_id, scalars);
         }
@@ -1195,31 +1227,41 @@ fn build_gpu_resources(
 }
 
 fn build_render_data(
-    _scene: &HeadlessScene,
+    scene: &HeadlessScene,
     workflow: &HeadlessWorkflowState,
+    view: HeadlessView,
 ) -> HeadlessRenderData {
-    let surface_draws = workflow
-        .runtime
-        .scene_plan
-        .surface_draws
-        .iter()
-        .map(|draw| {
-            (
-                draw.source_id,
-                MeshDrawStyle {
-                    color: [draw.color[0], draw.color[1], draw.color[2], draw.opacity],
-                    scalar_min: draw.range_min,
-                    scalar_max: draw.range_max,
-                    scalar_enabled: draw.show_projection_map,
-                    colormap: draw.projection_colormap,
-                    gloss: draw.gloss,
-                    map_opacity: draw.map_opacity,
-                    map_threshold: draw.map_threshold,
-                },
-            )
-        })
-        .collect();
-    let volume_draws = workflow
+    let surface_draws = match view {
+        HeadlessView::InflatedStage => stage_surface_draw_instances(scene, workflow),
+        _ => workflow
+            .runtime
+            .scene_plan
+            .surface_draws
+            .iter()
+            .map(|draw| {
+                (
+                    draw.source_id,
+                    0,
+                    MeshDrawStyle {
+                        color: [draw.color[0], draw.color[1], draw.color[2], draw.opacity],
+                        scalar_min: draw.range_min,
+                        scalar_max: draw.range_max,
+                        scalar_enabled: draw.show_projection_map,
+                        vertex_color_enabled: !draw.vertex_rgba.is_empty(),
+                        colormap: draw.projection_colormap,
+                        gloss: draw.gloss,
+                        map_opacity: draw.map_opacity,
+                        map_threshold: draw.map_threshold,
+                        model_matrix: draw.model_matrix,
+                    },
+                )
+            })
+            .collect(),
+    };
+    let volume_draws = if view == HeadlessView::InflatedStage {
+        Vec::new()
+    } else {
+        workflow
         .runtime
         .scene_plan
         .volume_draws
@@ -1231,8 +1273,12 @@ fn build_render_data(
             colormap: draw.colormap.as_u32(),
             opacity: draw.opacity,
         })
-        .collect::<Vec<_>>();
-    let streamline_draws = workflow
+        .collect::<Vec<_>>()
+    };
+    let streamline_draws = if view == HeadlessView::InflatedStage {
+        Vec::new()
+    } else {
+        workflow
         .runtime
         .scene_plan
         .streamline_draws
@@ -1243,8 +1289,12 @@ fn build_render_data(
             render_style: draw.render_style,
             tube_radius: draw.tube_radius_mm,
         })
-        .collect::<Vec<_>>();
-    let bundle_draws = workflow
+        .collect::<Vec<_>>()
+    };
+    let bundle_draws = if view == HeadlessView::InflatedStage {
+        Vec::new()
+    } else {
+        workflow
         .runtime
         .scene_plan
         .bundle_draws
@@ -1253,13 +1303,18 @@ fn build_render_data(
             file_id: draw.draw_id,
             opacity: draw.opacity,
         })
-        .collect::<Vec<_>>();
-    let glyph_draw = workflow
+        .collect::<Vec<_>>()
+    };
+    let glyph_draw = if view == HeadlessView::InflatedStage {
+        None
+    } else {
+        workflow
         .runtime
         .scene_plan
         .boundary_glyph_draws
         .iter()
-        .find(|draw| draw.visible);
+        .find(|draw| draw.visible)
+    };
 
     HeadlessRenderData {
         any_visible_streamlines: streamline_draws.iter().any(|draw| draw.visible),
@@ -1278,6 +1333,77 @@ fn build_render_data(
         glyph_slice_density_step: glyph_draw
             .map(|draw| draw.slice_density_step as u32)
             .unwrap_or(1),
+    }
+}
+
+fn stage_surface_draw_instances(
+    scene: &HeadlessScene,
+    workflow: &HeadlessWorkflowState,
+) -> Vec<(usize, usize, MeshDrawStyle)> {
+    let mut draws = Vec::new();
+    for draw in &workflow.runtime.scene_plan.stage_surface_draws {
+        let Some(surface) = scene.gifti_surfaces.iter().find(|surface| surface.id == draw.source_id)
+        else {
+            continue;
+        };
+        for (uniform_slot, model_matrix) in stage_instance_model_matrices(
+            draw.structure,
+            surface.data.bbox_min,
+            surface.data.bbox_max,
+        )
+        .into_iter()
+        .enumerate()
+        {
+            draws.push((
+                draw.source_id,
+                uniform_slot,
+                MeshDrawStyle {
+                    color: [draw.color[0], draw.color[1], draw.color[2], draw.opacity],
+                    scalar_min: draw.range_min,
+                    scalar_max: draw.range_max,
+                    scalar_enabled: draw.show_projection_map,
+                    vertex_color_enabled: !draw.vertex_rgba.is_empty(),
+                    colormap: draw.projection_colormap,
+                    gloss: draw.gloss,
+                    map_opacity: draw.map_opacity,
+                    map_threshold: draw.map_threshold,
+                    model_matrix: model_matrix.to_cols_array_2d(),
+                },
+            ));
+        }
+    }
+    draws
+}
+
+fn compute_render_bounds(scene: &HeadlessScene, render_data: &HeadlessRenderData) -> SceneBounds {
+    let mut bounds_min = Vec3::splat(f32::INFINITY);
+    let mut bounds_max = Vec3::splat(f32::NEG_INFINITY);
+    let mut any = false;
+
+    for (surface_id, _, style) in &render_data.surface_draws {
+        let Some(surface) = scene.gifti_surfaces.iter().find(|surface| surface.id == *surface_id)
+        else {
+            continue;
+        };
+        let model = Mat4::from_cols_array_2d(&style.model_matrix);
+        for corner in bbox_corners(surface.data.bbox_min, surface.data.bbox_max) {
+            let point = model.transform_point3(corner);
+            bounds_min = bounds_min.min(point);
+            bounds_max = bounds_max.max(point);
+            any = true;
+        }
+    }
+
+    if !any {
+        return SceneBounds {
+            min: scene.volume_center - Vec3::splat(scene.volume_extent.max(1.0) * 0.5),
+            max: scene.volume_center + Vec3::splat(scene.volume_extent.max(1.0) * 0.5),
+        };
+    }
+
+    SceneBounds {
+        min: bounds_min,
+        max: bounds_max,
     }
 }
 
@@ -1318,6 +1444,56 @@ fn fit_distance(radius: f32, aspect: f32) -> f32 {
     let half_x = (half_y.tan() * aspect.max(1.0)).atan();
     let limiting_half_angle = half_y.min(half_x).max(0.1);
     (radius / limiting_half_angle.sin()) * 1.1
+}
+
+fn bbox_corners(min: Vec3, max: Vec3) -> [Vec3; 8] {
+    [
+        Vec3::new(min.x, min.y, min.z),
+        Vec3::new(min.x, min.y, max.z),
+        Vec3::new(min.x, max.y, min.z),
+        Vec3::new(min.x, max.y, max.z),
+        Vec3::new(max.x, min.y, min.z),
+        Vec3::new(max.x, min.y, max.z),
+        Vec3::new(max.x, max.y, min.z),
+        Vec3::new(max.x, max.y, max.z),
+    ]
+}
+
+fn stage_instance_model_matrices(
+    structure: Option<crate::data::cifti::CiftiStructure>,
+    bbox_min: Vec3,
+    bbox_max: Vec3,
+) -> Vec<Mat4> {
+    let center = (bbox_min + bbox_max) * 0.5;
+    let extents = bbox_max - bbox_min;
+    let span = extents.x.abs().max(extents.y.abs()).max(extents.z.abs()).max(1.0);
+    let separation = span * 0.55;
+    let lateral_row_z = span * 0.42;
+    let medial_row_z = -span * 0.42;
+    let center_transform = Mat4::from_translation(-center);
+
+    match structure {
+        Some(crate::data::cifti::CiftiStructure::CortexLeft) => vec![
+            stage_panel_transform(center_transform, separation, lateral_row_z, 90.0),
+            stage_panel_transform(center_transform, separation, medial_row_z, -90.0),
+        ],
+        Some(crate::data::cifti::CiftiStructure::CortexRight) => vec![
+            stage_panel_transform(center_transform, -separation, lateral_row_z, -90.0),
+            stage_panel_transform(center_transform, -separation, medial_row_z, 90.0),
+        ],
+        _ => vec![Mat4::IDENTITY],
+    }
+}
+
+fn stage_panel_transform(
+    center_transform: Mat4,
+    x_shift: f32,
+    z_shift: f32,
+    turn_deg: f32,
+) -> Mat4 {
+    Mat4::from_translation(Vec3::new(x_shift, 0.0, z_shift))
+        * Mat4::from_rotation_z(turn_deg.to_radians())
+        * center_transform
 }
 
 fn render_scene3d_to_png(
@@ -1432,11 +1608,11 @@ fn render_scene3d_to_png(
             );
         }
     }
-    for (surface_id, style) in &render_data.surface_draws {
+    for (surface_id, uniform_slot, style) in &render_data.surface_draws {
         resources.meshes.update_surface_uniforms(
             queue,
             *surface_id,
-            0,
+            *uniform_slot,
             view_proj,
             style,
             camera_pos,
@@ -1575,7 +1751,7 @@ fn render_scene3d_to_png(
         if !render_data.surface_draws.is_empty() {
             resources
                 .meshes
-                .paint_opaque(render_pass, 0, &render_data.surface_draws);
+                .paint_opaque(render_pass, &render_data.surface_draws);
         }
         if !render_data.bundle_draws.is_empty() {
             let bundle_draws = render_data
@@ -1588,7 +1764,6 @@ fn render_scene3d_to_png(
                 .paint_bundle_opaque(render_pass, &bundle_draws);
             resources.meshes.paint_transparent(
                 render_pass,
-                0,
                 &render_data.surface_draws,
                 &bundle_draws,
                 camera_pos,
@@ -1597,7 +1772,6 @@ fn render_scene3d_to_png(
         } else if !render_data.surface_draws.is_empty() {
             resources.meshes.paint_transparent(
                 render_pass,
-                0,
                 &render_data.surface_draws,
                 &[],
                 camera_pos,
@@ -2195,55 +2369,122 @@ fn build_glb_scene(
     options: &HeadlessSceneExportOptions,
 ) -> anyhow::Result<Vec<u8>> {
     let mut builder = GlbBuilder::new();
-    let scene_bounds = compute_scene_bounds(scene, workflow);
+    let scene_bounds = if options.view == HeadlessView::InflatedStage {
+        compute_render_bounds(scene, render_data)
+    } else {
+        compute_scene_bounds(scene, workflow)
+    };
     let scene_center = (scene_bounds.min + scene_bounds.max) * 0.5;
     let scene_radius = ((scene_bounds.max - scene_bounds.min) * 0.5)
         .length()
         .max(1.0);
 
-    for (draw_index, draw) in workflow.runtime.scene_plan.surface_draws.iter().enumerate() {
-        let Some(surface) = scene
-            .gifti_surfaces
-            .iter()
-            .find(|surface| surface.id == draw.source_id)
-        else {
-            continue;
-        };
-        let colors = bake_surface_vertex_colors(surface.data.as_ref(), draw);
-        let positions = surface
-            .data
-            .vertices
-            .iter()
-            .map(|position| gltf_point(*position))
-            .collect::<Vec<_>>();
-        let normals = surface
-            .data
-            .normals
-            .iter()
-            .map(|normal| gltf_vector(*normal))
-            .collect::<Vec<_>>();
-        let material = builder.add_vertex_color_material(
-            format!("surface_material_{draw_index}"),
-            draw.opacity,
-            false,
-            gloss_to_roughness(draw.gloss).max(0.22),
-            if draw.opacity < 0.999 { 0.12 } else { 0.08 },
-        );
-        let mesh = builder.add_mesh(
-            format!("surface_mesh_{}", surface.name),
-            &positions,
-            Some(&normals),
-            Some(&colors),
-            None,
-            &surface.data.indices,
-            material,
-            false,
-        )?;
-        builder.add_mesh_node(
-            format!("surface_{}_{}", surface.name, draw_index),
-            mesh,
-            glam::Mat4::IDENTITY,
-        );
+    match options.view {
+        HeadlessView::InflatedStage => {
+            for (draw_index, draw) in workflow
+                .runtime
+                .scene_plan
+                .stage_surface_draws
+                .iter()
+                .enumerate()
+            {
+                let Some(surface) = scene
+                    .gifti_surfaces
+                    .iter()
+                    .find(|surface| surface.id == draw.source_id)
+                else {
+                    continue;
+                };
+                let colors = surface_vertex_colors_for_export(surface.data.as_ref(), draw);
+                let positions = surface
+                    .data
+                    .vertices
+                    .iter()
+                    .map(|position| gltf_point(*position))
+                    .collect::<Vec<_>>();
+                let normals = surface
+                    .data
+                    .normals
+                    .iter()
+                    .map(|normal| gltf_vector(*normal))
+                    .collect::<Vec<_>>();
+                let material = builder.add_unlit_vertex_color_material(
+                    format!("stage_surface_material_{draw_index}"),
+                    draw.opacity,
+                    false,
+                );
+                let mesh = builder.add_mesh(
+                    format!("stage_surface_mesh_{}", surface.name),
+                    &positions,
+                    Some(&normals),
+                    Some(&colors),
+                    None,
+                    &surface.data.indices,
+                    material,
+                    false,
+                )?;
+                for (panel_index, model_matrix) in stage_instance_model_matrices(
+                    draw.structure,
+                    surface.data.bbox_min,
+                    surface.data.bbox_max,
+                )
+                .into_iter()
+                .enumerate()
+                {
+                    builder.add_mesh_node(
+                        format!("stage_surface_{}_{}_{}", surface.name, draw_index, panel_index),
+                        mesh,
+                        gltf_transform(model_matrix),
+                    );
+                }
+            }
+        }
+        _ => {
+            for (draw_index, draw) in workflow.runtime.scene_plan.surface_draws.iter().enumerate() {
+                let Some(surface) = scene
+                    .gifti_surfaces
+                    .iter()
+                    .find(|surface| surface.id == draw.source_id)
+                else {
+                    continue;
+                };
+                let colors = surface_vertex_colors_for_export(surface.data.as_ref(), draw);
+                let positions = surface
+                    .data
+                    .vertices
+                    .iter()
+                    .map(|position| gltf_point(*position))
+                    .collect::<Vec<_>>();
+                let normals = surface
+                    .data
+                    .normals
+                    .iter()
+                    .map(|normal| gltf_vector(*normal))
+                    .collect::<Vec<_>>();
+                let material = builder.add_vertex_color_material(
+                    format!("surface_material_{draw_index}"),
+                    draw.opacity,
+                    false,
+                    gloss_to_roughness(draw.gloss).max(0.22),
+                    if draw.opacity < 0.999 { 0.12 } else { 0.08 },
+                );
+                let mesh = builder.add_mesh(
+                    format!("surface_mesh_{}", surface.name),
+                    &positions,
+                    Some(&normals),
+                    Some(&colors),
+                    None,
+                    &surface.data.indices,
+                    material,
+                    false,
+                )?;
+                builder.add_mesh_node(
+                    format!("surface_{}_{}", surface.name, draw_index),
+                    mesh,
+                    gltf_transform(Mat4::from_cols_array_2d(&draw.model_matrix)),
+                );
+            }
+        }
     }
 
     for draw in &workflow.runtime.scene_plan.bundle_draws {
@@ -2326,7 +2567,7 @@ fn build_glb_scene(
         );
     }
 
-    if options.include_slices {
+    if options.include_slices && options.view != HeadlessView::InflatedStage {
         for volume in &render_data.volume_draws {
             if volume.opacity <= 0.001 {
                 continue;
@@ -2502,6 +2743,16 @@ fn slice_plane_normal(axis_index: usize) -> Vec3 {
     }
 }
 
+fn surface_vertex_colors_for_export(
+    surface: &GiftiSurfaceData,
+    draw: &crate::workflow::SurfaceDrawPlan,
+) -> Vec<[f32; 4]> {
+    if !draw.vertex_rgba.is_empty() {
+        return draw.vertex_rgba.clone();
+    }
+    bake_surface_vertex_colors(surface, draw)
+}
+
 fn bake_surface_vertex_colors(
     surface: &GiftiSurfaceData,
     draw: &crate::workflow::SurfaceDrawPlan,
@@ -2675,6 +2926,11 @@ fn gltf_vector(vector: [f32; 3]) -> [f32; 3] {
 
 fn gltf_axis_conversion() -> glam::Mat3 {
     GLTF_AXIS_CONVERSION
+}
+
+fn gltf_transform(transform: Mat4) -> Mat4 {
+    let basis = Mat4::from_mat3(gltf_axis_conversion());
+    basis * transform * basis.inverse()
 }
 
 fn add_lighting_rig_to_glb(

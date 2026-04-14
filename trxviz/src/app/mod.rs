@@ -93,6 +93,17 @@ impl TrxVizApp {
                         Err(err) => self.error_msg = Some(format!("Failed to load NIfTI: {err}")),
                     }
                 }
+                WorkerMessage::CiftiLoaded {
+                    job_id,
+                    path,
+                    result,
+                } => {
+                    self.pending_file_loads.retain(|job| job.job_id != job_id);
+                    match result {
+                        Ok(cifti) => self.apply_loaded_cifti(path, cifti),
+                        Err(err) => self.error_msg = Some(format!("Failed to load CIFTI: {err}")),
+                    }
+                }
                 WorkerMessage::GiftiLoaded {
                     job_id,
                     path,
@@ -251,6 +262,7 @@ impl TrxVizApp {
             }
             helpers::DroppedPathKind::ImportTractogram(_) => self.open_import_dialog(Some(path)),
             helpers::DroppedPathKind::OpenNifti => self.begin_load_nifti(path),
+            helpers::DroppedPathKind::OpenCifti => self.begin_load_cifti(path),
             helpers::DroppedPathKind::OpenParcellation => self.begin_load_parcellation(path),
             helpers::DroppedPathKind::OpenGifti => self.begin_load_gifti_surface(path),
             helpers::DroppedPathKind::Unsupported => {
@@ -376,7 +388,7 @@ impl eframe::App for TrxVizApp {
             self.save_workflow_project(true);
         }
         if menu_action.export_to_blender {
-            self.export_to_blender();
+            self.export_to_blender(trxviz_core::headless::HeadlessView::View3D);
         }
         if menu_action.import_streamlines {
             self.open_import_dialog(None);
@@ -487,6 +499,9 @@ impl eframe::App for TrxVizApp {
                 false
             }
         };
+        if self.workflow.document_revision != self.workflow.last_interactive_revision {
+            ctx.request_repaint();
+        }
         if open_files_after_ui {
             self.open_files_dialog();
         }

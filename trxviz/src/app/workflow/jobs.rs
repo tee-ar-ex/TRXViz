@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tempfile::tempdir;
 use trx_rs::{AnyTrxFile, ConversionOptions};
 use trxviz_core::data::gifti_data::GiftiSurfaceData;
 use trxviz_core::data::loaded_files::{FileId, StreamlineBacking};
@@ -10,8 +9,9 @@ use trxviz_core::data::nifti_data::NiftiVolume;
 use trxviz_core::data::parcellation_data::ParcellationVolume;
 use trxviz_core::data::trx_data::{RenderStyle, TrxGpuData};
 use trxviz_core::headless::{
-    HeadlessSceneExportFormat, HeadlessSceneExportOptions, export_project_glb,
+    HeadlessSceneExportFormat, HeadlessSceneExportOptions, HeadlessView, export_state_glb,
 };
+use trxviz_core::scene::HeadlessWorkflowState;
 use trxviz_core::renderer::background_renderer::BackgroundResources;
 use trxviz_core::renderer::glyph_renderer::GlyphResources;
 use trxviz_core::renderer::mesh_renderer::MeshResources;
@@ -100,10 +100,7 @@ impl crate::app::TrxVizApp {
                                 changed = true;
                             }
                             WorkflowJobOutput::SurfaceMap(map) => {
-                                let summary = format!(
-                                    "Surface streamline map for surface {}",
-                                    map.surface_id
-                                );
+                                let summary = format!("Surface scalars ({} values)", map.values.len());
                                 self.workflow
                                     .execution_cache
                                     .surface_streamline_map_cache
@@ -442,6 +439,7 @@ impl crate::app::TrxVizApp {
             &self.workflow.document,
             &self.scene.trx_files,
             &self.scene.nifti_files,
+            &self.scene.cifti_files,
             &self.scene.gifti_surfaces,
             &self.scene.parcellations,
             &mut self.workflow.display_runtimes,
@@ -596,7 +594,17 @@ impl crate::app::TrxVizApp {
         }
 
         if let Some(mesh_resources) = renderer.callback_resources.get_mut::<MeshResources>() {
-            for draw in &self.workflow.runtime.scene_plan.surface_draws {
+            for draw in self
+                .workflow
+                .runtime
+                .scene_plan
+                .surface_draws
+                .iter()
+                .chain(self.workflow.runtime.scene_plan.stage_surface_draws.iter())
+            {
+                if !draw.vertex_rgba.is_empty() {
+                    mesh_resources.update_surface_colors(&rs.queue, draw.source_id, &draw.vertex_rgba);
+                }
                 if let Some(scalars) = &draw.projection_scalars {
                     mesh_resources.update_surface_scalars(&rs.queue, draw.source_id, scalars);
                 }
@@ -842,8 +850,15 @@ impl crate::app::TrxVizApp {
         }
     }
 
-    pub(in crate::app) fn export_to_blender(&mut self) {
-        self.sync_viewport_camera_into_workflow_document();
+    pub(in crate::app) fn export_to_blender(&mut self, view: HeadlessView) {
+        match view {
+            HeadlessView::View3D => self.sync_viewport_camera_into_workflow_document(),
+            HeadlessView::InflatedStage => {}
+            HeadlessView::View2D => {
+                self.error_msg = Some("2D views cannot be exported to Blender.".to_string());
+                return;
+            }
+        }
         let default_name = self
             .workflow
             .project_path
@@ -861,42 +876,55 @@ impl crate::app::TrxVizApp {
             return;
         };
 
-        let temp_dir = match tempdir() {
-            Ok(dir) => dir,
-            Err(err) => {
-                self.error_msg = Some(format!(
-                    "Failed to create temporary export directory: {err}"
-                ));
-                return;
-            }
-        };
-        let project_path = temp_dir.path().join("export_project.json");
-        if let Err(err) = gui_save_project(
-            &self.workflow.document,
-            &self.workflow.workspace,
-            crate::app::workflow::capture_gui_slice_view_state(&self.viewport),
-            &project_path,
-        ) {
-            self.error_msg = Some(format!("Failed to prepare Blender export: {err}"));
-            return;
-        }
-
-        let width = self.viewport.window_3d_size[0].max(1.0).round() as u32;
-        let height = self.viewport.window_3d_size[1].max(1.0).round() as u32;
+        let (width, height, include_slices, target, azimuth_deg, elevation_deg, distance) =
+            match view {
+                HeadlessView::View3D => (
+                    self.viewport.window_3d_size[0].max(1.0).round() as u32,
+                    self.viewport.window_3d_size[1].max(1.0).round() as u32,
+                    true,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                HeadlessView::InflatedStage => (
+                    self.viewport.inflated_stage_size[0].max(1.0).round() as u32,
+                    self.viewport.inflated_stage_size[1].max(1.0).round() as u32,
+                    false,
+                    Some(self.viewport.inflated_stage_camera.center),
+                    Some(self.viewport.inflated_stage_camera.yaw.to_degrees()),
+                    Some(self.viewport.inflated_stage_camera.pitch.to_degrees()),
+                    Some(self.viewport.inflated_stage_camera.distance),
+                ),
+                HeadlessView::View2D => unreachable!(),
+            };
         let options = HeadlessSceneExportOptions {
             format: HeadlessSceneExportFormat::Glb,
             include_camera: true,
             include_lights: true,
-            include_slices: true,
+            include_slices,
             width,
             height,
-            target: None,
-            azimuth_deg: None,
-            elevation_deg: None,
-            distance: None,
+            view,
+            target,
+            azimuth_deg,
+            elevation_deg,
+            distance,
         };
 
-        match export_project_glb(&project_path, &output_path, &options) {
+        let workflow = HeadlessWorkflowState {
+            document: self.workflow.document.clone(),
+            slice_view_ui: Some(crate::app::workflow::capture_gui_slice_view_state(
+                &self.viewport,
+            )),
+            runtime: self.workflow.runtime.clone(),
+            display_runtimes: self.workflow.display_runtimes.clone(),
+            next_draw_id: self.workflow.next_draw_id,
+            execution_cache: self.workflow.execution_cache.clone(),
+            project_path: self.workflow.project_path.clone(),
+        };
+
+        match export_state_glb(&self.scene, workflow, &output_path, &options) {
             Ok(()) => {
                 self.status_msg = Some(format!(
                     "Exported Blender scene to {}",
@@ -1012,6 +1040,29 @@ impl crate::app::TrxVizApp {
                             asset_path,
                             volume,
                             rs,
+                            Some(id),
+                            false,
+                        );
+                    }),
+                WorkflowAssetDocument::Cifti {
+                    id,
+                    path: asset_path,
+                    ..
+                } => trxviz_core::data::cifti::LoadedCifti::load(&asset_path)
+                    .map_err(|err| err.to_string())
+                    .map(|data| {
+                        self.apply_loaded_cifti_with_options(
+                            asset_path.clone(),
+                            trxviz_core::data::loaded_files::LoadedCifti {
+                                id,
+                                name: asset_path
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| "cifti.nii".to_string()),
+                                path: asset_path,
+                                data: Arc::new(data),
+                                visible: true,
+                            },
                             Some(id),
                             false,
                         );

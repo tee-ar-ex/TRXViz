@@ -7,7 +7,7 @@ use egui::Rect;
 use egui_snarl::Snarl;
 use glam::Vec3;
 use trxviz_core::data::gifti_data::GiftiSurfaceData;
-use trxviz_core::data::loaded_files::{FileId, LoadedNifti};
+use trxviz_core::data::loaded_files::{FileId, LoadedCifti, LoadedNifti};
 use trxviz_core::data::nifti_data::NiftiVolume;
 use trxviz_core::data::orientation_field::BoundaryContactField;
 pub use trxviz_core::lighting::{SceneLightingParams, WorkflowBackground3D, WorkflowRender3D};
@@ -92,6 +92,7 @@ impl View2DMode {
 pub enum ExportTarget {
     View3D,
     View2D,
+    InflatedStage,
 }
 
 impl ExportTarget {
@@ -99,6 +100,7 @@ impl ExportTarget {
         match self {
             Self::View3D => "3D View",
             Self::View2D => "2D View",
+            Self::InflatedStage => "Inflated Stage",
         }
     }
 }
@@ -288,6 +290,9 @@ pub struct ViewportState {
     pub boundary_field_revision: u64,
     pub window_3d_open: bool,
     pub window_3d_size: [f32; 2],
+    pub inflated_stage_open: bool,
+    pub inflated_stage_size: [f32; 2],
+    pub inflated_stage_camera: OrbitCamera,
     pub view_2d: View2DState,
     pub window_2d_size: [f32; 2],
     pub export_dialog: ExportDialogState,
@@ -314,6 +319,9 @@ impl Default for ViewportState {
             boundary_field_revision: 0,
             window_3d_open: false,
             window_3d_size: [1200.0, 900.0],
+            inflated_stage_open: false,
+            inflated_stage_size: [1200.0, 900.0],
+            inflated_stage_camera: OrbitCamera::new(Vec3::ZERO, 250.0),
             view_2d: View2DState::default(),
             window_2d_size: [1400.0, 900.0],
             export_dialog: ExportDialogState::default(),
@@ -583,6 +591,11 @@ pub enum WorkerMessage {
         job_id: u64,
         path: PathBuf,
         result: Result<NiftiVolume, String>,
+    },
+    CiftiLoaded {
+        job_id: u64,
+        path: PathBuf,
+        result: Result<LoadedCifti, String>,
     },
     GiftiLoaded {
         job_id: u64,

@@ -2,7 +2,11 @@ use std::path::Path;
 
 use crate::app::callbacks::{self, BundleDrawInfo, StreamlineDrawInfo, VolumeDrawInfo};
 use crate::app::state::{ExportTarget, SliceViewKind, View2DMode};
+use glam::{Mat4, Vec3};
+use trxviz_core::data::cifti::CiftiStructure;
 use trxviz_core::data::orientation_field::BoundaryGlyphColorMode;
+use trxviz_core::headless::HeadlessView;
+use trxviz_core::renderer::camera::OrbitCamera;
 use trxviz_core::renderer::mesh_renderer::MeshDrawStyle;
 
 fn viewport_3d_id() -> egui::ViewportId {
@@ -13,15 +17,20 @@ fn viewport_2d_id() -> egui::ViewportId {
     egui::ViewportId::from_hash_of("trxviz_2d_window")
 }
 
+fn viewport_stage_id() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("trxviz_stage_window")
+}
+
 fn export_viewport_id(target: ExportTarget) -> egui::ViewportId {
     match target {
         ExportTarget::View3D => egui::ViewportId::from_hash_of("trxviz_export_3d"),
         ExportTarget::View2D => egui::ViewportId::from_hash_of("trxviz_export_2d"),
+        ExportTarget::InflatedStage => egui::ViewportId::from_hash_of("trxviz_export_stage"),
     }
 }
 
 struct ViewerRenderData {
-    surface_draws: Vec<(usize, MeshDrawStyle)>,
+    surface_draws: Vec<(usize, usize, MeshDrawStyle)>,
     volume_draws: Vec<VolumeDrawInfo>,
     streamline_draws: Vec<StreamlineDrawInfo>,
     bundle_draws: Vec<BundleDrawInfo>,
@@ -36,6 +45,7 @@ impl super::super::TrxVizApp {
     pub(in crate::app) fn show_viewports(&mut self, ctx: &egui::Context) {
         self.show_export_dialog(ctx);
         self.show_3d_window(ctx);
+        self.show_inflated_stage_window(ctx);
         self.show_2d_window(ctx);
         self.show_export_viewport(ctx);
     }
@@ -94,6 +104,10 @@ impl super::super::TrxVizApp {
                 ui.separator();
                 if ui.button("Pop Out 3D").clicked() {
                     self.viewport.window_3d_open = true;
+                }
+                if ui.button("Open Inflated Stage").clicked() {
+                    self.viewport.inflated_stage_open = true;
+                    self.reset_inflated_stage_camera();
                 }
                 if ui.button("Pop Out 2D").clicked() {
                     self.viewport.view_2d.window_open = true;
@@ -207,6 +221,34 @@ impl super::super::TrxVizApp {
         });
     }
 
+    fn show_inflated_stage_window(&mut self, ctx: &egui::Context) {
+        if !self.viewport.inflated_stage_open {
+            return;
+        }
+        let builder = egui::ViewportBuilder::default()
+            .with_title("TRXViz: Inflated Stage")
+            .with_inner_size(self.viewport.inflated_stage_size)
+            .with_resizable(true);
+        ctx.show_viewport_immediate(viewport_stage_id(), builder, |ctx, class| {
+            if ctx.input(|i| i.viewport().close_requested()) {
+                self.viewport.inflated_stage_open = false;
+                return;
+            }
+
+            if class == egui::ViewportClass::Embedded {
+                let mut open = self.viewport.inflated_stage_open;
+                egui::Window::new("Inflated Stage")
+                    .open(&mut open)
+                    .default_size(self.viewport.inflated_stage_size)
+                    .resizable(true)
+                    .show(ctx, |ui| self.show_inflated_stage_contents(ui.ctx(), true));
+                self.viewport.inflated_stage_open = open;
+            } else {
+                self.show_inflated_stage_contents(ctx, true);
+            }
+        });
+    }
+
     fn show_export_dialog(&mut self, ctx: &egui::Context) {
         if !self.viewport.export_dialog.open {
             return;
@@ -242,6 +284,7 @@ impl super::super::TrxVizApp {
         let default_name = match self.viewport.export_dialog.target {
             ExportTarget::View3D => "trxviz-3d.png",
             ExportTarget::View2D => "trxviz-2d.png",
+            ExportTarget::InflatedStage => "trxviz-stage.png",
         };
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("PNG image", &["png"])
@@ -267,6 +310,7 @@ impl super::super::TrxVizApp {
         let base_size = match pending.target {
             ExportTarget::View3D => self.viewport.window_3d_size,
             ExportTarget::View2D => self.viewport.window_2d_size,
+            ExportTarget::InflatedStage => self.viewport.inflated_stage_size,
         };
         let export_size = [
             (base_size[0] * pending.scale as f32).max(256.0),
@@ -286,6 +330,7 @@ impl super::super::TrxVizApp {
             |ctx, _class| match target {
                 ExportTarget::View3D => self.show_3d_contents(ctx, false),
                 ExportTarget::View2D => self.show_2d_contents(ctx, false),
+                ExportTarget::InflatedStage => self.show_inflated_stage_contents(ctx, false),
             },
         );
     }
@@ -326,6 +371,141 @@ impl super::super::TrxVizApp {
         });
 
         self.finish_export_if_ready(ctx, ExportTarget::View3D);
+    }
+
+    fn show_inflated_stage_contents(&mut self, ctx: &egui::Context, interactive: bool) {
+        if interactive {
+            let size = ctx.input(|i| i.content_rect().size());
+            self.viewport.inflated_stage_size = [size.x.max(320.0), size.y.max(240.0)];
+        }
+
+        egui::TopBottomPanel::top("inflated_stage_toolbar").show_animated(ctx, interactive, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.small("Inflated Stage");
+                ui.separator();
+                if ui.button("Reset camera").clicked() {
+                    self.reset_inflated_stage_camera();
+                }
+                ui.menu_button("Export", |ui| {
+                    if ui.button("PNG").clicked() {
+                        self.viewport.export_dialog.target = ExportTarget::InflatedStage;
+                        self.viewport.export_dialog.open = true;
+                        ui.close();
+                    }
+                    if ui.button("Blender (GLB)").clicked() {
+                        self.export_to_blender(HeadlessView::InflatedStage);
+                        ui.close();
+                    }
+                });
+                ui.separator();
+                ui.small("Drag orbit");
+                ui.small("Shift-drag or middle-drag pan");
+                ui.small("Scroll zoom");
+            });
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let render_data = self.build_stage_render_data();
+            if render_data.surface_draws.is_empty() {
+                ui.centered_and_justified(|ui| {
+                    ui.label("No surfaces are routed to Stage.");
+                });
+                return;
+            }
+            let available = ui.available_size();
+            let (rect, response) =
+                ui.allocate_exact_size(available, egui::Sense::click_and_drag());
+            self.draw_stage_scene3d_rect(ui, rect, interactive.then_some(&response), &render_data);
+        });
+
+        self.finish_export_if_ready(ctx, ExportTarget::InflatedStage);
+    }
+
+    fn reset_inflated_stage_camera(&mut self) {
+        let Some((center, span)) = self.inflated_stage_bounds() else {
+            let mut camera = OrbitCamera::new(Vec3::ZERO, 250.0);
+            camera.yaw = 0.0;
+            camera.pitch = 0.0;
+            self.viewport.inflated_stage_camera = camera;
+            return;
+        };
+        let mut camera = OrbitCamera::new(center, (span * 1.15).max(50.0));
+        camera.yaw = 0.0;
+        camera.pitch = 0.0;
+        self.viewport.inflated_stage_camera = camera;
+    }
+
+    fn inflated_stage_bounds(&self) -> Option<(Vec3, f32)> {
+        let mut bounds_min = Vec3::splat(f32::INFINITY);
+        let mut bounds_max = Vec3::splat(f32::NEG_INFINITY);
+        let mut any = false;
+
+        for (surface_id, _, style) in self.stage_surface_draw_instances() {
+            let Some(surface) = self
+                .scene
+                .gifti_surfaces
+                .iter()
+                .find(|surface| surface.id == surface_id)
+            else {
+                continue;
+            };
+            let model = Mat4::from_cols_array_2d(&style.model_matrix);
+            for corner in bbox_corners(surface.data.bbox_min, surface.data.bbox_max) {
+                let point = model.transform_point3(corner);
+                bounds_min = bounds_min.min(point);
+                bounds_max = bounds_max.max(point);
+                any = true;
+            }
+        }
+
+        if !any {
+            return None;
+        }
+
+        let center = (bounds_min + bounds_max) * 0.5;
+        let extents = bounds_max - bounds_min;
+        let span = extents.x.abs().max(extents.y.abs()).max(extents.z.abs()).max(1.0);
+        Some((center, span))
+    }
+
+    fn stage_surface_draw_instances(&self) -> Vec<(usize, usize, MeshDrawStyle)> {
+        let mut surface_draws = Vec::new();
+        for draw in &self.workflow.runtime.scene_plan.stage_surface_draws {
+            let Some(surface) = self
+                .scene
+                .gifti_surfaces
+                .iter()
+                .find(|surface| surface.id == draw.source_id)
+            else {
+                continue;
+            };
+            for (uniform_slot, model_matrix) in stage_instance_model_matrices(
+                draw.structure,
+                surface.data.bbox_min,
+                surface.data.bbox_max,
+            )
+            .into_iter()
+            .enumerate()
+            {
+                surface_draws.push((
+                    draw.source_id,
+                    uniform_slot,
+                    MeshDrawStyle {
+                        color: [draw.color[0], draw.color[1], draw.color[2], draw.opacity],
+                        scalar_min: draw.range_min,
+                        scalar_max: draw.range_max,
+                        scalar_enabled: draw.show_projection_map,
+                        vertex_color_enabled: !draw.vertex_rgba.is_empty(),
+                        colormap: draw.projection_colormap,
+                        gloss: draw.gloss,
+                        map_opacity: draw.map_opacity,
+                        map_threshold: draw.map_threshold,
+                        model_matrix: model_matrix.to_cols_array_2d(),
+                    },
+                ));
+            }
+        }
+        surface_draws
     }
 
     fn show_2d_contents(&mut self, ctx: &egui::Context, interactive: bool) {
@@ -628,6 +808,65 @@ impl super::super::TrxVizApp {
         self.draw_3d_axes(ui, rect, vp);
     }
 
+    fn draw_stage_scene3d_rect(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        response: Option<&egui::Response>,
+        render_data: &ViewerRenderData,
+    ) {
+        if let Some(response) = response {
+            let modifiers = ui.input(|i| i.modifiers);
+            if response.dragged_by(egui::PointerButton::Primary) {
+                let delta = ui.input(|i| i.pointer.delta());
+                if modifiers.shift {
+                    self.viewport.inflated_stage_camera.pan_screen(delta.x, delta.y);
+                } else {
+                    self.viewport.inflated_stage_camera.handle_drag(delta.x, delta.y);
+                }
+            }
+            if response.dragged_by(egui::PointerButton::Middle) {
+                let delta = ui.input(|i| i.pointer.delta());
+                self.viewport.inflated_stage_camera.pan_screen(delta.x, delta.y);
+            }
+            if response.hovered() {
+                let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+                if scroll.abs() > 0.0 {
+                    self.viewport.inflated_stage_camera.handle_scroll(scroll * 0.01);
+                }
+            }
+        }
+
+        let aspect = rect.width() / rect.height().max(1.0);
+        let vp = self.viewport.inflated_stage_camera.view_projection(aspect);
+        let fog_span =
+            (self.viewport.inflated_stage_camera.distance + self.viewport.volume_extent).max(1.0);
+        let render_3d = self.viewport.workflow_render_3d();
+        let fog_near = fog_span * render_3d.fog_start_fraction;
+        let fog_far = fog_span * render_3d.fog_end_fraction;
+        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+            rect,
+            callbacks::Scene3DCallback {
+                view_proj: vp,
+                camera_pos: self.viewport.inflated_stage_camera.eye(),
+                camera_dir: self.viewport.inflated_stage_camera.view_direction(),
+                streamline_draws: Vec::new(),
+                show_streamlines: false,
+                volume_draws: Vec::new(),
+                slice_visible: [false; 3],
+                surface_draws: render_data.surface_draws.clone(),
+                bundle_draws: Vec::new(),
+                show_boundary_glyphs: false,
+                boundary_glyph_color_mode: BoundaryGlyphColorMode::DirectionRgb,
+                boundary_glyph_draw_step: 1,
+                scene_lighting: self.viewport.scene_lighting(),
+                render_3d,
+                fog_near,
+                fog_far,
+            },
+        ));
+    }
+
     fn draw_slice_rect(
         &mut self,
         ui: &mut egui::Ui,
@@ -718,15 +957,18 @@ impl super::super::TrxVizApp {
             .map(|draw| {
                 (
                     draw.source_id,
+                    0,
                     MeshDrawStyle {
                         color: [draw.color[0], draw.color[1], draw.color[2], draw.opacity],
                         scalar_min: draw.range_min,
                         scalar_max: draw.range_max,
                         scalar_enabled: draw.show_projection_map,
+                        vertex_color_enabled: !draw.vertex_rgba.is_empty(),
                         colormap: draw.projection_colormap,
                         gloss: draw.gloss,
                         map_opacity: draw.map_opacity,
                         map_threshold: draw.map_threshold,
+                        model_matrix: draw.model_matrix,
                     },
                 )
             })
@@ -798,6 +1040,21 @@ impl super::super::TrxVizApp {
             glyph_slice_density_step: glyph_draw
                 .map(|draw| draw.slice_density_step as u32)
                 .unwrap_or(1),
+        }
+    }
+
+    fn build_stage_render_data(&self) -> ViewerRenderData {
+        let surface_draws = self.stage_surface_draw_instances();
+        ViewerRenderData {
+            surface_draws,
+            volume_draws: Vec::new(),
+            streamline_draws: Vec::new(),
+            bundle_draws: Vec::new(),
+            any_visible_streamlines: false,
+            glyph_visible: false,
+            glyph_color_mode: BoundaryGlyphColorMode::DirectionRgb,
+            glyph_density_3d_step: 1,
+            glyph_slice_density_step: 1,
         }
     }
 
@@ -886,4 +1143,54 @@ fn save_color_image(image: &egui::ColorImage, path: &Path) -> anyhow::Result<()>
         image::ColorType::Rgba8,
     )?;
     Ok(())
+}
+
+fn bbox_corners(min: Vec3, max: Vec3) -> [Vec3; 8] {
+    [
+        Vec3::new(min.x, min.y, min.z),
+        Vec3::new(min.x, min.y, max.z),
+        Vec3::new(min.x, max.y, min.z),
+        Vec3::new(min.x, max.y, max.z),
+        Vec3::new(max.x, min.y, min.z),
+        Vec3::new(max.x, min.y, max.z),
+        Vec3::new(max.x, max.y, min.z),
+        Vec3::new(max.x, max.y, max.z),
+    ]
+}
+
+fn stage_instance_model_matrices(
+    structure: Option<CiftiStructure>,
+    bbox_min: Vec3,
+    bbox_max: Vec3,
+) -> Vec<Mat4> {
+    let center = (bbox_min + bbox_max) * 0.5;
+    let extents = bbox_max - bbox_min;
+    let span = extents.x.abs().max(extents.y.abs()).max(extents.z.abs()).max(1.0);
+    let separation = span * 0.55;
+    let lateral_row_z = span * 0.42;
+    let medial_row_z = -span * 0.42;
+    let center_transform = Mat4::from_translation(-center);
+
+    match structure {
+        Some(CiftiStructure::CortexLeft) => vec![
+            stage_panel_transform(center_transform, separation, lateral_row_z, 90.0),
+            stage_panel_transform(center_transform, separation, medial_row_z, -90.0),
+        ],
+        Some(CiftiStructure::CortexRight) => vec![
+            stage_panel_transform(center_transform, -separation, lateral_row_z, -90.0),
+            stage_panel_transform(center_transform, -separation, medial_row_z, 90.0),
+        ],
+        _ => vec![Mat4::IDENTITY],
+    }
+}
+
+fn stage_panel_transform(
+    center_transform: Mat4,
+    x_shift: f32,
+    z_shift: f32,
+    turn_deg: f32,
+) -> Mat4 {
+    Mat4::from_translation(Vec3::new(x_shift, 0.0, z_shift))
+        * Mat4::from_rotation_z(turn_deg.to_radians())
+        * center_transform
 }

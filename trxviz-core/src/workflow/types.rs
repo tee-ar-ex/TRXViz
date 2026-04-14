@@ -4,6 +4,9 @@ use std::sync::Arc;
 
 use super::graph::{GraphRect, WorkflowGraph};
 use crate::data::bundle_mesh::BundleMesh;
+use crate::data::cifti::{
+    CiftiIntent, CiftiStructure, SurfaceScalars, VolumeScalars,
+};
 use crate::data::gifti_data::GiftiSurfaceData;
 use crate::data::loaded_files::{FileId, StreamlineBacking, VolumeColormap};
 use crate::data::orientation_field::{
@@ -35,8 +38,15 @@ pub enum WorkflowNodeKind {
     VolumeSource {
         source_id: FileId,
     },
+    CiftiSource {
+        source_id: FileId,
+    },
     SurfaceSource {
         source_id: FileId,
+    },
+    CiftiStructure {
+        structure: CiftiStructure,
+        map_index: usize,
     },
     ParcellationSource {
         source_id: FileId,
@@ -94,6 +104,10 @@ pub enum WorkflowNodeKind {
         depth_mm: f32,
         field: String,
     },
+    SurfaceOverlayStack {
+        #[serde(default = "default_surface_overlay_layers")]
+        layers: Vec<SurfaceOverlayLayerConfig>,
+    },
     BundleSurfaceBuild {
         #[serde(default)]
         per_group: bool,
@@ -141,6 +155,11 @@ pub enum WorkflowNodeKind {
         projection_colormap: SurfaceColormap,
         range_min: f32,
         range_max: f32,
+        space: SurfaceDisplaySpace,
+    },
+    VolumeScalarsDisplay {
+        colormap: VolumeColormap,
+        opacity: f32,
     },
     BundleSurfaceDisplay {
         #[serde(default)]
@@ -215,8 +234,63 @@ pub fn default_bundle_surface_min_component_volume_mm3() -> f32 {
     0.0
 }
 
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Default,
+)]
+pub enum SurfaceDisplaySpace {
+    #[default]
+    Anatomical,
+    Stage,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SurfaceOverlayLayerConfig {
+    pub enabled: bool,
+    pub solid_color: [f32; 4],
+    pub opacity: f32,
+    pub colormap: SurfaceColormap,
+    pub range_min: f32,
+    pub range_max: f32,
+    pub threshold_min: f32,
+    pub threshold_max: f32,
+    pub use_label_colors: bool,
+    pub legend_label: String,
+}
+
+pub fn default_surface_overlay_layers() -> Vec<SurfaceOverlayLayerConfig> {
+    let mut layers = Vec::with_capacity(5);
+    layers.push(SurfaceOverlayLayerConfig {
+        enabled: true,
+        solid_color: DEFAULT_SURFACE_BASE_RGBA,
+        opacity: 1.0,
+        colormap: SurfaceColormap::Inferno,
+        range_min: 0.0,
+        range_max: 1.0,
+        threshold_min: f32::NEG_INFINITY,
+        threshold_max: f32::INFINITY,
+        use_label_colors: false,
+        legend_label: "Base".to_string(),
+    });
+    for index in 1..5 {
+        layers.push(SurfaceOverlayLayerConfig {
+            enabled: false,
+            solid_color: DEFAULT_SURFACE_BASE_RGBA,
+            opacity: 1.0,
+            colormap: SurfaceColormap::Inferno,
+            range_min: 0.0,
+            range_max: 1.0,
+            threshold_min: f32::NEG_INFINITY,
+            threshold_max: f32::INFINITY,
+            use_label_colors: true,
+            legend_label: format!("Overlay {index}"),
+        });
+    }
+    layers
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WorkflowDocument {
+    #[serde(default = "default_next_node_uuid")]
     pub next_node_uuid: u64,
     pub graph: WorkflowGraph,
     pub assets: Vec<WorkflowAssetDocument>,
@@ -249,6 +323,11 @@ pub enum WorkflowAssetDocument {
     Volume {
         id: FileId,
         path: PathBuf,
+    },
+    Cifti {
+        id: FileId,
+        path: PathBuf,
+        intent: CiftiIntent,
     },
     Surface {
         id: FileId,
@@ -417,7 +496,7 @@ pub struct CachedDerivedStreamline {
 
 #[derive(Clone)]
 pub struct CachedSurfaceStreamlineMap {
-    pub map: SurfaceStreamlineMap,
+    pub map: SurfaceScalars,
 }
 
 #[derive(Clone)]
@@ -458,6 +537,8 @@ pub struct SceneFramePlan {
     pub streamline_draws: Vec<StreamlineDrawPlan>,
     pub volume_draws: Vec<VolumeDrawPlan>,
     pub surface_draws: Vec<SurfaceDrawPlan>,
+    pub stage_surface_draws: Vec<SurfaceDrawPlan>,
+    pub volume_scalar_draws: Vec<VolumeScalarDrawPlan>,
     pub bundle_surface_plans: Vec<BundleSurfacePlan>,
     pub bundle_draws: Vec<BundleDrawPlan>,
     pub parcellation_draws: Vec<ParcellationDrawPlan>,
@@ -474,6 +555,8 @@ impl Default for SceneFramePlan {
             streamline_draws: Vec::new(),
             volume_draws: Vec::new(),
             surface_draws: Vec::new(),
+            stage_surface_draws: Vec::new(),
+            volume_scalar_draws: Vec::new(),
             bundle_surface_plans: Vec::new(),
             bundle_draws: Vec::new(),
             parcellation_draws: Vec::new(),
@@ -573,11 +656,11 @@ pub struct VolumeDrawPlan {
     pub window_width: f32,
 }
 
-#[allow(dead_code)]
 #[derive(Clone)]
 pub struct SurfaceDrawPlan {
     pub node_uuid: WorkflowNodeUuid,
     pub source_id: FileId,
+    pub structure: Option<CiftiStructure>,
     pub color: [f32; 3],
     pub opacity: f32,
     pub outline_color: [f32; 3],
@@ -590,24 +673,20 @@ pub struct SurfaceDrawPlan {
     pub range_min: f32,
     pub range_max: f32,
     pub projection_scalars: Option<Vec<f32>>,
+    pub vertex_rgba: Vec<[f32; 4]>,
+    pub space: SurfaceDisplaySpace,
+    pub model_matrix: [[f32; 4]; 4],
 }
 
 pub const DEFAULT_SURFACE_COLOR: [f32; 3] = [0.72, 0.72, 0.72];
 pub const DEFAULT_SURFACE_OPACITY: f32 = 1.0;
+pub const DEFAULT_SURFACE_BASE_RGBA: [f32; 4] = [0.72, 0.72, 0.72, 1.0];
 
 #[derive(Clone)]
 pub struct ParcellationDrawPlan {
     pub source_id: FileId,
     pub labels: BTreeSet<u32>,
     pub opacity: f32,
-}
-
-#[derive(Clone)]
-pub struct SurfaceStreamlineMap {
-    pub surface_id: FileId,
-    pub scalars: Vec<f32>,
-    pub range_min: f32,
-    pub range_max: f32,
 }
 
 #[derive(Clone)]
@@ -731,10 +810,13 @@ pub(super) struct ParcelSelection {
 pub(super) enum WorkflowValue {
     Streamline(StreamlineFlow),
     Volume(FileId),
+    Cifti(FileId),
     Surface(FileId),
     Parcellation(FileId),
     ParcelSelection(ParcelSelection),
-    SurfaceStreamlineMap(SurfaceStreamlineMap),
+    SurfaceScalars(SurfaceScalars),
+    VolumeScalars(VolumeScalars),
+    SurfaceAppearance(SurfaceAppearance),
     BundleSurface(BundleSurfacePlan),
     BoundaryField(BoundaryFieldPlan),
 }
@@ -809,7 +891,7 @@ pub enum WorkflowJobPayload {
 pub enum WorkflowJobOutput {
     ReactiveStreamline(StreamlineFlow),
     SurfaceQuery(StreamlineFlow),
-    SurfaceMap(SurfaceStreamlineMap),
+    SurfaceMap(SurfaceScalars),
     TubeGeometry {
         vertices: Vec<crate::data::trx_data::TubeMeshVertex>,
         indices: Vec<u32>,
@@ -839,10 +921,13 @@ pub enum WorkflowJobMessage {
 pub enum PortKind {
     Streamline,
     Volume,
+    Cifti,
     Surface,
     Parcellation,
     ParcelSelection,
-    SurfaceMap,
+    SurfaceScalars,
+    VolumeScalars,
+    SurfaceAppearance,
     BundleSurface,
     BoundaryField,
 }
@@ -852,9 +937,13 @@ pub struct SeededWorkflowBranch {
     pub primary_selection: WorkflowSelection,
 }
 
+pub fn default_next_node_uuid() -> u64 {
+    1
+}
+
 pub fn default_document() -> WorkflowDocument {
     WorkflowDocument {
-        next_node_uuid: 1,
+        next_node_uuid: default_next_node_uuid(),
         graph: WorkflowGraph::new(),
         assets: Vec::new(),
         camera_3d: None,
@@ -879,7 +968,13 @@ impl WorkflowNodeKind {
         match self {
             Self::StreamlineSource { .. } => "Streamline Source",
             Self::VolumeSource { .. } => "Volume Source",
+            Self::CiftiSource { .. } => "CIFTI Source",
             Self::SurfaceSource { .. } => "Surface Source",
+            Self::CiftiStructure { structure, .. } => match structure {
+                CiftiStructure::CortexLeft => "CIFTI Left Cortex",
+                CiftiStructure::CortexRight => "CIFTI Right Cortex",
+                CiftiStructure::Subcortical => "CIFTI Subcortex",
+            },
             Self::ParcellationSource { .. } => "Parcellation Source",
             Self::LimitStreamlines { .. } => "Limit Streamlines",
             Self::GroupSelect { .. } => "Group Select",
@@ -903,10 +998,12 @@ impl WorkflowNodeKind {
             Self::UniformColor { .. } => "Uniform Color",
             Self::SurfaceProjectionDensity { .. } => "Map Streamlines to Surface",
             Self::SurfaceProjectionMeanDps { .. } => "Map Streamlines to Surface (Mean DPS)",
+            Self::SurfaceOverlayStack { .. } => "Surface Overlay Stack",
             Self::BundleSurfaceBuild { .. } => "Bundle Surface Build",
             Self::BoundaryFieldBuild { .. } => "Boundary Field Build",
             Self::StreamlineDisplay { .. } => "Streamline Display",
             Self::VolumeDisplay { .. } => "Volume Display",
+            Self::VolumeScalarsDisplay { .. } => "Volume Scalars Display",
             Self::SurfaceDisplay { .. } => "Surface Display",
             Self::BundleSurfaceDisplay { .. } => "Bundle Surface Display",
             Self::BoundaryGlyphDisplay { .. } => "Boundary Glyph Display",
@@ -919,6 +1016,7 @@ impl WorkflowNodeKind {
         match self {
             Self::StreamlineSource { .. }
             | Self::VolumeSource { .. }
+            | Self::CiftiSource { .. }
             | Self::SurfaceSource { .. }
             | Self::ParcellationSource { .. } => Vec::new(),
             Self::LimitStreamlines { .. }
@@ -940,6 +1038,10 @@ impl WorkflowNodeKind {
             }
             Self::BoundaryGlyphDisplay { .. } => vec![PortKind::BoundaryField],
             Self::SurfaceDepthQuery { .. } => vec![PortKind::Streamline, PortKind::Surface],
+            Self::CiftiStructure { structure, .. } => match structure {
+                CiftiStructure::Subcortical => vec![PortKind::Cifti],
+                _ => vec![PortKind::Cifti],
+            },
             Self::Merge => {
                 vec![PortKind::Streamline, PortKind::Streamline]
             }
@@ -959,7 +1061,13 @@ impl WorkflowNodeKind {
                 vec![PortKind::Streamline, PortKind::Surface]
             }
             Self::VolumeDisplay { .. } => vec![PortKind::Volume],
-            Self::SurfaceDisplay { .. } => vec![PortKind::Surface, PortKind::SurfaceMap],
+            Self::VolumeScalarsDisplay { .. } => vec![PortKind::VolumeScalars],
+            Self::SurfaceOverlayStack { layers } => {
+                let mut ports = vec![PortKind::Surface];
+                ports.extend(std::iter::repeat_n(PortKind::SurfaceScalars, layers.len()));
+                ports
+            }
+            Self::SurfaceDisplay { .. } => vec![PortKind::SurfaceAppearance],
         }
     }
 
@@ -985,17 +1093,24 @@ impl WorkflowNodeKind {
             | Self::ColorByDPS { .. }
             | Self::UniformColor { .. } => vec![PortKind::Streamline],
             Self::VolumeSource { .. } => vec![PortKind::Volume],
+            Self::CiftiSource { .. } => vec![PortKind::Cifti],
             Self::SurfaceSource { .. } => vec![PortKind::Surface],
             Self::ParcellationSource { .. } => vec![PortKind::Parcellation],
             Self::ParcelSelect { .. } => vec![PortKind::ParcelSelection],
             Self::SurfaceProjectionDensity { .. } | Self::SurfaceProjectionMeanDps { .. } => {
-                vec![PortKind::SurfaceMap]
+                vec![PortKind::SurfaceScalars]
             }
+            Self::CiftiStructure { structure, .. } => match structure {
+                CiftiStructure::Subcortical => vec![PortKind::VolumeScalars],
+                _ => vec![PortKind::SurfaceScalars],
+            },
+            Self::SurfaceOverlayStack { .. } => vec![PortKind::SurfaceAppearance],
             Self::BundleSurfaceBuild { .. } => vec![PortKind::BundleSurface],
             Self::BoundaryFieldBuild { .. } => vec![PortKind::BoundaryField],
             Self::ParcelSurfaceBuild
             | Self::StreamlineDisplay { .. }
             | Self::VolumeDisplay { .. }
+            | Self::VolumeScalarsDisplay { .. }
             | Self::SurfaceDisplay { .. }
             | Self::BoundaryGlyphDisplay { .. }
             | Self::ParcellationDisplay { .. }
@@ -1081,6 +1196,13 @@ mod tests {
     }
 
     #[test]
+    fn workflow_document_defaults_next_node_uuid_when_missing() {
+        let json = r#"{"graph":{"nodes":{},"wires":[]},"assets":[]}"#;
+        let restored: WorkflowDocument = serde_json::from_str(json).unwrap();
+        assert_eq!(restored.next_node_uuid, 1);
+    }
+
+    #[test]
     fn workflow_project_slice_view_ui_round_trips() {
         let project = WorkflowProject {
             version: 1,
@@ -1105,4 +1227,19 @@ mod tests {
         let restored: WorkflowProject = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.slice_view_ui, project.slice_view_ui);
     }
+}
+#[derive(Clone)]
+pub struct SurfaceAppearance {
+    pub source_id: FileId,
+    pub structure: Option<CiftiStructure>,
+    pub vertex_rgba: Vec<[f32; 4]>,
+    pub legend_labels: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+pub struct VolumeScalarDrawPlan {
+    pub dims: [usize; 3],
+    pub voxel_to_ras: [[f32; 4]; 4],
+    pub colormap: VolumeColormap,
+    pub opacity: f32,
 }

@@ -1,8 +1,9 @@
 # TRXViz
 
 A cross-platform desktop application for visualizing [TRX](https://github.com/tee-ar-ex/trx-spec)
-brain tractography files with NIfTI-1 background volumes. Includes a headless CLI for producing
-renders as part of data-processing pipelines on compute nodes with no display.
+brain tractography files with NIfTI-1 background volumes, GIFTI surfaces, and CIFTI scalar data.
+Includes a headless CLI for producing renders as part of data-processing pipelines on compute
+nodes with no display.
 
 Built with Rust, [egui](https://github.com/emilk/egui), and [wgpu](https://wgpu.rs/) for GPU-accelerated rendering.
 
@@ -21,9 +22,11 @@ Built with Rust, [egui](https://github.com/emilk/egui), and [wgpu](https://wgpu.
 ## Features
 
 - **4-viewport layout** — 3D perspective view with axial, coronal, and sagittal slice views
+- **CIFTI support** — load `.dscalar.nii`, `.dtseries.nii`, `.dlabel.nii`, and `.pscalar.nii`
 - **GPU-accelerated rendering** via wgpu (Metal on macOS, Vulkan/DX12 on Linux/Windows)
 - **Workflow editor** — node graph for building and reusing visualization pipelines
 - **Headless rendering** — render workflow projects to PNG on display-less compute nodes
+- **Inflated Stage** — pop-out viewer for non-anatomical cortical surface layouts
 - **NIfTI-1 volume slices** correctly aligned in RAS+ coordinates using the NIfTI affine
 - **Multiple coloring modes** — direction RGB, per-vertex (DPV) scalar, per-streamline (DPS) scalar, group color, or uniform
 - **Group visibility controls** — toggle individual streamline groups on/off
@@ -44,9 +47,25 @@ cargo run -p trxviz --release -- tractogram.trx background.nii.gz
 # CLI — render a saved workflow project to PNG
 cargo run -p trxviz-cli -- render --project workflow.json --out scene.png
 
+# CLI — render the inflated stage from a saved workflow project
+cargo run -p trxviz-cli -- render --project workflow.json --view stage --out stage.png
+
 # CLI — render from loose assets
 cargo run -p trxviz-cli -- render --tractogram tractogram.trx --nifti background.nii.gz --out scene.png
+
+# CLI — export the inflated stage as a Blender-oriented GLB
+cargo run -p trxviz-cli -- export-scene --project workflow.json --view stage --out stage.glb
 ```
+
+## CIFTI Notes
+
+TRXViz supports CIFTI scalar files with suffixes `.dscalar.nii`, `.dtseries.nii`, `.dlabel.nii`,
+and `.pscalar.nii`.
+
+- Cortical CIFTI data is visualized on separately loaded GIFTI surfaces.
+- Non-anatomical cortical layouts use the `Inflated Stage` pop-out viewer rather than the main 3D
+  anatomical scene.
+- CIFTI workflow editing happens in Advanced mode.
 
 ## Downloading Executables
 

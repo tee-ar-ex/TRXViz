@@ -1,5 +1,6 @@
 struct Uniforms {
     view_proj: mat4x4<f32>,
+    model: mat4x4<f32>,
     color: vec4<f32>,
     camera_pos: vec3<f32>,
     shininess: f32,
@@ -13,8 +14,9 @@ struct Uniforms {
     headlight_mix: f32,
     specular_strength: f32,
     scalar_enabled: u32,
+    vertex_color_enabled: u32,
     colormap: u32,
-    _pad0: f32,
+    _pad0: vec4<f32>,
     fog_color: vec4<f32>,
     fog_params: vec4<f32>,
     post_params: vec4<f32>,
@@ -26,6 +28,7 @@ struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) scalar: f32,
+    @location(3) vertex_color: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -33,16 +36,20 @@ struct VertexOutput {
     @location(0) world_pos: vec3<f32>,
     @location(1) world_normal: vec3<f32>,
     @location(2) scalar: f32,
-    @location(3) ndc_xy: vec2<f32>,
+    @location(3) vertex_color: vec4<f32>,
+    @location(4) ndc_xy: vec2<f32>,
 }
 
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    out.clip_position = uniforms.view_proj * vec4<f32>(in.position, 1.0);
-    out.world_pos = in.position;
-    out.world_normal = normalize(in.normal);
+    let world_pos = uniforms.model * vec4<f32>(in.position, 1.0);
+    let world_normal = normalize((uniforms.model * vec4<f32>(in.normal, 0.0)).xyz);
+    out.clip_position = uniforms.view_proj * world_pos;
+    out.world_pos = world_pos.xyz;
+    out.world_normal = world_normal;
     out.scalar = in.scalar;
+    out.vertex_color = in.vertex_color;
     out.ndc_xy = out.clip_position.xy / out.clip_position.w;
     return out;
 }
@@ -135,6 +142,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         N = -N;
     }
     var base_rgb = uniforms.color.rgb;
+    var alpha = uniforms.color.a;
+    if uniforms.vertex_color_enabled == 1u {
+        base_rgb = in.vertex_color.rgb;
+        alpha = in.vertex_color.a;
+    }
     if uniforms.scalar_enabled == 1u {
         let denom = max(uniforms.scalar_max - uniforms.scalar_min, 1e-6);
         let t = clamp((in.scalar - uniforms.scalar_min) / denom, 0.0, 1.0);
@@ -154,5 +166,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let lit = base_rgb * shade + vec3<f32>(spec);
     let faded = apply_depth_fade(lit, in.world_pos);
-    return vec4<f32>(apply_post_color(faded, in.ndc_xy), uniforms.color.a);
+    return vec4<f32>(apply_post_color(faded, in.ndc_xy), alpha);
 }

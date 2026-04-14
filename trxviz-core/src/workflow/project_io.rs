@@ -17,16 +17,32 @@ pub fn save_workflow_project_to_path(
 
 pub fn load_workflow_project_from_path(path: &Path) -> Result<WorkflowProject, String> {
     let contents = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
-    // Preferred: current project format.
-    if let Ok(project) = serde_json::from_str::<WorkflowProject>(&contents) {
+    let value = serde_json::from_str::<serde_json::Value>(&contents).map_err(|err| err.to_string())?;
+    load_workflow_project_from_value(value)
+}
+
+fn load_workflow_project_from_value(value: serde_json::Value) -> Result<WorkflowProject, String> {
+    if let Ok(mut project) = serde_json::from_value::<WorkflowProject>(value.clone()) {
+        ensure_node_uuids(&mut project.document);
         return Ok(project);
     }
-    // Bare (unversioned) document in the current format.
-    serde_json::from_str::<WorkflowDocument>(&contents)
-        .map(|document| WorkflowProject {
-            version: 1,
-            document,
-            slice_view_ui: None,
+
+    if let Some(project_value) = value.get("project")
+        && let Ok(mut project) =
+            serde_json::from_value::<WorkflowProject>(project_value.clone())
+    {
+        ensure_node_uuids(&mut project.document);
+        return Ok(project);
+    }
+
+    serde_json::from_value::<WorkflowDocument>(value)
+        .map(|mut document| {
+            ensure_node_uuids(&mut document);
+            WorkflowProject {
+                version: 1,
+                document,
+                slice_view_ui: None,
+            }
         })
         .map_err(|err| err.to_string())
 }
@@ -35,6 +51,7 @@ fn asset_path_mut(asset: &mut WorkflowAssetDocument) -> &mut PathBuf {
     match asset {
         WorkflowAssetDocument::Streamlines { path, .. }
         | WorkflowAssetDocument::Volume { path, .. }
+        | WorkflowAssetDocument::Cifti { path, .. }
         | WorkflowAssetDocument::Surface { path, .. }
         | WorkflowAssetDocument::Parcellation { path, .. } => path,
     }
@@ -65,5 +82,29 @@ pub fn resolve_document_asset_paths(document: &mut WorkflowDocument, project_pat
         if path.is_relative() {
             *path = base_dir.join(&*path);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_workflow_project_from_value;
+
+    #[test]
+    fn load_workflow_project_accepts_nested_gui_wrapper() {
+        let value = serde_json::json!({
+            "project": {
+                "version": 1,
+                "document": {
+                    "graph": { "nodes": {}, "wires": [] },
+                    "assets": []
+                }
+            },
+            "workspace": {}
+        });
+
+        let project = load_workflow_project_from_value(value).unwrap();
+        assert_eq!(project.version, 1);
+        assert_eq!(project.document.next_node_uuid, 1);
+        assert!(project.document.assets.is_empty());
     }
 }

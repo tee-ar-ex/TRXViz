@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use crate::data::cifti::{ScalarKind, ScalarMetadata, SurfaceScalars};
 use crate::data::bundle_mesh::{
     BundleMesh, BundleMeshColorStrategy, build_bundle_mesh, build_streamtube_bundle_mesh,
 };
@@ -75,11 +76,22 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> Result<WorkflowJobOutput
                 .map(|_| projected)
                 .unwrap_or(density);
             let (range_min, range_max) = robust_range(&scalars);
-            Ok(WorkflowJobOutput::SurfaceMap(SurfaceStreamlineMap {
-                surface_id: plan.surface_id,
-                scalars,
-                range_min,
-                range_max,
+            Ok(WorkflowJobOutput::SurfaceMap(SurfaceScalars {
+                structure: None,
+                source_surface_id: Some(plan.surface_id),
+                vertex_count: scalars.len(),
+                values: scalars,
+                kind: ScalarKind::Continuous,
+                metadata: ScalarMetadata {
+                    map_name: plan
+                        .dps_field
+                        .clone()
+                        .unwrap_or_else(|| "Streamline density".to_string()),
+                    suggested_range: Some((range_min, range_max)),
+                    series_index: None,
+                    series_value: None,
+                    label_table: Vec::new(),
+                },
             }))
         }
         WorkflowJobPayload::TubeGeometry(draw) => {

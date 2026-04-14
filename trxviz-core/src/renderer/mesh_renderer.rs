@@ -11,6 +11,7 @@ use crate::lighting::{SceneLightingParams, WorkflowRender3D};
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct MeshUniforms {
     view_proj: [[f32; 4]; 4],
+    model: [[f32; 4]; 4],
     color: [f32; 4],
     camera_pos: [f32; 3],
     shininess: f32,
@@ -24,8 +25,9 @@ struct MeshUniforms {
     headlight_mix: f32,
     specular_strength: f32,
     scalar_enabled: u32,
+    vertex_color_enabled: u32,
     colormap: u32,
-    _pad0: f32,
+    _pad0: [f32; 4],
     fog_color: [f32; 4],
     fog_params: [f32; 4],
     post_params: [f32; 4],
@@ -44,10 +46,12 @@ pub struct MeshDrawStyle {
     pub scalar_min: f32,
     pub scalar_max: f32,
     pub scalar_enabled: bool,
+    pub vertex_color_enabled: bool,
     pub colormap: SurfaceColormap,
     pub gloss: f32,
     pub map_opacity: f32,
     pub map_threshold: f32,
+    pub model_matrix: [[f32; 4]; 4],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -97,6 +101,7 @@ pub struct MeshResources {
 struct GpuSurface {
     vertex_buffer: wgpu::Buffer,
     scalar_buffer: wgpu::Buffer,
+    color_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     transparent_index_buffers: [wgpu::Buffer; 6],
     num_indices: u32,
@@ -163,6 +168,15 @@ impl MeshResources {
                                 offset: 0,
                                 shader_location: 2,
                                 format: wgpu::VertexFormat::Float32,
+                            }],
+                        },
+                        wgpu::VertexBufferLayout {
+                            array_stride: std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &[wgpu::VertexAttribute {
+                                offset: 0,
+                                shader_location: 3,
+                                format: wgpu::VertexFormat::Float32x4,
                             }],
                         },
                     ],
@@ -335,10 +349,16 @@ impl MeshResources {
             contents: bytemuck::cast_slice(&vec![0.0f32; surface.vertices.len()]),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
+        let color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("gifti_surface_colors"),
+            contents: bytemuck::cast_slice(&vec![[0.7f32, 0.7, 0.7, 1.0]; surface.vertices.len()]),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
 
         let bind_group_layout = self.opaque_pipeline.get_bind_group_layout(0);
         let default_uniforms = MeshUniforms {
             view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(),
+            model: glam::Mat4::IDENTITY.to_cols_array_2d(),
             color: [0.7, 0.7, 0.7, 1.0],
             camera_pos: [0.0, 0.0, 1.0],
             shininess: 24.0,
@@ -352,8 +372,9 @@ impl MeshResources {
             headlight_mix: 0.18,
             specular_strength: 0.14,
             scalar_enabled: 0,
+            vertex_color_enabled: 0,
             colormap: SurfaceColormap::BlueWhiteRed as u32,
-            _pad0: 0.0,
+            _pad0: [0.0; 4],
             fog_color: [0.0, 0.0, 0.0, 0.0],
             fog_params: [0.0, 1.0, 0.0, 0.0],
             post_params: [1.0, 1.0, 0.12, 0.0],
@@ -382,6 +403,7 @@ impl MeshResources {
             GpuSurface {
                 vertex_buffer,
                 scalar_buffer,
+                color_buffer,
                 index_buffer,
                 transparent_index_buffers,
                 num_indices: surface.indices.len() as u32,
@@ -408,6 +430,7 @@ impl MeshResources {
         if let Some(surface) = self.surfaces.get(&surface_index) {
             let uniforms = MeshUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
+                model: style.model_matrix,
                 color: style.color,
                 camera_pos: camera_pos.into(),
                 shininess: 8.0 + 80.0 * style.gloss.clamp(0.0, 1.0),
@@ -422,8 +445,9 @@ impl MeshResources {
                 specular_strength: scene_lighting.specular_strength()
                     * (0.15 + 0.85 * style.gloss.clamp(0.0, 1.0)),
                 scalar_enabled: if style.scalar_enabled { 1 } else { 0 },
+                vertex_color_enabled: if style.vertex_color_enabled { 1 } else { 0 },
                 colormap: style.colormap as u32,
-                _pad0: 0.0,
+                _pad0: [0.0; 4],
                 fog_color: [
                     render_3d.fog_color[0],
                     render_3d.fog_color[1],
@@ -457,21 +481,32 @@ impl MeshResources {
         }
     }
 
+    pub fn update_surface_colors(
+        &self,
+        queue: &wgpu::Queue,
+        surface_index: usize,
+        colors: &[[f32; 4]],
+    ) {
+        if let Some(surface) = self.surfaces.get(&surface_index) {
+            queue.write_buffer(&surface.color_buffer, 0, bytemuck::cast_slice(colors));
+        }
+    }
+
     pub fn paint_opaque(
         &self,
         render_pass: &mut wgpu::RenderPass<'static>,
-        viewport: usize,
-        draw_calls: &[(usize, MeshDrawStyle)],
+        draw_calls: &[(usize, usize, MeshDrawStyle)],
     ) {
         render_pass.set_pipeline(&self.opaque_pipeline);
-        for (surface_index, style) in draw_calls {
+        for (surface_index, viewport, style) in draw_calls {
             if let Some(surface) = self.surfaces.get(surface_index) {
                 if style.color[3] <= 0.999 {
                     continue;
                 }
-                render_pass.set_bind_group(0, &surface.bind_groups[viewport], &[]);
+                render_pass.set_bind_group(0, &surface.bind_groups[*viewport], &[]);
                 render_pass.set_vertex_buffer(0, surface.vertex_buffer.slice(..));
                 render_pass.set_vertex_buffer(1, surface.scalar_buffer.slice(..));
+                render_pass.set_vertex_buffer(2, surface.color_buffer.slice(..));
                 render_pass
                     .set_index_buffer(surface.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 render_pass.draw_indexed(0..surface.num_indices, 0, 0..1);
@@ -482,8 +517,7 @@ impl MeshResources {
     pub fn paint_transparent(
         &self,
         render_pass: &mut wgpu::RenderPass<'static>,
-        viewport: usize,
-        draw_calls: &[(usize, MeshDrawStyle)],
+        draw_calls: &[(usize, usize, MeshDrawStyle)],
         bundle_draw_calls: &[(usize, f32)],
         camera_pos: glam::Vec3,
         camera_dir: glam::Vec3,
@@ -502,16 +536,18 @@ impl MeshResources {
         }
 
         let mut draws = Vec::new();
-        for (surface_index, style) in draw_calls {
+        for (surface_index, viewport, style) in draw_calls {
             if style.color[3] <= 0.001 || style.color[3] >= 0.999 {
                 continue;
             }
             if let Some(surface) = self.surfaces.get(surface_index) {
-                let centroid = Vec3::from_array(surface.centroid);
+                let centroid = (glam::Mat4::from_cols_array_2d(&style.model_matrix)
+                    * Vec3::from_array(surface.centroid).extend(1.0))
+                .truncate();
                 let depth = (centroid - camera_pos).dot(camera_dir);
                 draws.push(TransparentDraw::Surface {
                     surface,
-                    viewport,
+                    viewport: *viewport,
                     depth,
                 });
             }
@@ -558,6 +594,7 @@ impl MeshResources {
                     render_pass.set_bind_group(0, &surface.bind_groups[viewport], &[]);
                     render_pass.set_vertex_buffer(0, surface.vertex_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, surface.scalar_buffer.slice(..));
+                    render_pass.set_vertex_buffer(2, surface.color_buffer.slice(..));
                     render_pass.set_index_buffer(
                         surface.transparent_index_buffers[transparent_order].slice(..),
                         wgpu::IndexFormat::Uint32,

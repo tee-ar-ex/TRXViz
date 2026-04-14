@@ -107,6 +107,16 @@ impl super::super::TrxVizApp {
                             self.workflow.selection = Some(WorkflowSelection::Asset(*id));
                         }
                     }
+                    workflow::WorkflowAssetDocument::Cifti { id, path, .. } => {
+                        let selected =
+                            self.workflow.selection == Some(WorkflowSelection::Asset(*id));
+                        if ui
+                            .selectable_label(selected, format!("CIFTI\n{}", path.display()))
+                            .clicked()
+                        {
+                            self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                        }
+                    }
                     workflow::WorkflowAssetDocument::Surface { id, path } => {
                         let selected =
                             self.workflow.selection == Some(WorkflowSelection::Asset(*id));
@@ -151,6 +161,7 @@ impl super::super::TrxVizApp {
             focus_bounds: &mut self.workflow.graph_focus_request,
             viewport_rect: ui.max_rect(),
             node_state: &self.workflow.runtime.node_state,
+            assets: &self.workflow.document.assets,
         };
         let response = egui_snarl::ui::SnarlWidget::new()
             .id(egui::Id::new("workflow_graph"))
@@ -512,6 +523,70 @@ impl super::super::TrxVizApp {
                     ui.add(egui::Slider::new(window_center, 0.0..=1.0).text("Window center"));
                     ui.add(egui::Slider::new(window_width, 0.01..=2.0).text("Window width"));
                 }
+                workflow::WorkflowNodeKind::SurfaceOverlayStack { layers } => {
+                    ui.small("Ordered surface appearance layers. Layer 0 provides the fallback base color and also styles the first connected scalar input.");
+                    ui.separator();
+                    for (layer_index, layer) in layers.iter_mut().enumerate() {
+                        let is_base_layer = layer_index == 0;
+                        let title = if is_base_layer {
+                            "Layer 0: Base".to_string()
+                        } else {
+                            format!("Layer {layer_index}")
+                        };
+                        ui.collapsing(title, |ui| {
+                            ui.checkbox(&mut layer.enabled, "Enabled");
+                            ui.horizontal(|ui| {
+                                ui.label("Legend");
+                                ui.text_edit_singleline(&mut layer.legend_label);
+                            });
+                            if is_base_layer {
+                                ui.label("Fallback base color");
+                                ui.color_edit_button_rgba_unmultiplied(&mut layer.solid_color);
+                            }
+                            ui.add(
+                                egui::Slider::new(&mut layer.opacity, 0.0..=1.0).text("Opacity"),
+                            );
+                            ui.checkbox(&mut layer.use_label_colors, "Use label table colors");
+                            if layer.use_label_colors {
+                                ui.small("Label overlays use the attached label-table RGBA colors.");
+                            }
+                            ui.add_enabled_ui(!layer.use_label_colors, |ui| {
+                                show_surface_colormap_picker(
+                                    ui,
+                                    format!(
+                                        "surface_overlay_colormap_{}_{}",
+                                        node_uuid.0, layer_index
+                                    ),
+                                    &mut layer.colormap,
+                                );
+                                ui.horizontal(|ui| {
+                                    ui.add(
+                                        egui::DragValue::new(&mut layer.range_min)
+                                            .speed(0.1)
+                                            .prefix("Min "),
+                                    );
+                                    ui.add(
+                                        egui::DragValue::new(&mut layer.range_max)
+                                            .speed(0.1)
+                                            .prefix("Max "),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.add(
+                                        egui::DragValue::new(&mut layer.threshold_min)
+                                            .speed(0.1)
+                                            .prefix("Thresh min "),
+                                    );
+                                    ui.add(
+                                        egui::DragValue::new(&mut layer.threshold_max)
+                                            .speed(0.1)
+                                            .prefix("Thresh max "),
+                                    );
+                                });
+                            });
+                        });
+                    }
+                }
                 workflow::WorkflowNodeKind::SurfaceDisplay {
                     color,
                     opacity,
@@ -524,10 +599,28 @@ impl super::super::TrxVizApp {
                     projection_colormap,
                     range_min,
                     range_max,
+                    space,
                 } => {
                     ui.label("Surface");
                     ui.color_edit_button_rgb(color);
                     ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
+                    egui::ComboBox::from_id_salt(format!("surface_space_{}", node_uuid.0))
+                        .selected_text(match space {
+                            workflow::SurfaceDisplaySpace::Anatomical => "Anatomical",
+                            workflow::SurfaceDisplaySpace::Stage => "Stage",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                space,
+                                workflow::SurfaceDisplaySpace::Anatomical,
+                                "Anatomical",
+                            );
+                            ui.selectable_value(
+                                space,
+                                workflow::SurfaceDisplaySpace::Stage,
+                                "Stage",
+                            );
+                        });
                     ui.separator();
                     ui.label("Slice outline");
                     ui.color_edit_button_rgb(outline_color);
@@ -933,6 +1026,40 @@ fn replace_group_fragment(groups_csv: &mut String, group_name: &str) {
         *groups_csv = format!("{group_name}, ");
     } else {
         *groups_csv = format!("{prefix} {group_name}, ");
+    }
+}
+
+fn show_surface_colormap_picker(
+    ui: &mut egui::Ui,
+    id_salt: impl std::hash::Hash,
+    colormap: &mut SurfaceColormap,
+) {
+    egui::ComboBox::from_id_salt(id_salt)
+        .selected_text(surface_colormap_label(*colormap))
+        .show_ui(ui, |ui| {
+            ui.selectable_value(
+                colormap,
+                SurfaceColormap::BlueWhiteRed,
+                surface_colormap_label(SurfaceColormap::BlueWhiteRed),
+            );
+            ui.selectable_value(
+                colormap,
+                SurfaceColormap::Viridis,
+                surface_colormap_label(SurfaceColormap::Viridis),
+            );
+            ui.selectable_value(
+                colormap,
+                SurfaceColormap::Inferno,
+                surface_colormap_label(SurfaceColormap::Inferno),
+            );
+        });
+}
+
+fn surface_colormap_label(colormap: SurfaceColormap) -> &'static str {
+    match colormap {
+        SurfaceColormap::BlueWhiteRed => "Blue-White-Red",
+        SurfaceColormap::Viridis => "Viridis",
+        SurfaceColormap::Inferno => "Inferno",
     }
 }
 

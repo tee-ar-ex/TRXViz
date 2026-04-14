@@ -28,6 +28,8 @@ enum ViewArg {
     View3d,
     #[value(name = "2d")]
     View2d,
+    #[value(name = "stage")]
+    Stage,
 }
 
 #[derive(Args)]
@@ -78,6 +80,8 @@ struct ExportSceneArgs {
     width: u32,
     #[arg(long, default_value_t = 1080)]
     height: u32,
+    #[arg(long, value_enum, default_value_t = ViewArg::View3d)]
+    view: ViewArg,
     #[arg(long, value_parser = parse_vec3)]
     target: Option<Vec3>,
     #[arg(long)]
@@ -116,6 +120,7 @@ fn run_render(args: RenderArgs) -> anyhow::Result<()> {
         view: match args.view {
             ViewArg::View3d => HeadlessView::View3D,
             ViewArg::View2d => HeadlessView::View2D,
+            ViewArg::Stage => HeadlessView::InflatedStage,
         },
         target: args.target,
         azimuth_deg: args.azimuth,
@@ -152,6 +157,11 @@ fn run_render(args: RenderArgs) -> anyhow::Result<()> {
 }
 
 fn run_export_scene(args: ExportSceneArgs) -> anyhow::Result<()> {
+    let view = match args.view {
+        ViewArg::View3d => HeadlessView::View3D,
+        ViewArg::Stage => HeadlessView::InflatedStage,
+        ViewArg::View2d => bail!("--view 2d is not supported for scene export"),
+    };
     let options = HeadlessSceneExportOptions {
         format: HeadlessSceneExportFormat::Glb,
         include_camera: args.include_camera,
@@ -159,6 +169,7 @@ fn run_export_scene(args: ExportSceneArgs) -> anyhow::Result<()> {
         include_slices: args.include_slices,
         width: args.width,
         height: args.height,
+        view,
         target: args.target,
         azimuth_deg: args.azimuth,
         elevation_deg: args.elevation,
@@ -323,6 +334,29 @@ mod tests {
                 assert!(args.include_slices);
             }
             Command::Render(_) => panic!("expected export-scene command"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_export_scene_stage_command() {
+        let cli = Cli::parse_from([
+            "trxviz-cli",
+            "export-scene",
+            "--project",
+            "workflow.json",
+            "--out",
+            "scene.glb",
+            "--view",
+            "stage",
+        ]);
+
+        match cli.command {
+            Command::ExportScene(args) => {
+                assert_eq!(args.project, Some(PathBuf::from("workflow.json")));
+                assert_eq!(args.out, PathBuf::from("scene.glb"));
+                assert!(matches!(args.view, ViewArg::Stage));
+            }
+            _ => panic!("expected export-scene command"),
         }
     }
 }
