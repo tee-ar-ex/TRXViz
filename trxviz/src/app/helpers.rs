@@ -8,6 +8,7 @@ pub(super) enum DroppedPathKind {
     OpenTrx,
     ImportTractogram(Format),
     OpenNifti,
+    OpenCifti,
     OpenParcellation,
     OpenGifti,
     Unsupported,
@@ -56,6 +57,17 @@ mod tests {
 }
 
 fn classify_nifti_like(path: &Path, file_name: &str) -> DroppedPathKind {
+    if [
+        ".dscalar.nii",
+        ".dlabel.nii",
+        ".dtseries.nii",
+        ".pscalar.nii",
+    ]
+    .iter()
+    .any(|suffix| file_name.ends_with(suffix))
+    {
+        return DroppedPathKind::OpenCifti;
+    }
     if guess_label_table_path(path).is_some()
         || ["parcel", "parc", "atlas", "label", "seg", "segmentation"]
             .iter()

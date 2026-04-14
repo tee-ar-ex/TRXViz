@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::data::cifti::LoadedCifti as LoadedCiftiData;
 use crate::data::nifti_data::NiftiVolume;
 use crate::data::trx_data::TrxGpuData;
 use trx_rs::{AnyTrxFile, Tractogram};
@@ -73,5 +74,13 @@ pub struct LoadedNifti {
     pub z_order: i32,
     pub window_center: f32,
     pub window_width: f32,
+    pub visible: bool,
+}
+
+pub struct LoadedCifti {
+    pub id: FileId,
+    pub name: String,
+    pub path: PathBuf,
+    pub data: Arc<LoadedCiftiData>,
     pub visible: bool,
 }

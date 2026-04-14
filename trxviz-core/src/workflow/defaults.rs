@@ -1,6 +1,12 @@
+use std::path::Path;
+use std::sync::OnceLock;
+
+use regex::Regex;
+
 use crate::data::loaded_files::VolumeColormap;
-use crate::data::trx_data::RenderStyle;
 use crate::renderer::mesh_renderer::SurfaceColormap;
+use crate::data::cifti::CiftiStructure;
+use crate::data::trx_data::RenderStyle;
 
 use super::graph::{GraphPos, GraphRect, InPort, OutPort};
 use super::*;
@@ -147,11 +153,76 @@ pub fn add_default_nodes_for_asset(
                 primary_selection: WorkflowSelection::Node(source),
             }
         }
-        WorkflowAssetDocument::Surface { id, .. } => {
+        WorkflowAssetDocument::Cifti { id, .. } => {
+            let source = make_node(
+                document,
+                WorkflowNodeKind::CiftiSource { source_id: *id },
+                pos,
+            );
+            let left = make_node(
+                document,
+                WorkflowNodeKind::CiftiStructure {
+                    structure: CiftiStructure::CortexLeft,
+                    map_index: 0,
+                },
+                offset(pos, 240.0, -80.0),
+            );
+            let right = make_node(
+                document,
+                WorkflowNodeKind::CiftiStructure {
+                    structure: CiftiStructure::CortexRight,
+                    map_index: 0,
+                },
+                offset(pos, 240.0, 0.0),
+            );
+            let subcortical = make_node(
+                document,
+                WorkflowNodeKind::CiftiStructure {
+                    structure: CiftiStructure::Subcortical,
+                    map_index: 0,
+                },
+                offset(pos, 240.0, 80.0),
+            );
+            document.graph.connect(
+                OutPort { node: source, output: 0 },
+                InPort { node: left, input: 0 },
+            );
+            document.graph.connect(
+                OutPort { node: source, output: 0 },
+                InPort {
+                    node: right,
+                    input: 0,
+                },
+            );
+            document.graph.connect(
+                OutPort { node: source, output: 0 },
+                InPort {
+                    node: subcortical,
+                    input: 0,
+                },
+            );
+            SeededWorkflowBranch {
+                bounds: branch_bounds(document, &[source, left, right, subcortical]),
+                primary_selection: WorkflowSelection::Node(source),
+            }
+        }
+        WorkflowAssetDocument::Surface { id, path } => {
+            let default_surface_space = if guess_non_anatomical_surface(path) {
+                SurfaceDisplaySpace::Stage
+            } else {
+                SurfaceDisplaySpace::Anatomical
+            };
             let source = make_node(
                 document,
                 WorkflowNodeKind::SurfaceSource { source_id: *id },
                 pos,
+            );
+            let overlay = make_node(
+                document,
+                WorkflowNodeKind::SurfaceOverlayStack {
+                    layers: default_surface_overlay_layers(),
+                },
+                offset(pos, 220.0, 0.0),
             );
             let display = make_node(
                 document,
@@ -167,12 +238,14 @@ pub fn add_default_nodes_for_asset(
                     projection_colormap: SurfaceColormap::Inferno,
                     range_min: 0.0,
                     range_max: 1.0,
+                    space: default_surface_space,
                 },
-                offset(pos, 220.0, 0.0),
+                offset(pos, 440.0, 0.0),
             );
-            connect_chain(document, source, display);
+            connect_chain(document, source, overlay);
+            connect_chain(document, overlay, display);
             SeededWorkflowBranch {
-                bounds: branch_bounds(document, &[source, display]),
+                bounds: branch_bounds(document, &[source, overlay, display]),
                 primary_selection: WorkflowSelection::Node(source),
             }
         }
@@ -196,5 +269,47 @@ pub fn add_default_nodes_for_asset(
                 primary_selection: WorkflowSelection::Node(source),
             }
         }
+    }
+}
+
+fn guess_non_anatomical_surface(path: &Path) -> bool {
+    let file_name = match path.file_name() {
+        Some(name) => name.to_string_lossy(),
+        None => return false,
+    };
+    non_anatomical_surface_regex().is_match(&file_name)
+}
+
+fn non_anatomical_surface_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"(?i)([-_.](sphere|inflated)[-_.])").expect("valid non-anatomical regex")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::guess_non_anatomical_surface;
+    use std::path::Path;
+
+    #[test]
+    fn guesses_inflated_surface_as_non_anatomical() {
+        assert!(guess_non_anatomical_surface(Path::new(
+            "100307.L.inflated.164k_fs_LR.surf.gii"
+        )));
+    }
+
+    #[test]
+    fn guesses_sphere_surface_as_non_anatomical() {
+        assert!(guess_non_anatomical_surface(Path::new(
+            "subject-L_sphere.surf.gii"
+        )));
+    }
+
+    #[test]
+    fn anatomical_surface_name_is_not_promoted_to_stage() {
+        assert!(!guess_non_anatomical_surface(Path::new(
+            "subject.L.midthickness.surf.gii"
+        )));
     }
 }

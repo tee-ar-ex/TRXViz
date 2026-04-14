@@ -6,9 +6,10 @@ use trx_rs::{
     AnyTrxFile, ConcatenateOptions, ConversionOptions, DType, Format, concatenate_any_trx,
     header_from_reference,
 };
+use trxviz_core::data::cifti::LoadedCifti as LoadedCiftiData;
 use trxviz_core::data::gifti_data::GiftiSurfaceData;
 use trxviz_core::data::loaded_files::{
-    FileId, LoadedNifti, LoadedTrx, StreamlineBacking, VolumeColormap,
+    FileId, LoadedCifti, LoadedNifti, LoadedTrx, StreamlineBacking, VolumeColormap,
 };
 use trxviz_core::data::nifti_data::NiftiVolume;
 use trxviz_core::data::orientation_field::BoundaryContactField;
@@ -110,6 +111,37 @@ impl super::TrxVizApp {
         std::thread::spawn(move || {
             let result = NiftiVolume::load(&path).map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::NiftiLoaded {
+                job_id,
+                path,
+                result,
+            });
+        });
+    }
+
+    pub(super) fn begin_load_cifti(&mut self, path: PathBuf) {
+        let job_id = self.next_job_id;
+        self.next_job_id += 1;
+        let tx = self.worker_tx.clone();
+        let label = path
+            .file_name()
+            .map(|n| format!("Loading {}", n.to_string_lossy()))
+            .unwrap_or_else(|| "Loading CIFTI".to_string());
+        self.pending_file_loads
+            .push(super::state::PendingFileLoad { job_id, label });
+        std::thread::spawn(move || {
+            let result = LoadedCiftiData::load(&path)
+                .map(|data| LoadedCifti {
+                    id: 0,
+                    name: path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "cifti".to_string()),
+                    path: path.clone(),
+                    data: Arc::new(data),
+                    visible: true,
+                })
+                .map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::CiftiLoaded {
                 job_id,
                 path,
                 result,
@@ -560,6 +592,37 @@ impl super::TrxVizApp {
             self.viewport.camera_3d = OrbitCamera::new(center, extent * 0.8);
             self.reset_slice_cameras();
             self.viewport.slice_world_offsets = [center.z, center.y, center.x];
+        }
+        self.error_msg = None;
+        self.status_msg = None;
+    }
+
+    pub(super) fn apply_loaded_cifti(&mut self, path: PathBuf, cifti: LoadedCifti) {
+        self.apply_loaded_cifti_with_options(path, cifti, None, true);
+    }
+
+    pub(super) fn apply_loaded_cifti_with_options(
+        &mut self,
+        path: PathBuf,
+        mut cifti: LoadedCifti,
+        explicit_id: Option<FileId>,
+        register_workflow_asset: bool,
+    ) {
+        let id = self.allocate_file_id(explicit_id.or(Some(cifti.id)).filter(|id| *id != 0));
+        cifti.id = id;
+        cifti.name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "cifti.nii".to_string());
+        cifti.path = path.clone();
+        let intent = cifti.data.intent;
+        self.scene.cifti_files.push(cifti);
+        if register_workflow_asset {
+            self.register_workflow_asset(
+                WorkflowAssetDocument::Cifti { id, path, intent },
+                true,
+                None,
+            );
         }
         self.error_msg = None;
         self.status_msg = None;

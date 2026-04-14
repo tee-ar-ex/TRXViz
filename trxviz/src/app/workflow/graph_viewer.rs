@@ -11,6 +11,8 @@
 //! letting us reuse the existing editor widget.
 
 use std::collections::{BTreeSet, HashMap};
+use std::path::Path;
+use std::sync::OnceLock;
 
 use egui::emath::TSTransform;
 use egui::{Pos2, Rect};
@@ -18,6 +20,7 @@ use egui_snarl::{
     InPin, InPinId, NodeId, OutPin, OutPinId, Snarl,
     ui::{PinInfo, SnarlViewer},
 };
+use regex::Regex;
 
 use trxviz_core::data::loaded_files::VolumeColormap;
 use trxviz_core::data::trx_data::RenderStyle;
@@ -189,14 +192,34 @@ pub struct WorkflowGraphViewer<'a> {
     pub focus_bounds: &'a mut Option<Rect>,
     pub viewport_rect: Rect,
     pub node_state: &'a HashMap<WorkflowNodeUuid, NodeEvalState>,
+    pub assets: &'a [WorkflowAssetDocument],
 }
 
 impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
     fn title(&mut self, node: &WorkflowNode) -> String {
-        if node.label.is_empty() {
+        let base = if node.label.is_empty() {
             node.kind.title().to_string()
         } else {
             node.label.clone()
+        };
+        match &node.kind {
+            WorkflowNodeKind::SurfaceSource { source_id } => {
+                let guess = self
+                    .assets
+                    .iter()
+                    .find_map(|asset| match asset {
+                        WorkflowAssetDocument::Surface { id, path } if id == source_id => {
+                            guess_surface_hemisphere(path)
+                        }
+                        _ => None,
+                    });
+                match guess {
+                    Some(HemisphereGuess::Left) => format!("{base} (Left)"),
+                    Some(HemisphereGuess::Right) => format!("{base} (Right)"),
+                    None => base,
+                }
+            }
+            _ => base,
         }
     }
 
@@ -531,6 +554,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     projection_colormap: SurfaceColormap::Inferno,
                     range_min: 0.0,
                     range_max: 1.0,
+                    space: SurfaceDisplaySpace::Anatomical,
                 },
             );
             add_node_button(
@@ -634,6 +658,33 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HemisphereGuess {
+    Left,
+    Right,
+}
+
+fn guess_surface_hemisphere(path: &Path) -> Option<HemisphereGuess> {
+    let file_name = path.file_name()?.to_string_lossy();
+    if left_hemisphere_regex().is_match(&file_name) {
+        return Some(HemisphereGuess::Left);
+    }
+    if right_hemisphere_regex().is_match(&file_name) {
+        return Some(HemisphereGuess::Right);
+    }
+    None
+}
+
+fn left_hemisphere_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"(?i)(left|[-_.]l[-_.])").expect("valid left regex"))
+}
+
+fn right_hemisphere_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"(?i)(right|[-_.]r[-_.])").expect("valid right regex"))
+}
+
 fn port_name(port: PortKind) -> &'static str {
     match port {
         PortKind::Streamline => "Streamline",
@@ -641,7 +692,10 @@ fn port_name(port: PortKind) -> &'static str {
         PortKind::Surface => "Surface",
         PortKind::Parcellation => "Parcellation",
         PortKind::ParcelSelection => "Parcel Set",
-        PortKind::SurfaceMap => "Surface Map",
+        PortKind::Cifti => "CIFTI",
+        PortKind::SurfaceScalars => "Surface Scalars",
+        PortKind::VolumeScalars => "Volume Scalars",
+        PortKind::SurfaceAppearance => "Surface Appearance",
         PortKind::BundleSurface => "Bundle Surface",
         PortKind::BoundaryField => "Boundary Field",
     }
@@ -673,7 +727,10 @@ fn pin_info_for_port(port: PortKind) -> PinInfo {
         PortKind::Surface => egui::Color32::from_rgb(145, 255, 161),
         PortKind::Parcellation => egui::Color32::from_rgb(255, 108, 145),
         PortKind::ParcelSelection => egui::Color32::from_rgb(255, 217, 79),
-        PortKind::SurfaceMap => egui::Color32::from_rgb(214, 139, 255),
+        PortKind::Cifti => egui::Color32::from_rgb(120, 176, 255),
+        PortKind::SurfaceScalars => egui::Color32::from_rgb(214, 139, 255),
+        PortKind::VolumeScalars => egui::Color32::from_rgb(255, 145, 112),
+        PortKind::SurfaceAppearance => egui::Color32::from_rgb(170, 226, 145),
         PortKind::BundleSurface => egui::Color32::from_rgb(143, 224, 201),
         PortKind::BoundaryField => egui::Color32::from_rgb(255, 160, 96),
     };
@@ -683,6 +740,7 @@ fn pin_info_for_port(port: PortKind) -> PinInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn moving_node_only_reports_position_change() {
@@ -713,5 +771,41 @@ mod tests {
         assert!(!summary.topology_changed);
         assert!(!summary.node_params_changed);
         assert!(!summary.semantic_changed());
+    }
+
+    #[test]
+    fn hemisphere_guess_finds_left_word() {
+        assert_eq!(
+            guess_surface_hemisphere(Path::new("subject_left.surf.gii")),
+            Some(HemisphereGuess::Left)
+        );
+    }
+
+    #[test]
+    fn hemisphere_guess_finds_right_token() {
+        assert_eq!(
+            guess_surface_hemisphere(Path::new("subject.R.inflated.surf.gii")),
+            Some(HemisphereGuess::Right)
+        );
+    }
+
+    #[test]
+    fn hemisphere_guess_ignores_unmatched_names() {
+        assert_eq!(
+            guess_surface_hemisphere(Path::new("subject_inflated.surf.gii")),
+            None
+        );
+    }
+
+    #[test]
+    fn hemisphere_guess_matches_mixed_separator_tokens() {
+        assert_eq!(
+            guess_surface_hemisphere(Path::new("subject-L_inflated.surf.gii")),
+            Some(HemisphereGuess::Left)
+        );
+        assert_eq!(
+            guess_surface_hemisphere(Path::new("subject.R-inflated.surf.gii")),
+            Some(HemisphereGuess::Right)
+        );
     }
 }

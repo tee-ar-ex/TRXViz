@@ -76,11 +76,9 @@ impl crate::app::TrxVizApp {
         }
     }
 
-    /// Draw 3D orientation axes in the corner of the 3D viewport.
+    /// Draw 3D orientation axes in the corner of the main 3D viewport.
     pub(super) fn draw_3d_axes(&self, ui: &egui::Ui, rect: egui::Rect, view_proj: glam::Mat4) {
         let painter = ui.painter_at(rect);
-
-        // Place axes in bottom-left corner
         let origin_screen = egui::pos2(rect.left() + 50.0, rect.bottom() - 50.0);
         let axis_length = 30.0;
 
@@ -91,14 +89,12 @@ impl crate::app::TrxVizApp {
         ];
 
         for (dir, label, color) in axes {
-            // Project the direction vector (just the rotation, no translation)
             let clip0 = view_proj * Vec3::ZERO.extend(1.0);
             let clip1 = view_proj * dir.extend(1.0);
-            // Direction in NDC
             let ndc0 = egui::vec2(clip0.x / clip0.w, clip0.y / clip0.w);
             let ndc1 = egui::vec2(clip1.x / clip1.w, clip1.y / clip1.w);
             let dir_ndc = ndc1 - ndc0;
-            let dir_screen = egui::vec2(dir_ndc.x, -dir_ndc.y); // flip Y
+            let dir_screen = egui::vec2(dir_ndc.x, -dir_ndc.y);
             let dir_norm = if dir_screen.length() > 0.001 {
                 dir_screen / dir_screen.length()
             } else {

@@ -86,6 +86,13 @@ impl super::super::TrxVizApp {
                                     self.show_simple_parcellation_summary(ui, id);
                                 }
                             }
+                            (_, WorkflowAssetDocument::Cifti { id, path, .. }) => {
+                                ui.group(|ui| {
+                                    ui.strong(format!("CIFTI {}", id));
+                                    ui.small(path.display().to_string());
+                                    ui.small("CIFTI assets are available in Advanced mode.");
+                                });
+                            }
                             (_, WorkflowAssetDocument::Streamlines { id, .. }) => {
                                 self.show_simple_streamline_asset(
                                     ui,

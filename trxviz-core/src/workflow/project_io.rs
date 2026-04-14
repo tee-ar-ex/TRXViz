@@ -35,6 +35,7 @@ fn asset_path_mut(asset: &mut WorkflowAssetDocument) -> &mut PathBuf {
     match asset {
         WorkflowAssetDocument::Streamlines { path, .. }
         | WorkflowAssetDocument::Volume { path, .. }
+        | WorkflowAssetDocument::Cifti { path, .. }
         | WorkflowAssetDocument::Surface { path, .. }
         | WorkflowAssetDocument::Parcellation { path, .. } => path,
     }

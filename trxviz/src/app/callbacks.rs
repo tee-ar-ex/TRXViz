@@ -41,7 +41,7 @@ pub(super) struct Scene3DCallback {
     pub(super) show_streamlines: bool,
     pub(super) volume_draws: Vec<VolumeDrawInfo>,
     pub(super) slice_visible: [bool; 3],
-    pub(super) surface_draws: Vec<(usize, MeshDrawStyle)>,
+    pub(super) surface_draws: Vec<(usize, usize, MeshDrawStyle)>,
     pub(super) bundle_draws: Vec<BundleDrawInfo>,
     pub(super) show_boundary_glyphs: bool,
     pub(super) boundary_glyph_color_mode: BoundaryGlyphColorMode,
@@ -115,11 +115,11 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
             }
         }
         if let Some(res) = callback_resources.get_mut::<MeshResources>() {
-            for (surface_index, style) in &self.surface_draws {
+            for (surface_index, uniform_slot, style) in &self.surface_draws {
                 res.update_surface_uniforms(
                     queue,
                     *surface_index,
-                    0,
+                    *uniform_slot,
                     self.view_proj,
                     style,
                     self.camera_pos,
@@ -244,7 +244,7 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
 
         if let Some(mr) = callback_resources.get::<MeshResources>() {
             if !self.surface_draws.is_empty() {
-                mr.paint_opaque(render_pass, 0, &self.surface_draws);
+                mr.paint_opaque(render_pass, &self.surface_draws);
             }
             if !self.bundle_draws.is_empty() {
                 let bundle_draws: Vec<(usize, f32)> = self
@@ -255,7 +255,6 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                 mr.paint_bundle_opaque(render_pass, &bundle_draws);
                 mr.paint_transparent(
                     render_pass,
-                    0,
                     &self.surface_draws,
                     &bundle_draws,
                     self.camera_pos,
@@ -264,7 +263,6 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
             } else if !self.surface_draws.is_empty() {
                 mr.paint_transparent(
                     render_pass,
-                    0,
                     &self.surface_draws,
                     &[],
                     self.camera_pos,

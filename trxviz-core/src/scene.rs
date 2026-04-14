@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::data::gifti_data::GiftiSurfaceData;
-use crate::data::loaded_files::{FileId, LoadedNifti, LoadedTrx, StreamlineBacking};
+use crate::data::loaded_files::{FileId, LoadedCifti, LoadedNifti, LoadedTrx, StreamlineBacking};
 use crate::data::orientation_field::BoundaryContactField;
 use crate::data::parcellation_data::ParcellationVolume;
 use crate::data::trx_data::TrxGpuData;
@@ -52,6 +52,7 @@ pub struct LoadedParcellationSource {
 pub struct HeadlessScene {
     pub trx_files: Vec<LoadedTrx>,
     pub nifti_files: Vec<LoadedNifti>,
+    pub cifti_files: Vec<LoadedCifti>,
     pub gifti_surfaces: Vec<LoadedGiftiSurface>,
     pub parcellations: Vec<LoadedParcellation>,
     pub next_file_id: FileId,
@@ -69,6 +70,7 @@ impl Default for HeadlessScene {
         Self {
             trx_files: Vec::new(),
             nifti_files: Vec::new(),
+            cifti_files: Vec::new(),
             gifti_surfaces: Vec::new(),
             parcellations: Vec::new(),
             next_file_id: 0,
