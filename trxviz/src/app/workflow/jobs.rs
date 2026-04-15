@@ -43,6 +43,15 @@ impl crate::app::TrxVizApp {
         self.workflow.editor_interaction_active = true;
     }
 
+    /// Mark a change to a render-only parameter (color, opacity, visibility toggle,
+    /// outline thickness, etc.).  The graph is re-evaluated immediately on the next
+    /// frame so the scene plan updates, but document_revision is NOT incremented, so
+    /// no fingerprints become stale and the "Run Expensive Nodes" flow is never
+    /// triggered by pure display changes.
+    pub(in crate::app) fn mark_render_only_edit(&mut self) {
+        self.workflow.render_only_changed = true;
+    }
+
     pub(in crate::app) fn mark_workflow_nonsemantic_edit(&mut self) {
         self.workflow.editor_interaction_active = true;
     }
@@ -214,6 +223,7 @@ impl crate::app::TrxVizApp {
         }
         if changed {
             self.workflow.last_runtime_revision += 1;
+            self.workflow.pending_job_completion = true;
         }
     }
 
@@ -452,11 +462,14 @@ impl crate::app::TrxVizApp {
 
     pub(in crate::app) fn refresh_workflow_runtime_if_needed(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
-        let needs_interactive =
-            self.workflow.document_revision != self.workflow.last_interactive_revision;
+        let needs_interactive = self.workflow.document_revision != self.workflow.last_interactive_revision
+            || self.workflow.render_only_changed
+            || self.workflow.pending_job_completion;
         if needs_interactive {
             self.refresh_workflow_runtime(WorkflowEvalMode::Interactive);
             self.workflow.last_interactive_revision = self.workflow.document_revision;
+            self.workflow.render_only_changed = false;
+            self.workflow.pending_job_completion = false;
         }
 
         let should_run_settled = self.workflow.run_expensive_requested
@@ -795,6 +808,8 @@ impl crate::app::TrxVizApp {
         self.workflow.next_draw_id = 1_000_000;
         self.workflow.run_expensive_requested = false;
         self.workflow.run_session_active = false;
+        self.workflow.render_only_changed = false;
+        self.workflow.pending_job_completion = false;
         self.workflow.jobs_in_flight.clear();
         self.workflow.document_revision += 1;
         self.workflow.last_interactive_revision = 0;

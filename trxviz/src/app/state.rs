@@ -525,6 +525,15 @@ pub struct WorkflowState {
     pub execution_cache: WorkflowExecutionCache,
     pub run_expensive_requested: bool,
     pub run_session_active: bool,
+    /// Set when a render-only parameter changes (color, opacity, visibility toggle).
+    /// Triggers an immediate graph re-evaluation without incrementing document_revision,
+    /// so no fingerprints become stale and no expensive jobs are triggered.
+    pub render_only_changed: bool,
+    /// Set when a background job completes (poll_workflow_job_messages saw a Finished message).
+    /// Triggers an immediate interactive re-evaluation so downstream synchronous nodes
+    /// (e.g. SurfaceOverlayStack) pick up the new cached data without requiring a second
+    /// button press.
+    pub pending_job_completion: bool,
     pub document_revision: u64,
     pub last_interactive_revision: u64,
     pub last_settled_revision: u64,
@@ -557,6 +566,8 @@ impl WorkflowState {
             execution_cache: WorkflowExecutionCache::default(),
             run_expensive_requested: false,
             run_session_active: false,
+            render_only_changed: false,
+            pending_job_completion: false,
             document_revision: 1,
             last_interactive_revision: 0,
             last_settled_revision: 0,

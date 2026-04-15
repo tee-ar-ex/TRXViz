@@ -243,6 +243,27 @@ pub enum SurfaceDisplaySpace {
     Stage,
 }
 
+/// Serialize an f32 threshold: finite values as numbers, ±infinity as `null`.
+/// `null` is also accepted on deserialization and maps back to ±infinity
+/// (sign is determined by the default for each field).
+fn serialize_f32_inf_as_null<S: serde::Serializer>(v: &f32, s: S) -> Result<S::Ok, S::Error> {
+    if v.is_finite() {
+        s.serialize_f32(*v)
+    } else {
+        s.serialize_none()
+    }
+}
+
+fn deserialize_threshold_min<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    let opt: Option<f32> = serde::Deserialize::deserialize(d)?;
+    Ok(opt.unwrap_or(f32::NEG_INFINITY))
+}
+
+fn deserialize_threshold_max<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    let opt: Option<f32> = serde::Deserialize::deserialize(d)?;
+    Ok(opt.unwrap_or(f32::INFINITY))
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SurfaceOverlayLayerConfig {
     pub enabled: bool,
@@ -251,7 +272,15 @@ pub struct SurfaceOverlayLayerConfig {
     pub colormap: SurfaceColormap,
     pub range_min: f32,
     pub range_max: f32,
+    #[serde(
+        serialize_with = "serialize_f32_inf_as_null",
+        deserialize_with = "deserialize_threshold_min"
+    )]
     pub threshold_min: f32,
+    #[serde(
+        serialize_with = "serialize_f32_inf_as_null",
+        deserialize_with = "deserialize_threshold_max"
+    )]
     pub threshold_max: f32,
     pub use_label_colors: bool,
     pub legend_label: String,

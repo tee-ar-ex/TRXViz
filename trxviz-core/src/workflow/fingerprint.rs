@@ -5,6 +5,34 @@ use crate::data::trx_data::ColorMode;
 
 use super::*;
 
+/// Fingerprint for SurfaceOverlayStack. Captures all layer configuration and
+/// whether upstream scalar inputs are currently stale, so that downstream nodes
+/// can detect when the composed vertex-colour array has genuinely changed.
+pub fn workflow_surface_overlay_fingerprint(
+    surface_id: FileId,
+    layers: &[SurfaceOverlayLayerConfig],
+    upstream_stale: bool,
+) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    surface_id.hash(&mut hasher);
+    upstream_stale.hash(&mut hasher);
+    layers.len().hash(&mut hasher);
+    for layer in layers {
+        layer.enabled.hash(&mut hasher);
+        for c in layer.solid_color {
+            c.to_bits().hash(&mut hasher);
+        }
+        layer.opacity.to_bits().hash(&mut hasher);
+        (layer.colormap as u32).hash(&mut hasher);
+        layer.range_min.to_bits().hash(&mut hasher);
+        layer.range_max.to_bits().hash(&mut hasher);
+        layer.threshold_min.to_bits().hash(&mut hasher);
+        layer.threshold_max.to_bits().hash(&mut hasher);
+        layer.use_label_colors.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 pub fn workflow_streamline_fingerprint(draw: &StreamlineDrawPlan) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     draw.label.hash(&mut hasher);
@@ -115,7 +143,8 @@ pub fn workflow_bundle_build_fingerprint(draw: &BundleDrawPlan) -> u64 {
     draw.min_component_volume_mm3.to_bits().hash(&mut hasher);
     draw.tube_radius_mm.to_bits().hash(&mut hasher);
     draw.tube_sides.hash(&mut hasher);
-    draw.opacity.to_bits().hash(&mut hasher);
+    // opacity is excluded: it is a render-only parameter (GPU uniform) and does not
+    // affect mesh geometry, so opacity changes must not trigger a mesh rebuild.
     hash_flow(&draw.flow, &mut hasher);
     hasher.finish()
 }
@@ -142,7 +171,8 @@ pub fn workflow_bundle_plan_fingerprint(plan: &BundleSurfacePlan) -> u64 {
     plan.min_component_volume_mm3.to_bits().hash(&mut hasher);
     plan.tube_radius_mm.to_bits().hash(&mut hasher);
     plan.tube_sides.hash(&mut hasher);
-    plan.opacity.to_bits().hash(&mut hasher);
+    // opacity is excluded: it is a render-only parameter (GPU uniform) and does not
+    // affect mesh geometry, so opacity changes must not trigger a mesh rebuild.
     hash_flow(&plan.flow, &mut hasher);
     hasher.finish()
 }

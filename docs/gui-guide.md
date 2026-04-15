@@ -1,6 +1,6 @@
 # GUI Guide
 
-## Interface Model
+## Modes
 
 TRXViz is designed around two usage modes:
 
@@ -10,7 +10,7 @@ TRXViz is designed around two usage modes:
 The desktop app combines:
 
 - a 3D perspective viewer
-- an optional `Inflated Stage` pop-out viewer for non-anatomical cortical layouts
+- an optional `Inflated Stage` pop-out viewer for non-anatomical cortical layouts (like inflated or Very Inflated surfaces)
 - axial, coronal, and sagittal slice views
 - asset and inspector panes
 - workflow graph editing when advanced mode is enabled
@@ -71,6 +71,41 @@ scalar layers.
 - Each layer has its own colormap, numeric range, thresholding, opacity, visibility, and legend label.
 - `dlabel` overlays can use attached label-table colors instead of numeric colormaps.
 - CIFTI cortex outputs and streamline-derived surface scalars can both feed the same overlay stack.
+
+### Layer controls
+
+Each layer in the inspector exposes the following controls. Controls marked *(scalar input required)*
+only have a visible effect when a scalar input is connected to that layer's input port.
+
+**Enabled** — toggles the layer on or off. Disabled layers are skipped entirely; the layer beneath
+shows through.
+
+**Legend label** — text shown in the figure legend. Purely cosmetic.
+
+**Fallback base color** *(base layer only)* — the RGBA color applied to every vertex before any
+scalar overlays are blended. This is what you see when no scalar input is connected to layer 0, or
+for any vertex not reached by an enabled overlay.
+
+**Opacity** — *(scalar input required)* the alpha value blended over lower layers for each
+colored vertex. 1.0 fully replaces the color below; 0.0 makes the layer invisible. Vertices that
+are skipped by thresholding are unaffected and remain fully transparent to this layer.
+
+**Use label table colors** *(scalar input required)* — for `dlabel` scalar inputs, uses the
+integer label index to look up RGBA colors from the attached label table instead of the colormap.
+When this is on, the Colormap, Min, Max, and threshold controls are all ignored.
+
+**Colormap** *(scalar input required, disabled when "Use label table colors" is on)* — the color
+ramp mapped across the scalar range. Values at Min receive the first ramp color; values at Max
+receive the last.
+
+**Min / Max** *(scalar input required)* — the scalar range that spans the full colormap. Values
+outside this range are clamped to the nearest endpoint rather than hidden. When the scalar
+metadata includes a suggested range, that range is used and these fields act as a fallback only.
+
+**Thresh min / Thresh max** *(scalar input required)* — a hard visibility gate. Vertices whose
+scalar value falls below Thresh min or above Thresh max are skipped (not colored), letting the
+layer beneath show through. Defaults to −∞ / +∞ (no thresholding). Useful for masking
+low-density regions or clipping outliers.
 
 ## Saving And Reusing The 3D Camera
 

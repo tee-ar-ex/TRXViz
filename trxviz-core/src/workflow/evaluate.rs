@@ -18,7 +18,7 @@ use crate::data::trx_data::{ColorMode, RenderStyle, TrxGpuData};
 use crate::renderer::mesh_renderer::SurfaceColormap;
 use crate::scene::LoadedGiftiSurface;
 
-use super::jobs::{prime_expensive_record, sync_node_state_from_run_record};
+use super::jobs::{mark_expensive_success, prime_expensive_record, sync_node_state_from_run_record};
 use super::*;
 
 pub fn evaluate_scene_plan(
@@ -31,13 +31,7 @@ pub fn evaluate_scene_plan(
     display_ids: &mut HashMap<WorkflowNodeUuid, StreamlineDisplayRuntime>,
     next_draw_id: &mut FileId,
     execution_cache: &mut WorkflowExecutionCache,
-    run_expensive: bool,
 ) -> WorkflowRuntime {
-    let mode = if run_expensive {
-        WorkflowEvalMode::Settled
-    } else {
-        WorkflowEvalMode::Settled
-    };
     evaluate_scene_plan_with_mode(
         document,
         streamline_assets,
@@ -48,7 +42,7 @@ pub fn evaluate_scene_plan(
         display_ids,
         next_draw_id,
         execution_cache,
-        mode,
+        WorkflowEvalMode::Interactive,
     )
 }
 
@@ -176,12 +170,13 @@ pub fn evaluate_scene_plan_with_mode(
         .surface_draws
         .iter_mut()
         .for_each(|draw| {
-            if let Some(projection) = projection_by_surface.get(&draw.source_id) {
-                draw.show_projection_map = true;
-                let range = projection.metadata.suggested_range.unwrap_or((0.0, 1.0));
-                draw.range_min = range.0;
-                draw.range_max = range.1;
-                draw.projection_scalars = Some(projection.values.clone());
+            if draw.show_projection_map {
+                if let Some(projection) = projection_by_surface.get(&draw.source_id) {
+                    let range = projection.metadata.suggested_range.unwrap_or((0.0, 1.0));
+                    draw.range_min = range.0;
+                    draw.range_max = range.1;
+                    draw.projection_scalars = Some(projection.values.clone());
+                }
             }
         });
 
@@ -895,8 +890,22 @@ fn evaluate_node(
             let surface = surface_assets
                 .get(&surface_id)
                 .ok_or_else(|| format!("Missing surface {surface_id}"))?;
+            let upstream_stale = inputs.iter().flatten().any(|v| v.stale);
+            let fingerprint =
+                workflow_surface_overlay_fingerprint(surface_id, layers, upstream_stale);
             let appearance = compose_surface_appearance(surface_id, surface, layers, &inputs[1..])?;
-            Ok(Some(WorkflowValue::SurfaceAppearance(appearance).into()))
+            let record = execution_cache.node_runs.entry(node.uuid).or_default();
+            let active_layers = layers.iter().filter(|l| l.enabled).count();
+            mark_expensive_success(
+                record,
+                fingerprint,
+                format!("{active_layers} active layer(s)"),
+            );
+            sync_node_state_from_run_record(node_state, record);
+            Ok(Some(EvaluatedValue {
+                value: WorkflowValue::SurfaceAppearance(appearance),
+                stale: upstream_stale,
+            }))
         }
         WorkflowNodeKind::SurfaceDisplay {
             color,

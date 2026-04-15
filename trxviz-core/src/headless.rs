@@ -751,7 +751,6 @@ fn refresh_workflow_runtime(scene: &HeadlessScene, workflow: &mut HeadlessWorkfl
         &mut workflow.display_runtimes,
         &mut workflow.next_draw_id,
         &mut workflow.execution_cache,
-        false,
     );
 }
 
