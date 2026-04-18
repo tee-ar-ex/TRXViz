@@ -2,10 +2,22 @@ use trxviz_core::data::orientation_field::BoundaryGlyphColorMode;
 use trxviz_core::data::trx_data::RenderStyle;
 use trxviz_core::lighting::{SceneLightingParams, WorkflowRender3D};
 use trxviz_core::renderer::background_renderer::BackgroundResources;
+use trxviz_core::renderer::fixel_renderer::FixelResources;
 use trxviz_core::renderer::glyph_renderer::GlyphResources;
 use trxviz_core::renderer::mesh_renderer::{MeshDrawStyle, MeshResources};
 use trxviz_core::renderer::slice_renderer::AllSliceResources;
 use trxviz_core::renderer::streamline_renderer::AllStreamlineResources;
+
+fn glyph_colormap_code(cm: trxviz_core::workflow::GlyphColormap) -> u32 {
+    use trxviz_core::workflow::GlyphColormap as G;
+    match cm {
+        G::Directional => 0,
+        G::Plasma => 2,
+        G::Viridis => 3,
+        G::Inferno => 4,
+        G::BlueWhiteRed => 5,
+    }
+}
 
 // ── Paint Callbacks ──
 
@@ -46,6 +58,25 @@ pub(super) struct Scene3DCallback {
     pub(super) show_boundary_glyphs: bool,
     pub(super) boundary_glyph_color_mode: BoundaryGlyphColorMode,
     pub(super) boundary_glyph_draw_step: u32,
+    pub(super) show_odx_glyphs: bool,
+    pub(super) show_odx_fixels: bool,
+    pub(super) odx_glyph_opacity: f32,
+    pub(super) odx_glyph_gloss: f32,
+    pub(super) odx_glyph_scale: f32,
+    pub(super) odx_glyph_colormap: trxviz_core::workflow::GlyphColormap,
+    pub(super) odx_opacity_gate: [f32; 4],
+    pub(super) odx_size_gate: [f32; 4],
+    pub(super) odx_amp_norm: f32,
+    pub(super) odx_fixel_line_width: f32,
+    pub(super) odx_fixel_opacity: f32,
+    pub(super) odx_fixel_length_scale: f32,
+    pub(super) odx_fixel_visible: bool,
+    pub(super) odx_fixel_colormap_code: u32,
+    pub(super) odx_fixel_scalar_range: [f32; 2],
+    /// Slab parameters that clip the 3D fixel pass to the current ODF slice.
+    pub(super) odx_fixel_3d_slab_normal: glam::Vec3,
+    pub(super) odx_fixel_3d_slab_center: glam::Vec3,
+    pub(super) odx_fixel_3d_slab_half_width: f32,
     pub(super) scene_lighting: SceneLightingParams,
     pub(super) render_3d: WorkflowRender3D,
     pub(super) fog_near: f32,
@@ -87,9 +118,9 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                         self.view_proj,
                         self.camera_pos,
                         sd.render_style as u32,
-                        3,
-                        0.0,
-                        0.0,
+                        glam::Vec3::Z,    // slab_normal (irrelevant — slab disabled)
+                        glam::Vec3::ZERO, // slab_center
+                        0.0,              // slab_half_width = 0 → disabled
                         aux,
                         self.scene_lighting,
                         &self.render_3d,
@@ -143,22 +174,81 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                 );
             }
         }
-        if self.show_boundary_glyphs {
+        if self.show_boundary_glyphs || self.show_odx_glyphs {
             if let Some(gr) = callback_resources.get_mut::<GlyphResources>() {
+                let color_mode = if self.show_odx_glyphs {
+                    BoundaryGlyphColorMode::DirectionRgb
+                } else {
+                    self.boundary_glyph_color_mode
+                };
+                let draw_step = if self.show_odx_glyphs {
+                    1
+                } else {
+                    self.boundary_glyph_draw_step
+                };
+                let (glyph_op, glyph_gl) = if self.show_odx_glyphs {
+                    (self.odx_glyph_opacity, self.odx_glyph_gloss)
+                } else {
+                    (0.95, 0.0)
+                };
                 gr.update_uniforms(
                     queue,
                     0,
                     self.view_proj,
                     self.camera_pos,
-                    3,
-                    0.0,
-                    0.0,
-                    self.boundary_glyph_color_mode,
-                    self.boundary_glyph_draw_step,
+                    glam::Vec3::Z,    // slab_normal (irrelevant — slab disabled)
+                    glam::Vec3::ZERO, // slab_center
+                    0.0,              // slab_half_width = 0 → disabled
+                    color_mode,
+                    draw_step,
+                    glyph_op,
+                    glyph_gl,
                     self.scene_lighting,
                     &self.render_3d,
                     self.fog_near,
                     self.fog_far,
+                );
+                let scale_mul = if self.show_odx_glyphs {
+                    self.odx_glyph_scale
+                } else {
+                    0.0
+                };
+                gr.update_scale_mul(queue, 0, scale_mul);
+                if self.show_odx_glyphs {
+                    gr.update_color_mode(queue, 0, glyph_colormap_code(self.odx_glyph_colormap));
+                    gr.update_amp_norm(queue, 0, self.odx_amp_norm);
+                    gr.update_opacity_gate(queue, 0, self.odx_opacity_gate);
+                    gr.update_size_gate(queue, 0, self.odx_size_gate);
+                }
+            }
+        }
+        if self.show_odx_fixels && self.odx_fixel_visible {
+            if let Some(fr) = callback_resources.get_mut::<FixelResources>() {
+                fr.update_uniforms(
+                    queue,
+                    0,
+                    self.view_proj,
+                    self.camera_pos,
+                    self.odx_fixel_3d_slab_normal,
+                    self.odx_fixel_3d_slab_center,
+                    self.odx_fixel_3d_slab_half_width,
+                    1, // draw_step
+                    self.odx_fixel_line_width,
+                    self.odx_fixel_opacity,
+                    self.scene_lighting,
+                    &self.render_3d,
+                    self.fog_near,
+                    self.fog_far,
+                );
+                fr.update_length_mul(queue, 0, self.odx_fixel_length_scale);
+                fr.update_colormap(
+                    queue,
+                    0,
+                    self.odx_fixel_colormap_code,
+                    (
+                        self.odx_fixel_scalar_range[0],
+                        self.odx_fixel_scalar_range[1],
+                    ),
                 );
             }
         }
@@ -276,9 +366,14 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                 );
             }
         }
-        if self.show_boundary_glyphs {
+        if self.show_boundary_glyphs || self.show_odx_glyphs {
             if let Some(gr) = callback_resources.get::<GlyphResources>() {
                 gr.paint(render_pass, 0, false);
+            }
+        }
+        if self.show_odx_fixels && self.odx_fixel_visible {
+            if let Some(fr) = callback_resources.get::<FixelResources>() {
+                fr.paint(render_pass, 0, false);
             }
         }
     }
@@ -291,13 +386,29 @@ pub(super) struct SliceViewCallback {
     pub(super) volume_draws: Vec<VolumeDrawInfo>,
     pub(super) streamline_draws: Vec<StreamlineDrawInfo>,
     pub(super) show_streamlines: bool,
-    /// Slab clipping axis for streamlines: 0=X, 1=Y, 2=Z.
-    pub(super) slab_axis: u32,
-    pub(super) slab_min: f32,
-    pub(super) slab_max: f32,
+    /// Slab clipping plane (works for both axis-aligned and oblique volumes).
+    pub(super) slab_normal: glam::Vec3,
+    pub(super) slab_center: glam::Vec3,
+    pub(super) slab_half_width: f32,
     pub(super) show_boundary_glyphs: bool,
     pub(super) boundary_glyph_color_mode: BoundaryGlyphColorMode,
     pub(super) boundary_glyph_draw_step: u32,
+    pub(super) show_odx_glyphs: bool,
+    pub(super) show_odx_fixels: bool,
+    pub(super) odx_glyph_opacity: f32,
+    pub(super) odx_glyph_gloss: f32,
+    pub(super) odx_fixel_line_width: f32,
+    pub(super) odx_fixel_opacity: f32,
+    pub(super) odx_fixel_slab_half_width_mm: f32,
+    pub(super) odx_glyph_scale: f32,
+    pub(super) odx_fixel_length_scale: f32,
+    pub(super) odx_fixel_visible: bool,
+    pub(super) odx_fixel_colormap_code: u32,
+    pub(super) odx_fixel_scalar_range: [f32; 2],
+    pub(super) odx_glyph_colormap: trxviz_core::workflow::GlyphColormap,
+    pub(super) odx_opacity_gate: [f32; 4],
+    pub(super) odx_size_gate: [f32; 4],
+    pub(super) odx_amp_norm: f32,
     pub(super) scene_lighting: SceneLightingParams,
 }
 
@@ -337,8 +448,8 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                     continue;
                 }
                 if let Some((_, res)) = all.entries.iter().find(|(id, _)| *id == sd.file_id) {
-                    let slab_min = self.slab_min - sd.slab_half_width;
-                    let slab_max = self.slab_max + sd.slab_half_width;
+                    // Expand the slab half-width by the per-streamline bundle width.
+                    let hw = self.slab_half_width + sd.slab_half_width;
                     // Slice views always render flat lines regardless of 3D render style.
                     res.update_uniforms(
                         queue,
@@ -346,9 +457,9 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                         self.view_proj,
                         glam::Vec3::ZERO,
                         0, // flat
-                        self.slab_axis,
-                        slab_min,
-                        slab_max,
+                        self.slab_normal,
+                        self.slab_center,
+                        hw,
                         0.5,
                         self.scene_lighting,
                         &neutral_render,
@@ -358,22 +469,90 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                 }
             }
         }
-        if self.show_boundary_glyphs {
+        if self.show_boundary_glyphs || self.show_odx_glyphs {
             if let Some(gr) = callback_resources.get_mut::<GlyphResources>() {
+                let color_mode = if self.show_odx_glyphs {
+                    BoundaryGlyphColorMode::DirectionRgb
+                } else {
+                    self.boundary_glyph_color_mode
+                };
+                let draw_step = if self.show_odx_glyphs {
+                    1
+                } else {
+                    self.boundary_glyph_draw_step
+                };
+                let (glyph_op, glyph_gl) = if self.show_odx_glyphs {
+                    (self.odx_glyph_opacity, self.odx_glyph_gloss)
+                } else {
+                    (0.95, 0.0)
+                };
                 gr.update_uniforms(
                     queue,
                     self.bind_group_index,
                     self.view_proj,
                     glam::Vec3::ZERO,
-                    self.slab_axis,
-                    self.slab_min,
-                    self.slab_max,
-                    self.boundary_glyph_color_mode,
-                    self.boundary_glyph_draw_step,
+                    self.slab_normal,
+                    self.slab_center,
+                    self.slab_half_width,
+                    color_mode,
+                    draw_step,
+                    glyph_op,
+                    glyph_gl,
                     self.scene_lighting,
                     &neutral_render,
                     0.0,
                     1.0,
+                );
+                let scale_mul = if self.show_odx_glyphs {
+                    self.odx_glyph_scale
+                } else {
+                    0.0
+                };
+                gr.update_scale_mul(queue, self.bind_group_index, scale_mul);
+                if self.show_odx_glyphs {
+                    gr.update_color_mode(
+                        queue,
+                        self.bind_group_index,
+                        glyph_colormap_code(self.odx_glyph_colormap),
+                    );
+                    gr.update_amp_norm(queue, self.bind_group_index, self.odx_amp_norm);
+                    gr.update_opacity_gate(queue, self.bind_group_index, self.odx_opacity_gate);
+                    gr.update_size_gate(queue, self.bind_group_index, self.odx_size_gate);
+                }
+            }
+        }
+        if self.show_odx_fixels && self.odx_fixel_visible {
+            if let Some(fr) = callback_resources.get_mut::<FixelResources>() {
+                fr.update_uniforms(
+                    queue,
+                    self.bind_group_index,
+                    self.view_proj,
+                    glam::Vec3::ZERO,
+                    self.slab_normal,
+                    self.slab_center,
+                    self.odx_fixel_slab_half_width_mm,
+                    1, // draw_step
+                    self.odx_fixel_line_width,
+                    self.odx_fixel_opacity,
+                    self.scene_lighting,
+                    &WorkflowRender3D {
+                        vignette_strength: 0.0,
+                        exposure: 1.0,
+                        contrast: 1.0,
+                        ..Default::default()
+                    },
+                    0.0,
+                    1.0,
+                );
+                fr.update_length_mul(queue, self.bind_group_index, self.odx_fixel_length_scale);
+                fr.update_colormap(
+                    queue,
+                    self.bind_group_index,
+                    self.odx_fixel_colormap_code,
+                    (
+                        self.odx_fixel_scalar_range[0],
+                        self.odx_fixel_scalar_range[1],
+                    ),
                 );
             }
         }
@@ -436,9 +615,14 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                 }
             }
         }
-        if self.show_boundary_glyphs {
+        if self.show_boundary_glyphs || self.show_odx_glyphs {
             if let Some(gr) = callback_resources.get::<GlyphResources>() {
                 gr.paint(render_pass, self.bind_group_index, true);
+            }
+        }
+        if self.show_odx_fixels && self.odx_fixel_visible {
+            if let Some(fr) = callback_resources.get::<FixelResources>() {
+                fr.paint(render_pass, self.bind_group_index, true);
             }
         }
     }

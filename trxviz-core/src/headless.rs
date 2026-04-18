@@ -17,12 +17,14 @@ use crate::data::loaded_files::{
     FileId, LoadedNifti, LoadedTrx, StreamlineBacking, VolumeColormap,
 };
 use crate::data::nifti_data::NiftiVolume;
+use crate::data::odx_data::OdxScene;
 use crate::data::orientation_field::BoundaryGlyphColorMode;
 use crate::data::parcellation_data::{ParcellationVolume, guess_label_table_path};
 use crate::data::trx_data::{RenderStyle, TrxGpuData};
 use crate::lighting::{SceneLightingParams, WorkflowRender3D};
 use crate::renderer::background_renderer::BackgroundResources;
 use crate::renderer::camera::OrbitCamera;
+use crate::renderer::fixel_renderer::FixelResources;
 use crate::renderer::glyph_renderer::GlyphResources;
 use crate::renderer::mesh_renderer::{MeshDrawStyle, MeshResources};
 use crate::renderer::slice_renderer::{AllSliceResources, SliceAxis, SliceResources};
@@ -125,6 +127,7 @@ pub struct AssetArgs {
     pub nifti_paths: Vec<PathBuf>,
     pub surface_paths: Vec<PathBuf>,
     pub parcellation_paths: Vec<PathBuf>,
+    pub odx_paths: Vec<PathBuf>,
 }
 
 struct HeadlessRenderData {
@@ -137,6 +140,14 @@ struct HeadlessRenderData {
     glyph_color_mode: BoundaryGlyphColorMode,
     glyph_density_3d_step: u32,
     glyph_slice_density_step: u32,
+    odx_visible: bool,
+    odx_fixel_3d_visible: bool,
+    odx_fixel_2d_visible: bool,
+    fixel_line_width: f32,
+    fixel_2d_slab_half_width_mm: f32,
+    fixel_opacity: f32,
+    odf_glyph_opacity: f32,
+    odf_glyph_gloss: f32,
 }
 
 struct VolumeDrawInfo {
@@ -171,6 +182,7 @@ struct GpuSceneResources {
     slices: AllSliceResources,
     meshes: MeshResources,
     glyphs: GlyphResources,
+    fixels: FixelResources,
     bounds: SceneBounds,
 }
 
@@ -186,6 +198,7 @@ struct ViewportRect {
 struct SlicePanel {
     rect: ViewportRect,
     axis_index: usize,
+    slice_index: usize,
     slice_pos: f32,
 }
 
@@ -341,15 +354,8 @@ fn export_loaded_scene(
         options.width as f32 / options.height.max(1) as f32,
     );
     let render_3d = workflow.document.render_3d.clone().unwrap_or_default();
-    let bytes = build_glb_scene(
-        scene,
-        &workflow,
-        &render_data,
-        &camera,
-        &render_3d,
-        options,
-    )
-    .context("building GLB scene")?;
+    let bytes = build_glb_scene(scene, &workflow, &render_data, &camera, &render_3d, options)
+        .context("building GLB scene")?;
     std::fs::write(output_path, bytes)
         .with_context(|| format!("writing GLB to {}", output_path.display()))?;
     Ok(())
@@ -408,6 +414,21 @@ fn load_project_state(
                     })
                     .map_err(|err| anyhow!(err.to_string()))?;
                 apply_loaded_parcellation(&mut scene, path, source, Some(id));
+            }
+            WorkflowAssetDocument::Odx { id, path } => {
+                let odx_scene = OdxScene::open(&path)
+                    .map_err(|err| anyhow!("opening ODX {}: {}", path.display(), err))?;
+                let name = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string());
+                scene.odx_files.push(crate::data::loaded_files::LoadedOdx {
+                    id,
+                    name,
+                    path,
+                    scene: Arc::new(odx_scene),
+                    visible: true,
+                });
             }
         }
     }
@@ -514,7 +535,69 @@ fn load_asset_args_state(
         );
     }
 
-    if workflow.document.assets.is_empty() {
+    for path in &args.odx_paths {
+        let odx_scene =
+            OdxScene::open(path).with_context(|| format!("loading ODX file {}", path.display()))?;
+        let dims = odx_scene.dimensions();
+        // Use the ODX affine to set volume center and extent for camera framing.
+        let header = odx_rs::OdxDataset::open(path)
+            .ok()
+            .map(|ds| ds.header().clone());
+        if let Some(h) = &header {
+            let affine = &h.voxel_to_rasmm;
+            let mid = [
+                dims[0] as f64 * 0.5,
+                dims[1] as f64 * 0.5,
+                dims[2] as f64 * 0.5,
+            ];
+            let cx = (affine[0][0] * mid[0]
+                + affine[0][1] * mid[1]
+                + affine[0][2] * mid[2]
+                + affine[0][3]) as f32;
+            let cy = (affine[1][0] * mid[0]
+                + affine[1][1] * mid[1]
+                + affine[1][2] * mid[2]
+                + affine[1][3]) as f32;
+            let cz = (affine[2][0] * mid[0]
+                + affine[2][1] * mid[1]
+                + affine[2][2] * mid[2]
+                + affine[2][3]) as f32;
+            scene.volume_center = Vec3::new(cx, cy, cz);
+            let dx = (affine[0][0].powi(2) + affine[1][0].powi(2) + affine[2][0].powi(2)).sqrt();
+            scene.volume_extent = (dims[0].max(dims[1]).max(dims[2]) as f64 * dx) as f32;
+        }
+        // Set default slice indices to volume midpoints.
+        scene.slice_indices = [
+            dims[0] as usize / 2,
+            dims[1] as usize / 2,
+            dims[2] as usize / 2,
+        ];
+        let odx_arc = Arc::new(odx_scene);
+        let id = scene.next_file_id;
+        scene.next_file_id += 1;
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        scene.odx_files.push(crate::data::loaded_files::LoadedOdx {
+            id,
+            name,
+            path: path.clone(),
+            scene: Arc::clone(&odx_arc),
+            visible: true,
+        });
+        scene.odx_scene = Some(odx_arc);
+        register_asset_default_nodes(
+            &mut workflow.document,
+            WorkflowAssetDocument::Odx {
+                id,
+                path: path.clone(),
+            },
+            None,
+        );
+    }
+
+    if workflow.document.assets.is_empty() && scene.odx_scene.is_none() {
         bail!("no input assets were provided");
     }
 
@@ -748,10 +831,18 @@ fn refresh_workflow_runtime(scene: &HeadlessScene, workflow: &mut HeadlessWorkfl
         &scene.cifti_files,
         &scene.gifti_surfaces,
         &scene.parcellations,
+        &scene.odx_files,
         &mut workflow.display_runtimes,
         &mut workflow.next_draw_id,
         &mut workflow.execution_cache,
     );
+}
+
+fn odx_odf_exceeds_binding_limit(odx: &OdxScene, device: &wgpu::Device) -> bool {
+    odx.compact_voxel_count()
+        .saturating_mul(odx.glyph_row_width())
+        .saturating_mul(std::mem::size_of::<f32>())
+        > device.limits().max_storage_buffer_binding_size as usize
 }
 
 fn execute_workflow_to_completion(
@@ -1207,6 +1298,206 @@ fn build_gpu_resources(
         }
     }
 
+    let mut fixels = FixelResources::new(device, TARGET_FORMAT);
+
+    // ODX ODF glyphs and fixels — driven by the evaluated workflow plan.
+    let axial_slice = scene.slice_indices[2] as u32;
+    let odf_plan = workflow
+        .runtime
+        .scene_plan
+        .odf_glyph_draws
+        .iter()
+        .find(|plan| plan.visible)
+        .or_else(|| workflow.runtime.scene_plan.odf_glyph_draws.first());
+    if let Some(plan) = odf_plan {
+        let odx = &plan.field.scene;
+        match odx.glyph_source_kind() {
+            Some(crate::data::odx_data::OdxGlyphSourceKind::Odf) => {
+                let use_slice_local = odx_odf_exceeds_binding_limit(odx, device);
+                let slice_index = scene.slice_indices[plan.slice_axis.viewport_index()] as u32;
+                let instances = if use_slice_local {
+                    odx.glyph_instances_for_slice(plan.slice_axis.odx_axis(), slice_index)
+                } else {
+                    odx.glyph_instances_full_volume()
+                };
+                if !instances.is_empty() {
+                    if use_slice_local {
+                        let amplitudes = odx
+                            .odf_amplitudes_for_slice(plan.slice_axis.odx_axis(), slice_index)
+                            .expect("ODF amplitudes should exist for slice-local ODF mode");
+                        glyphs.set_odx_slice_odf(
+                            device,
+                            &odx.sphere_vertices,
+                            &odx.sphere_indices,
+                            &instances,
+                            &amplitudes,
+                            None,
+                            None,
+                        );
+                    } else {
+                        let amplitudes = odx
+                            .odf_amplitudes_full_sphere()
+                            .expect("ODF amplitudes should exist for ODF glyph mode");
+                        glyphs.set_odx_odf_volume(
+                            device,
+                            &odx.sphere_vertices,
+                            &odx.sphere_indices,
+                            &instances,
+                            &amplitudes,
+                            None,
+                            None,
+                        );
+                    }
+                }
+            }
+            Some(crate::data::odx_data::OdxGlyphSourceKind::Sh) => {
+                let slice_index = scene.slice_indices[plan.slice_axis.viewport_index()] as u32;
+                let instances =
+                    odx.glyph_instances_for_slice(plan.slice_axis.odx_axis(), slice_index);
+                if !instances.is_empty() {
+                    let coefficients = odx
+                        .sh_coefficients_for_slice(plan.slice_axis.odx_axis(), slice_index)
+                        .expect("SH coefficients should exist for SH glyph mode");
+                    glyphs.set_odx_sh_volume(
+                        device,
+                        &odx.sphere_vertices,
+                        &odx.sphere_indices,
+                        &instances,
+                        &coefficients,
+                        odx.sh_view_f32()
+                            .expect("SH coefficients should exist for SH glyph mode")
+                            .ncols(),
+                        odx.sh_transform_flat()
+                            .expect("SH transform should exist for SH glyph mode"),
+                        odx.sh_source_dir_count()
+                            .expect("SH direction count should exist for SH glyph mode"),
+                        odx.glyph_row_width(),
+                        None,
+                        None,
+                    );
+                    let slice_indices: Vec<u32> = (0..instances.len() as u32).collect();
+                    let mut encoder =
+                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("headless_odx_sh_initial_slice_encoder"),
+                        });
+                    glyphs.dispatch_odx_sh_slice(device, queue, &mut encoder, &slice_indices);
+                    queue.submit(std::iter::once(encoder.finish()));
+                }
+            }
+            None => {}
+        }
+        for &center in odx.centers_ras() {
+            expand(Vec3::from(center));
+        }
+    } else if let Some(odx) = &scene.odx_scene {
+        match odx.glyph_source_kind() {
+            Some(crate::data::odx_data::OdxGlyphSourceKind::Odf) => {
+                let use_slice_local = odx_odf_exceeds_binding_limit(odx, device);
+                let instances = if use_slice_local {
+                    odx.glyph_instances_for_slice(2, axial_slice)
+                } else {
+                    odx.glyph_instances_full_volume()
+                };
+                if !instances.is_empty() {
+                    if use_slice_local {
+                        let amplitudes = odx
+                            .odf_amplitudes_for_slice(2, axial_slice)
+                            .expect("ODF amplitudes should exist for slice-local ODF mode");
+                        glyphs.set_odx_slice_odf(
+                            device,
+                            &odx.sphere_vertices,
+                            &odx.sphere_indices,
+                            &instances,
+                            &amplitudes,
+                            None,
+                            None,
+                        );
+                    } else {
+                        let amplitudes = odx
+                            .odf_amplitudes_full_sphere()
+                            .expect("ODF amplitudes should exist for ODF glyph mode");
+                        glyphs.set_odx_odf_volume(
+                            device,
+                            &odx.sphere_vertices,
+                            &odx.sphere_indices,
+                            &instances,
+                            &amplitudes,
+                            None,
+                            None,
+                        );
+                    }
+                }
+            }
+            Some(crate::data::odx_data::OdxGlyphSourceKind::Sh) => {
+                let instances = odx.glyph_instances_for_slice(2, axial_slice);
+                if !instances.is_empty() {
+                    let coefficients = odx
+                        .sh_coefficients_for_slice(2, axial_slice)
+                        .expect("SH coefficients should exist for SH glyph mode");
+                    glyphs.set_odx_sh_volume(
+                        device,
+                        &odx.sphere_vertices,
+                        &odx.sphere_indices,
+                        &instances,
+                        &coefficients,
+                        odx.sh_view_f32()
+                            .expect("SH coefficients should exist for SH glyph mode")
+                            .ncols(),
+                        odx.sh_transform_flat()
+                            .expect("SH transform should exist for SH glyph mode"),
+                        odx.sh_source_dir_count()
+                            .expect("SH direction count should exist for SH glyph mode"),
+                        odx.glyph_row_width(),
+                        None,
+                        None,
+                    );
+                    let slice_indices: Vec<u32> = (0..instances.len() as u32).collect();
+                    let mut encoder =
+                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("headless_odx_sh_fallback_slice_encoder"),
+                        });
+                    glyphs.dispatch_odx_sh_slice(device, queue, &mut encoder, &slice_indices);
+                    queue.submit(std::iter::once(encoder.finish()));
+                }
+            }
+            None => {}
+        }
+        for &center in odx.centers_ras() {
+            expand(Vec3::from(center));
+        }
+    }
+
+    let fixel_plan = workflow
+        .runtime
+        .scene_plan
+        .fixel_3d_draws
+        .iter()
+        .find(|p| p.visible)
+        .or_else(|| workflow.runtime.scene_plan.fixel_3d_draws.first())
+        .or_else(|| {
+            workflow
+                .runtime
+                .scene_plan
+                .fixel_2d_draws
+                .iter()
+                .find(|p| p.visible)
+        })
+        .or_else(|| workflow.runtime.scene_plan.fixel_2d_draws.first());
+    if let Some(plan) = fixel_plan {
+        let mut fixel_instances = plan.field.scene.fixels_for_slice(2, axial_slice);
+        for inst in &mut fixel_instances {
+            inst.length *= plan.length_scale;
+        }
+        if !fixel_instances.is_empty() {
+            fixels.set_fixels(device, &fixel_instances);
+        }
+    } else if let Some(odx) = &scene.odx_scene {
+        let fixel_instances = odx.fixels_for_slice(2, axial_slice);
+        if !fixel_instances.is_empty() {
+            fixels.set_fixels(device, &fixel_instances);
+        }
+    }
+
     if !bounds_min.is_finite() || !bounds_max.is_finite() {
         bounds_min = scene.volume_center - Vec3::splat(scene.volume_extent.max(1.0) * 0.5);
         bounds_max = scene.volume_center + Vec3::splat(scene.volume_extent.max(1.0) * 0.5);
@@ -1218,6 +1509,7 @@ fn build_gpu_resources(
         slices,
         meshes,
         glyphs,
+        fixels,
         bounds: SceneBounds {
             min: bounds_min,
             max: bounds_max,
@@ -1261,59 +1553,78 @@ fn build_render_data(
         Vec::new()
     } else {
         workflow
-        .runtime
-        .scene_plan
-        .volume_draws
-        .iter()
-        .map(|draw| VolumeDrawInfo {
-            file_id: draw.source_id,
-            window_center: draw.window_center,
-            window_width: draw.window_width,
-            colormap: draw.colormap.as_u32(),
-            opacity: draw.opacity,
-        })
-        .collect::<Vec<_>>()
+            .runtime
+            .scene_plan
+            .volume_draws
+            .iter()
+            .map(|draw| VolumeDrawInfo {
+                file_id: draw.source_id,
+                window_center: draw.window_center,
+                window_width: draw.window_width,
+                colormap: draw.colormap.as_u32(),
+                opacity: draw.opacity,
+            })
+            .collect::<Vec<_>>()
     };
     let streamline_draws = if view == HeadlessView::InflatedStage {
         Vec::new()
     } else {
         workflow
-        .runtime
-        .scene_plan
-        .streamline_draws
-        .iter()
-        .map(|draw| StreamlineDrawInfo {
-            file_id: draw.draw_id,
-            visible: draw.visible,
-            render_style: draw.render_style,
-            tube_radius: draw.tube_radius_mm,
-        })
-        .collect::<Vec<_>>()
+            .runtime
+            .scene_plan
+            .streamline_draws
+            .iter()
+            .map(|draw| StreamlineDrawInfo {
+                file_id: draw.draw_id,
+                visible: draw.visible,
+                render_style: draw.render_style,
+                tube_radius: draw.tube_radius_mm,
+            })
+            .collect::<Vec<_>>()
     };
     let bundle_draws = if view == HeadlessView::InflatedStage {
         Vec::new()
     } else {
         workflow
-        .runtime
-        .scene_plan
-        .bundle_draws
-        .iter()
-        .map(|draw| BundleDrawInfo {
-            file_id: draw.draw_id,
-            opacity: draw.opacity,
-        })
-        .collect::<Vec<_>>()
+            .runtime
+            .scene_plan
+            .bundle_draws
+            .iter()
+            .map(|draw| BundleDrawInfo {
+                file_id: draw.draw_id,
+                opacity: draw.opacity,
+            })
+            .collect::<Vec<_>>()
     };
     let glyph_draw = if view == HeadlessView::InflatedStage {
         None
     } else {
         workflow
+            .runtime
+            .scene_plan
+            .boundary_glyph_draws
+            .iter()
+            .find(|draw| draw.visible)
+    };
+    let odx_has_glyph_field = workflow
         .runtime
         .scene_plan
-        .boundary_glyph_draws
+        .odf_glyph_draws
         .iter()
-        .find(|draw| draw.visible)
-    };
+        .find(|p| p.visible)
+        .or_else(|| workflow.runtime.scene_plan.odf_glyph_draws.first())
+        .map(|plan| plan.field.scene.has_glyph_field())
+        .or_else(|| scene.odx_scene.as_ref().map(|odx| odx.has_glyph_field()))
+        .unwrap_or(false);
+    let odx_glyphs_active = workflow
+        .runtime
+        .scene_plan
+        .odf_glyph_draws
+        .iter()
+        .find(|p| p.visible)
+        .or_else(|| workflow.runtime.scene_plan.odf_glyph_draws.first())
+        .map(|p| p.visible)
+        .unwrap_or(scene.odx_scene.is_some());
 
     HeadlessRenderData {
         any_visible_streamlines: streamline_draws.iter().any(|draw| draw.visible),
@@ -1332,6 +1643,94 @@ fn build_render_data(
         glyph_slice_density_step: glyph_draw
             .map(|draw| draw.slice_density_step as u32)
             .unwrap_or(1),
+        odx_visible: scene.odx_scene.is_some()
+            || !workflow.runtime.scene_plan.odf_glyph_draws.is_empty()
+            || !workflow.runtime.scene_plan.fixel_3d_draws.is_empty()
+            || !workflow.runtime.scene_plan.fixel_2d_draws.is_empty(),
+        odx_fixel_3d_visible: workflow
+            .runtime
+            .scene_plan
+            .fixel_3d_draws
+            .iter()
+            .find(|p| p.visible)
+            .or_else(|| workflow.runtime.scene_plan.fixel_3d_draws.first())
+            .map(|p| p.visible)
+            .unwrap_or(true)
+            && !(odx_has_glyph_field && odx_glyphs_active),
+        odx_fixel_2d_visible: workflow
+            .runtime
+            .scene_plan
+            .fixel_2d_draws
+            .iter()
+            .find(|p| p.visible)
+            .or_else(|| workflow.runtime.scene_plan.fixel_2d_draws.first())
+            .map(|p| p.visible)
+            .unwrap_or(scene.odx_scene.is_some()),
+        fixel_line_width: workflow
+            .runtime
+            .scene_plan
+            .fixel_3d_draws
+            .iter()
+            .find(|p| p.visible)
+            .or_else(|| workflow.runtime.scene_plan.fixel_3d_draws.first())
+            .map(|p| p.line_width)
+            .or_else(|| {
+                workflow
+                    .runtime
+                    .scene_plan
+                    .fixel_2d_draws
+                    .iter()
+                    .find(|p| p.visible)
+                    .or_else(|| workflow.runtime.scene_plan.fixel_2d_draws.first())
+                    .map(|p| p.line_width)
+            })
+            .unwrap_or(0.006),
+        fixel_2d_slab_half_width_mm: workflow
+            .runtime
+            .scene_plan
+            .fixel_2d_draws
+            .iter()
+            .find(|p| p.visible)
+            .or_else(|| workflow.runtime.scene_plan.fixel_2d_draws.first())
+            .map(|p| (p.slab_thickness_mm * 0.5).max(0.0))
+            .unwrap_or(1.0),
+        fixel_opacity: workflow
+            .runtime
+            .scene_plan
+            .fixel_3d_draws
+            .iter()
+            .find(|p| p.visible)
+            .or_else(|| workflow.runtime.scene_plan.fixel_3d_draws.first())
+            .map(|p| p.opacity)
+            .or_else(|| {
+                workflow
+                    .runtime
+                    .scene_plan
+                    .fixel_2d_draws
+                    .iter()
+                    .find(|p| p.visible)
+                    .or_else(|| workflow.runtime.scene_plan.fixel_2d_draws.first())
+                    .map(|p| p.opacity)
+            })
+            .unwrap_or(1.0),
+        odf_glyph_opacity: workflow
+            .runtime
+            .scene_plan
+            .odf_glyph_draws
+            .iter()
+            .find(|p| p.visible)
+            .or_else(|| workflow.runtime.scene_plan.odf_glyph_draws.first())
+            .map(|p| p.opacity)
+            .unwrap_or(1.0),
+        odf_glyph_gloss: workflow
+            .runtime
+            .scene_plan
+            .odf_glyph_draws
+            .iter()
+            .find(|p| p.visible)
+            .or_else(|| workflow.runtime.scene_plan.odf_glyph_draws.first())
+            .map(|p| p.gloss)
+            .unwrap_or(0.0),
     }
 }
 
@@ -1341,7 +1740,10 @@ fn stage_surface_draw_instances(
 ) -> Vec<(usize, usize, MeshDrawStyle)> {
     let mut draws = Vec::new();
     for draw in &workflow.runtime.scene_plan.stage_surface_draws {
-        let Some(surface) = scene.gifti_surfaces.iter().find(|surface| surface.id == draw.source_id)
+        let Some(surface) = scene
+            .gifti_surfaces
+            .iter()
+            .find(|surface| surface.id == draw.source_id)
         else {
             continue;
         };
@@ -1380,7 +1782,10 @@ fn compute_render_bounds(scene: &HeadlessScene, render_data: &HeadlessRenderData
     let mut any = false;
 
     for (surface_id, _, style) in &render_data.surface_draws {
-        let Some(surface) = scene.gifti_surfaces.iter().find(|surface| surface.id == *surface_id)
+        let Some(surface) = scene
+            .gifti_surfaces
+            .iter()
+            .find(|surface| surface.id == *surface_id)
         else {
             continue;
         };
@@ -1465,7 +1870,12 @@ fn stage_instance_model_matrices(
 ) -> Vec<Mat4> {
     let center = (bbox_min + bbox_max) * 0.5;
     let extents = bbox_max - bbox_min;
-    let span = extents.x.abs().max(extents.y.abs()).max(extents.z.abs()).max(1.0);
+    let span = extents
+        .x
+        .abs()
+        .max(extents.y.abs())
+        .max(extents.z.abs())
+        .max(1.0);
     let separation = span * 0.55;
     let lateral_row_z = span * 0.42;
     let medial_row_z = -span * 0.42;
@@ -1596,9 +2006,9 @@ fn render_scene3d_to_png(
                 view_proj,
                 camera_pos,
                 streamline.render_style as u32,
-                3,
-                0.0,
-                0.0,
+                glam::Vec3::Z,    // slab_normal (irrelevant — slab disabled)
+                glam::Vec3::ZERO, // slab_center
+                0.0,              // slab_half_width = 0 → disabled
                 aux,
                 lighting,
                 render_3d,
@@ -1634,17 +2044,37 @@ fn render_scene3d_to_png(
             fog_far,
         );
     }
-    if render_data.glyph_visible {
+    if render_data.glyph_visible || render_data.odx_visible {
         resources.glyphs.update_uniforms(
             queue,
             0,
             view_proj,
             camera_pos,
-            3,
-            0.0,
-            0.0,
+            glam::Vec3::Z,    // slab_normal (irrelevant — slab disabled)
+            glam::Vec3::ZERO, // slab_center
+            0.0,              // slab_half_width = 0 → disabled
             render_data.glyph_color_mode,
             render_data.glyph_density_3d_step,
+            render_data.odf_glyph_opacity,
+            render_data.odf_glyph_gloss,
+            lighting,
+            render_3d,
+            fog_near,
+            fog_far,
+        );
+    }
+    if render_data.odx_visible && render_data.odx_fixel_3d_visible {
+        resources.fixels.update_uniforms(
+            queue,
+            0,
+            view_proj,
+            camera_pos,
+            glam::Vec3::Z,    // slab_normal (irrelevant — slab disabled)
+            glam::Vec3::ZERO, // slab_center
+            0.0,              // slab_half_width = 0 → disabled
+            1,
+            render_data.fixel_line_width,
+            render_data.fixel_opacity,
             lighting,
             render_3d,
             fog_near,
@@ -1777,8 +2207,11 @@ fn render_scene3d_to_png(
                 camera_dir,
             );
         }
-        if render_data.glyph_visible {
+        if render_data.glyph_visible || render_data.odx_visible {
             resources.glyphs.paint(render_pass, 0, false);
+        }
+        if render_data.odx_visible && render_data.odx_fixel_3d_visible {
+            resources.fixels.paint(render_pass, 0, false);
         }
     }
 
@@ -1866,6 +2299,7 @@ fn render_scene2d_to_png(
                 );
             }
         }
+        let (slab_normal, slab_center) = slice_plane_for_panel(scene, panel);
         for streamline in &render_data.streamline_draws {
             if !streamline.visible {
                 continue;
@@ -1876,16 +2310,16 @@ fn render_scene2d_to_png(
                 .iter()
                 .find(|(id, _)| *id == streamline.file_id)
             {
-                let slab_half_width = streamline.tube_radius.max(0.5);
+                let hw = streamline.tube_radius.max(0.5);
                 resource.update_uniforms(
                     queue,
                     bind_group_index,
                     view_proj,
                     glam::Vec3::ZERO,
                     0,
-                    slab_axis_for_index(panel.axis_index),
-                    panel.slice_pos - slab_half_width,
-                    panel.slice_pos + slab_half_width,
+                    slab_normal,
+                    slab_center,
+                    hw,
                     0.5,
                     lighting,
                     &neutral_render,
@@ -1894,17 +2328,37 @@ fn render_scene2d_to_png(
                 );
             }
         }
-        if render_data.glyph_visible {
+        if render_data.glyph_visible || render_data.odx_visible {
             resources.glyphs.update_uniforms(
                 queue,
                 bind_group_index,
                 view_proj,
                 glam::Vec3::ZERO,
-                slab_axis_for_index(panel.axis_index),
-                panel.slice_pos,
-                panel.slice_pos,
+                slab_normal,
+                slab_center,
+                1.0, // 1 mm slab half-width (placeholder; headless doesn't track voxel size)
                 render_data.glyph_color_mode,
                 render_data.glyph_slice_density_step,
+                render_data.odf_glyph_opacity,
+                render_data.odf_glyph_gloss,
+                lighting,
+                &neutral_render,
+                0.0,
+                1.0,
+            );
+        }
+        if render_data.odx_visible && render_data.odx_fixel_2d_visible {
+            resources.fixels.update_uniforms(
+                queue,
+                bind_group_index,
+                view_proj,
+                glam::Vec3::ZERO,
+                slab_normal,
+                slab_center,
+                render_data.fixel_2d_slab_half_width_mm,
+                1,
+                render_data.fixel_line_width,
+                render_data.fixel_opacity,
                 lighting,
                 &neutral_render,
                 0.0,
@@ -2007,8 +2461,11 @@ fn render_scene2d_to_png(
                     }
                 }
             }
-            if render_data.glyph_visible {
+            if render_data.glyph_visible || render_data.odx_visible {
                 resources.glyphs.paint(render_pass, bind_group_index, true);
+            }
+            if render_data.odx_visible && render_data.odx_fixel_2d_visible {
+                resources.fixels.paint(render_pass, bind_group_index, true);
             }
         }
     }
@@ -2026,6 +2483,7 @@ fn build_2d_panels(
     match slice_view_ui.mode {
         WorkflowView2DMode::Slice => {
             let axis_index = axis_index_for_kind(slice_view_ui.single_view);
+            let slice_index = scene.slice_indices[axis_index];
             vec![SlicePanel {
                 rect: ViewportRect {
                     x: 0,
@@ -2034,6 +2492,7 @@ fn build_2d_panels(
                     height,
                 },
                 axis_index,
+                slice_index,
                 slice_pos: slice_world_position(scene, axis_index),
             }]
         }
@@ -2049,6 +2508,7 @@ fn build_2d_panels(
                             height: height.max(1),
                         },
                         axis_index,
+                        slice_index: scene.slice_indices[axis_index],
                         slice_pos: slice_world_position(scene, axis_index),
                     })
                     .collect()
@@ -2064,6 +2524,7 @@ fn build_2d_panels(
                             height: panel_height,
                         },
                         axis_index: 0,
+                        slice_index: scene.slice_indices[0],
                         slice_pos: slice_world_position(scene, 0),
                     },
                     SlicePanel {
@@ -2074,6 +2535,7 @@ fn build_2d_panels(
                             height: panel_height,
                         },
                         axis_index: 1,
+                        slice_index: scene.slice_indices[1],
                         slice_pos: slice_world_position(scene, 1),
                     },
                     SlicePanel {
@@ -2084,6 +2546,7 @@ fn build_2d_panels(
                             height: panel_height,
                         },
                         axis_index: 2,
+                        slice_index: scene.slice_indices[2],
                         slice_pos: slice_world_position(scene, 2),
                     },
                 ]
@@ -2117,6 +2580,7 @@ fn build_2d_panels(
                             height: tile_height,
                         },
                         axis_index,
+                        slice_index: index,
                         slice_pos: slice_world_position_for_index(scene, axis_index, index),
                     });
                 }
@@ -2134,11 +2598,23 @@ fn axis_index_for_kind(kind: WorkflowSliceViewKind) -> usize {
     }
 }
 
-fn slab_axis_for_index(axis_index: usize) -> u32 {
-    match axis_index {
-        0 => 2,
-        1 => 1,
-        _ => 0,
+/// Return the slab plane (normal, center) for a slice panel.
+/// Falls back to world-axis normals when no NIfTI is loaded.
+fn slice_plane_for_panel(scene: &HeadlessScene, panel: &SlicePanel) -> (glam::Vec3, glam::Vec3) {
+    if let Some(nf) = scene.nifti_files.first() {
+        nf.volume.slice_plane(panel.axis_index, panel.slice_index)
+    } else {
+        let normal = match panel.axis_index {
+            0 => glam::Vec3::Z,
+            1 => glam::Vec3::Y,
+            _ => glam::Vec3::X,
+        };
+        let center = match panel.axis_index {
+            0 => glam::Vec3::new(0.0, 0.0, panel.slice_pos),
+            1 => glam::Vec3::new(0.0, panel.slice_pos, 0.0),
+            _ => glam::Vec3::new(panel.slice_pos, 0.0, 0.0),
+        };
+        (normal, center)
     }
 }
 
@@ -2431,7 +2907,10 @@ fn build_glb_scene(
                 .enumerate()
                 {
                     builder.add_mesh_node(
-                        format!("stage_surface_{}_{}_{}", surface.name, draw_index, panel_index),
+                        format!(
+                            "stage_surface_{}_{}_{}",
+                            surface.name, draw_index, panel_index
+                        ),
                         mesh,
                         gltf_transform(model_matrix),
                     );

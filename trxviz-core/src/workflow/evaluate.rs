@@ -12,13 +12,18 @@ use trx_rs::{
 };
 
 use crate::data::cifti::{CiftiStructure, ScalarKind, SurfaceScalars, VolumeScalars};
-use crate::data::loaded_files::{FileId, LoadedCifti, LoadedNifti, LoadedTrx, StreamlineBacking};
+use crate::data::loaded_files::{
+    FileId, LoadedCifti, LoadedNifti, LoadedOdx, LoadedTrx, StreamlineBacking,
+};
+use crate::data::odx_data::{FixelField, FixelScalars, OdfField, OdxCatalog};
 use crate::data::parcellation_data::ParcellationVolume;
 use crate::data::trx_data::{ColorMode, RenderStyle, TrxGpuData};
 use crate::renderer::mesh_renderer::SurfaceColormap;
 use crate::scene::LoadedGiftiSurface;
 
-use super::jobs::{mark_expensive_success, prime_expensive_record, sync_node_state_from_run_record};
+use super::jobs::{
+    mark_expensive_success, prime_expensive_record, sync_node_state_from_run_record,
+};
 use super::*;
 
 pub fn evaluate_scene_plan(
@@ -28,6 +33,7 @@ pub fn evaluate_scene_plan(
     cifti_assets: &[LoadedCifti],
     surface_assets: &[LoadedGiftiSurface],
     parcellation_assets: &[LoadedParcellation],
+    odx_assets: &[LoadedOdx],
     display_ids: &mut HashMap<WorkflowNodeUuid, StreamlineDisplayRuntime>,
     next_draw_id: &mut FileId,
     execution_cache: &mut WorkflowExecutionCache,
@@ -39,6 +45,7 @@ pub fn evaluate_scene_plan(
         cifti_assets,
         surface_assets,
         parcellation_assets,
+        odx_assets,
         display_ids,
         next_draw_id,
         execution_cache,
@@ -53,6 +60,7 @@ pub fn evaluate_scene_plan_with_mode(
     cifti_assets: &[LoadedCifti],
     surface_assets: &[LoadedGiftiSurface],
     parcellation_assets: &[LoadedParcellation],
+    odx_assets: &[LoadedOdx],
     display_ids: &mut HashMap<WorkflowNodeUuid, StreamlineDisplayRuntime>,
     next_draw_id: &mut FileId,
     execution_cache: &mut WorkflowExecutionCache,
@@ -73,10 +81,8 @@ pub fn evaluate_scene_plan_with_mode(
         .iter()
         .map(|asset| (asset.id, asset))
         .collect();
-    let cifti_map: HashMap<FileId, &LoadedCifti> = cifti_assets
-        .iter()
-        .map(|asset| (asset.id, asset))
-        .collect();
+    let cifti_map: HashMap<FileId, &LoadedCifti> =
+        cifti_assets.iter().map(|asset| (asset.id, asset)).collect();
     let surface_map: HashMap<FileId, &LoadedGiftiSurface> = surface_assets
         .iter()
         .map(|asset| (asset.id, asset))
@@ -85,8 +91,10 @@ pub fn evaluate_scene_plan_with_mode(
         .iter()
         .map(|asset| (asset.asset.id, asset))
         .collect();
+    let odx_map: HashMap<FileId, &LoadedOdx> =
+        odx_assets.iter().map(|asset| (asset.id, asset)).collect();
 
-    let mut values = HashMap::<WorkflowNodeUuid, EvaluatedValue>::new();
+    let mut values = HashMap::<WorkflowNodeUuid, Vec<EvaluatedValue>>::new();
     let mut projection_by_surface = HashMap::<FileId, SurfaceScalars>::new();
 
     for node_uuid in order {
@@ -99,9 +107,11 @@ pub fn evaluate_scene_plan_with_mode(
             .iter()
             .enumerate()
             .map(|(input_idx, _)| {
-                connections
-                    .get(&(node.uuid, input_idx))
-                    .and_then(|remote| values.get(remote).cloned())
+                connections.get(&(node.uuid, input_idx)).and_then(|remote| {
+                    values
+                        .get(&remote.node)
+                        .and_then(|vs| vs.get(remote.output).cloned())
+                })
             })
             .collect();
 
@@ -121,6 +131,7 @@ pub fn evaluate_scene_plan_with_mode(
             &cifti_map,
             &surface_map,
             &parcellation_map,
+            &odx_map,
             display_ids,
             next_draw_id,
             &mut runtime.scene_plan,
@@ -132,8 +143,9 @@ pub fn evaluate_scene_plan_with_mode(
         );
 
         match result {
-            Ok(Some(value)) => {
-                if let WorkflowValue::Streamline(flow) = &value.value {
+            Ok(outputs) if !outputs.is_empty() => {
+                let first = &outputs[0];
+                if let WorkflowValue::Streamline(flow) = &first.value {
                     node_state.available_streamline_groups = flow
                         .dataset
                         .gpu_data
@@ -143,11 +155,11 @@ pub fn evaluate_scene_plan_with_mode(
                         .collect();
                 }
                 if node_state.summary == node.kind.title() {
-                    node_state.summary = summarize_value(&value.value);
+                    node_state.summary = summarize_value(&first.value);
                 }
-                values.insert(node.uuid, value);
+                values.insert(node.uuid, outputs);
             }
-            Ok(None) => {
+            Ok(_) => {
                 if node_state.summary == node.kind.title() {
                     node_state.summary = runtime
                         .save_streamline_targets
@@ -188,7 +200,7 @@ fn compile_graph(
 ) -> Result<
     (
         Vec<WorkflowNodeUuid>,
-        HashMap<(WorkflowNodeUuid, usize), WorkflowNodeUuid>,
+        HashMap<(WorkflowNodeUuid, usize), OutPort>,
     ),
     String,
 > {
@@ -209,7 +221,7 @@ fn compile_graph(
             continue;
         };
         graph.add_edge(from_idx, to_idx, ());
-        connections.insert((wire.to.node, wire.to.input), wire.from.node);
+        connections.insert((wire.to.node, wire.to.input), wire.from);
     }
 
     let ordered =
@@ -231,6 +243,7 @@ fn evaluate_node(
     cifti_assets: &HashMap<FileId, &LoadedCifti>,
     surface_assets: &HashMap<FileId, &LoadedGiftiSurface>,
     parcellation_assets: &HashMap<FileId, &LoadedParcellation>,
+    odx_assets: &HashMap<FileId, &LoadedOdx>,
     display_ids: &mut HashMap<WorkflowNodeUuid, StreamlineDisplayRuntime>,
     next_draw_id: &mut FileId,
     scene_plan: &mut SceneFramePlan,
@@ -239,7 +252,7 @@ fn evaluate_node(
     execution_cache: &mut WorkflowExecutionCache,
     _mode: WorkflowEvalMode,
     node_state: &mut NodeEvalState,
-) -> Result<Option<EvaluatedValue>, String> {
+) -> Result<Vec<EvaluatedValue>, String> {
     match &node.kind {
         WorkflowNodeKind::StreamlineSource { source_id } => {
             let source = streamline_assets
@@ -256,7 +269,7 @@ fn evaluate_node(
                 })?,
             });
             let selected = (0..source.data.nb_streamlines as u32).collect();
-            Ok(Some(
+            Ok(vec![
                 WorkflowValue::Streamline(StreamlineFlow {
                     dataset,
                     selected_streamlines: Arc::new(selected),
@@ -266,25 +279,25 @@ fn evaluate_node(
                     scalar_range_max: 1.0,
                 })
                 .into(),
-            ))
+            ])
         }
         WorkflowNodeKind::VolumeSource { source_id } => {
             volume_assets
                 .get(source_id)
                 .ok_or_else(|| format!("Missing volume source {source_id}"))?;
-            Ok(Some(WorkflowValue::Volume(*source_id).into()))
+            Ok(vec![WorkflowValue::Volume(*source_id).into()])
         }
         WorkflowNodeKind::CiftiSource { source_id } => {
             cifti_assets
                 .get(source_id)
                 .ok_or_else(|| format!("Missing CIFTI source {source_id}"))?;
-            Ok(Some(WorkflowValue::Cifti(*source_id).into()))
+            Ok(vec![WorkflowValue::Cifti(*source_id).into()])
         }
         WorkflowNodeKind::SurfaceSource { source_id } => {
             surface_assets
                 .get(source_id)
                 .ok_or_else(|| format!("Missing surface source {source_id}"))?;
-            Ok(Some(WorkflowValue::Surface(*source_id).into()))
+            Ok(vec![WorkflowValue::Surface(*source_id).into()])
         }
         WorkflowNodeKind::CiftiStructure {
             structure,
@@ -302,8 +315,10 @@ fn evaluate_node(
                     .cloned()
                     .flatten()
                     .map(|value| WorkflowValue::SurfaceScalars(value).into())
-                    .ok_or_else(|| format!("CIFTI left cortex map {} is unavailable", map_index + 1))
-                    .map(Some),
+                    .ok_or_else(|| {
+                        format!("CIFTI left cortex map {} is unavailable", map_index + 1)
+                    })
+                    .map(|v: EvaluatedValue| vec![v]),
                 CiftiStructure::CortexRight => cifti
                     .data
                     .right_scalars
@@ -311,8 +326,10 @@ fn evaluate_node(
                     .cloned()
                     .flatten()
                     .map(|value| WorkflowValue::SurfaceScalars(value).into())
-                    .ok_or_else(|| format!("CIFTI right cortex map {} is unavailable", map_index + 1))
-                    .map(Some),
+                    .ok_or_else(|| {
+                        format!("CIFTI right cortex map {} is unavailable", map_index + 1)
+                    })
+                    .map(|v: EvaluatedValue| vec![v]),
                 CiftiStructure::Subcortical => cifti
                     .data
                     .subcortical_scalars
@@ -320,15 +337,17 @@ fn evaluate_node(
                     .cloned()
                     .flatten()
                     .map(|value| WorkflowValue::VolumeScalars(value).into())
-                    .ok_or_else(|| format!("CIFTI subcortical map {} is unavailable", map_index + 1))
-                    .map(Some),
+                    .ok_or_else(|| {
+                        format!("CIFTI subcortical map {} is unavailable", map_index + 1)
+                    })
+                    .map(|v: EvaluatedValue| vec![v]),
             }
         }
         WorkflowNodeKind::ParcellationSource { source_id } => {
             parcellation_assets
                 .get(source_id)
                 .ok_or_else(|| format!("Missing parcellation source {source_id}"))?;
-            Ok(Some(WorkflowValue::Parcellation(*source_id).into()))
+            Ok(vec![WorkflowValue::Parcellation(*source_id).into()])
         }
         WorkflowNodeKind::LimitStreamlines {
             limit,
@@ -346,25 +365,25 @@ fn evaluate_node(
                 });
             }
             selected.truncate(*limit);
-            Ok(Some(
+            Ok(vec![
                 WorkflowValue::Streamline(StreamlineFlow {
                     selected_streamlines: Arc::new(selected),
                     ..flow
                 })
                 .into(),
-            ))
+            ])
         }
         WorkflowNodeKind::GroupSelect { groups_csv } => {
             let flow = expect_streamline_input(inputs, "Group Select")?;
             match parse_group_filter(groups_csv) {
-                GroupFilter::All => Ok(Some(WorkflowValue::Streamline(flow).into())),
-                GroupFilter::None => Ok(Some(
+                GroupFilter::All => Ok(vec![WorkflowValue::Streamline(flow).into()]),
+                GroupFilter::None => Ok(vec![
                     WorkflowValue::Streamline(StreamlineFlow {
                         selected_streamlines: Arc::new(Vec::new()),
                         ..flow
                     })
                     .into(),
-                )),
+                ]),
                 GroupFilter::Selected(labels) => {
                     if flow.dataset.gpu_data.groups.is_empty() {
                         return Err(
@@ -386,13 +405,13 @@ fn evaluate_node(
                         .copied()
                         .filter(|index| keep.contains(index))
                         .collect();
-                    Ok(Some(
+                    Ok(vec![
                         WorkflowValue::Streamline(StreamlineFlow {
                             selected_streamlines: Arc::new(selected),
                             ..flow
                         })
                         .into(),
-                    ))
+                    ])
                 }
             }
         }
@@ -406,13 +425,13 @@ fn evaluate_node(
                 hasher.finish()
             });
             selected.truncate(*limit);
-            Ok(Some(
+            Ok(vec![
                 WorkflowValue::Streamline(StreamlineFlow {
                     selected_streamlines: Arc::new(selected),
                     ..flow
                 })
                 .into(),
-            ))
+            ])
         }
         WorkflowNodeKind::SphereQuery { center, radius_mm } => {
             let flow = expect_streamline_input(inputs, "Sphere Query")?;
@@ -426,13 +445,13 @@ fn evaluate_node(
                 .copied()
                 .filter(|index| hits.contains(index))
                 .collect();
-            Ok(Some(
+            Ok(vec![
                 WorkflowValue::Streamline(StreamlineFlow {
                     selected_streamlines: Arc::new(selected),
                     ..flow
                 })
                 .into(),
-            ))
+            ])
         }
         WorkflowNodeKind::SurfaceDepthQuery { depth_mm } => {
             let flow = expect_streamline_input(inputs, "Surface Depth Query")?;
@@ -456,10 +475,10 @@ fn evaluate_node(
             if let Some(cache) = execution_cache.surface_query_cache.get(&node.uuid) {
                 node_state.summary =
                     format!("{} streamlines", cache.flow.selected_streamlines.len());
-                return Ok(Some(EvaluatedValue {
+                return Ok(vec![EvaluatedValue {
                     value: WorkflowValue::Streamline(cache.flow.clone()),
                     stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
-                }));
+                }]);
             }
 
             node_state.summary = node_state
@@ -468,7 +487,7 @@ fn evaluate_node(
                 .map(|status| status.label())
                 .unwrap_or("Run required")
                 .to_string();
-            Ok(None)
+            Ok(Vec::new())
         }
         WorkflowNodeKind::RemoveDuplicates { params } => {
             let flow = expect_streamline_input(inputs, "Remove Duplicates")?;
@@ -524,9 +543,9 @@ fn evaluate_node(
                 .get(&source_id)
                 .ok_or_else(|| format!("Missing parcellation {source_id}"))?;
             let labels = resolve_selected_labels(labels_csv, &parcellation.asset.data);
-            Ok(Some(
+            Ok(vec![
                 WorkflowValue::ParcelSelection(ParcelSelection { source_id, labels }).into(),
-            ))
+            ])
         }
         WorkflowNodeKind::ParcelROI => {
             let flow = expect_streamline_input(inputs, "Parcel ROI")?;
@@ -642,53 +661,53 @@ fn evaluate_node(
         }
         WorkflowNodeKind::ColorByDirection => {
             let flow = expect_streamline_input(inputs, "Color By Direction")?;
-            Ok(Some(
+            Ok(vec![
                 WorkflowValue::Streamline(StreamlineFlow {
                     color_mode: ColorMode::DirectionRgb,
                     ..flow
                 })
                 .into(),
-            ))
+            ])
         }
         WorkflowNodeKind::ColorByGroup => {
             let flow = expect_streamline_input(inputs, "Color By Group")?;
-            Ok(Some(
+            Ok(vec![
                 WorkflowValue::Streamline(StreamlineFlow {
                     color_mode: ColorMode::Group,
                     ..flow
                 })
                 .into(),
-            ))
+            ])
         }
         WorkflowNodeKind::ColorByDPV { field } => {
             let flow = expect_streamline_input(inputs, "Color By DPV")?;
-            Ok(Some(
+            Ok(vec![
                 WorkflowValue::Streamline(StreamlineFlow {
                     color_mode: ColorMode::Dpv(field.clone()),
                     ..flow
                 })
                 .into(),
-            ))
+            ])
         }
         WorkflowNodeKind::ColorByDPS { field } => {
             let flow = expect_streamline_input(inputs, "Color By DPS")?;
-            Ok(Some(
+            Ok(vec![
                 WorkflowValue::Streamline(StreamlineFlow {
                     color_mode: ColorMode::Dps(field.clone()),
                     ..flow
                 })
                 .into(),
-            ))
+            ])
         }
         WorkflowNodeKind::UniformColor { color } => {
             let flow = expect_streamline_input(inputs, "Uniform Color")?;
-            Ok(Some(
+            Ok(vec![
                 WorkflowValue::Streamline(StreamlineFlow {
                     color_mode: ColorMode::Uniform(*color),
                     ..flow
                 })
                 .into(),
-            ))
+            ])
         }
         WorkflowNodeKind::SurfaceProjectionDensity { depth_mm } => {
             let flow = expect_streamline_input(inputs, "Map Streamlines to Surface")?;
@@ -717,10 +736,10 @@ fn evaluate_node(
                 }
                 node_state.summary =
                     summarize_value(&WorkflowValue::SurfaceScalars(cache.map.clone()));
-                return Ok(Some(EvaluatedValue {
+                return Ok(vec![EvaluatedValue {
                     value: WorkflowValue::SurfaceScalars(cache.map.clone()),
                     stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
-                }));
+                }]);
             }
 
             node_state.summary = node_state
@@ -729,7 +748,7 @@ fn evaluate_node(
                 .map(|status| status.label())
                 .unwrap_or("Run required")
                 .to_string();
-            Ok(None)
+            Ok(Vec::new())
         }
         WorkflowNodeKind::SurfaceProjectionMeanDps { depth_mm, field } => {
             let flow = expect_streamline_input(inputs, "Map Streamlines to Surface (Mean DPS)")?;
@@ -758,10 +777,10 @@ fn evaluate_node(
                 }
                 node_state.summary =
                     summarize_value(&WorkflowValue::SurfaceScalars(cache.map.clone()));
-                return Ok(Some(EvaluatedValue {
+                return Ok(vec![EvaluatedValue {
                     value: WorkflowValue::SurfaceScalars(cache.map.clone()),
                     stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
-                }));
+                }]);
             }
 
             node_state.summary = node_state
@@ -770,7 +789,7 @@ fn evaluate_node(
                 .map(|status| status.label())
                 .unwrap_or("Run required")
                 .to_string();
-            Ok(None)
+            Ok(Vec::new())
         }
         WorkflowNodeKind::StreamlineDisplay {
             enabled,
@@ -817,7 +836,7 @@ fn evaluate_node(
                 node_state.execution = None;
             }
             scene_plan.streamline_draws.push(plan);
-            Ok(None)
+            Ok(Vec::new())
         }
         WorkflowNodeKind::BundleSurfaceBuild {
             per_group,
@@ -851,10 +870,10 @@ fn evaluate_node(
             prime_expensive_record(record, fingerprint);
             sync_node_state_from_run_record(node_state, record);
             scene_plan.bundle_surface_plans.push(bundle.clone());
-            Ok(Some(EvaluatedValue {
+            Ok(vec![EvaluatedValue {
                 value: WorkflowValue::BundleSurface(bundle),
                 stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
-            }))
+            }])
         }
         WorkflowNodeKind::VolumeDisplay {
             colormap,
@@ -863,9 +882,9 @@ fn evaluate_node(
             window_width,
         } => {
             let source_id = expect_volume_input(inputs, "Volume Display")?;
-            let _ = volume_assets
-                .get(&source_id)
-                .ok_or_else(|| format!("Missing volume {source_id}"))?;
+            if volume_assets.get(&source_id).is_none() && odx_assets.get(&source_id).is_none() {
+                return Err(format!("Missing volume {source_id}"));
+            }
             scene_plan.volume_draws.push(VolumeDrawPlan {
                 source_id,
                 colormap: *colormap,
@@ -873,7 +892,7 @@ fn evaluate_node(
                 window_center: *window_center,
                 window_width: *window_width,
             });
-            Ok(None)
+            Ok(Vec::new())
         }
         WorkflowNodeKind::VolumeScalarsDisplay { colormap, opacity } => {
             let scalars = expect_volume_scalars_input(inputs, "Volume Scalars Display")?;
@@ -883,7 +902,7 @@ fn evaluate_node(
                 colormap: *colormap,
                 opacity: *opacity,
             });
-            Ok(None)
+            Ok(Vec::new())
         }
         WorkflowNodeKind::SurfaceOverlayStack { layers } => {
             let surface_id = expect_surface_input(inputs, "Surface Overlay Stack")?;
@@ -902,10 +921,10 @@ fn evaluate_node(
                 format!("{active_layers} active layer(s)"),
             );
             sync_node_state_from_run_record(node_state, record);
-            Ok(Some(EvaluatedValue {
+            Ok(vec![EvaluatedValue {
                 value: WorkflowValue::SurfaceAppearance(appearance),
                 stale: upstream_stale,
-            }))
+            }])
         }
         WorkflowNodeKind::SurfaceDisplay {
             color,
@@ -933,17 +952,13 @@ fn evaluate_node(
                 .and_then(|p| p.metadata.suggested_range)
                 .unwrap_or((*range_min, *range_max));
             let projection_scalars = projection.as_ref().map(|value| value.values.clone());
-            projection_by_surface.extend(
-                projection
-                    .as_ref()
-                    .cloned()
-                    .into_iter()
-                    .filter_map(|projection| {
-                        projection
-                            .source_surface_id
-                            .map(|surface_id| (surface_id, projection))
-                    }),
-            );
+            projection_by_surface.extend(projection.as_ref().cloned().into_iter().filter_map(
+                |projection| {
+                    projection
+                        .source_surface_id
+                        .map(|surface_id| (surface_id, projection))
+                },
+            ));
             let draw = SurfaceDrawPlan {
                 node_uuid: node.uuid,
                 source_id,
@@ -969,7 +984,7 @@ fn evaluate_node(
                 SurfaceDisplaySpace::Anatomical => scene_plan.surface_draws.push(draw),
                 SurfaceDisplaySpace::Stage => scene_plan.stage_surface_draws.push(draw),
             }
-            Ok(None)
+            Ok(Vec::new())
         }
         WorkflowNodeKind::ParcellationDisplay {
             labels_csv,
@@ -985,7 +1000,7 @@ fn evaluate_node(
                 labels,
                 opacity: *opacity,
             });
-            Ok(None)
+            Ok(Vec::new())
         }
         WorkflowNodeKind::BoundaryFieldBuild {
             voxel_size_mm,
@@ -1007,10 +1022,10 @@ fn evaluate_node(
             prime_expensive_record(record, fingerprint);
             sync_node_state_from_run_record(node_state, record);
             scene_plan.boundary_field_plans.push(plan.clone());
-            Ok(Some(EvaluatedValue {
+            Ok(vec![EvaluatedValue {
                 value: WorkflowValue::BoundaryField(plan),
                 stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
-            }))
+            }])
         }
         WorkflowNodeKind::SaveStreamlines { output_path } => {
             let flow = expect_streamline_input(inputs, "Save Streamlines")?;
@@ -1025,7 +1040,7 @@ fn evaluate_node(
                     flow,
                 },
             );
-            Ok(None)
+            Ok(Vec::new())
         }
         WorkflowNodeKind::BundleSurfaceDisplay {
             color_mode,
@@ -1095,7 +1110,7 @@ fn evaluate_node(
                 )
             };
             scene_plan.bundle_draws.push(draw);
-            Ok(None)
+            Ok(Vec::new())
         }
         WorkflowNodeKind::BoundaryGlyphDisplay {
             enabled,
@@ -1129,7 +1144,7 @@ fn evaluate_node(
                 "Displaying boundary field".to_string()
             };
             scene_plan.boundary_glyph_draws.push(draw);
-            Ok(None)
+            Ok(Vec::new())
         }
         WorkflowNodeKind::ParcelSurfaceBuild => {
             let parcel_selection = expect_parcel_selection_input(inputs, "Parcel Surface Build")?;
@@ -1138,8 +1153,230 @@ fn evaluate_node(
                 labels: parcel_selection.labels,
                 opacity: 0.9,
             });
-            Ok(None)
+            Ok(Vec::new())
         }
+        WorkflowNodeKind::OdxSource { source_id } => {
+            let asset = odx_assets
+                .get(source_id)
+                .ok_or_else(|| format!("Missing ODX asset {source_id}"))?;
+            let scene = asset.scene.clone();
+            let dirs = scene.directions().to_vec();
+            let default_scalars = FixelScalars::from_directions(*source_id, &dirs);
+            let field = FixelField {
+                source_id: *source_id,
+                scene: scene.clone(),
+                scalars: default_scalars.clone(),
+                colormap_code: 0,
+                scalar_range: (0.0, 1.0),
+            };
+            let odf = OdfField {
+                source_id: *source_id,
+                scene: scene.clone(),
+            };
+            let catalog = OdxCatalog::from_scene(*source_id, scene);
+            Ok(vec![
+                WorkflowValue::Fixels(field).into(),
+                WorkflowValue::OdfField(odf).into(),
+                WorkflowValue::OdxCatalog(catalog).into(),
+                WorkflowValue::FixelScalars(default_scalars).into(),
+            ])
+        }
+        WorkflowNodeKind::OdxVolumeSelect { dpv_name } => {
+            let catalog = expect_odx_catalog_input(inputs, "ODX Volume Select")?;
+            if dpv_name.is_empty() {
+                return Err("ODX Volume Select needs a DPV name".to_string());
+            }
+            let volume = catalog
+                .materialize_dpv(dpv_name)
+                .map_err(|e| format!("Failed to materialize DPV '{dpv_name}': {e}"))?;
+            // Stash the materialized volume in the execution cache so headless can pick it up.
+            execution_cache.odx_dpv_materializations.insert(
+                node.uuid,
+                crate::workflow::types::OdxDpvMaterialization {
+                    source_id: catalog.source_id,
+                    dpv_name: dpv_name.clone(),
+                    volume: Arc::new(volume),
+                },
+            );
+            Ok(vec![WorkflowValue::Volume(catalog.source_id).into()])
+        }
+        WorkflowNodeKind::OdxFixelScalarSelect { dpf_name } => {
+            let catalog = expect_odx_catalog_input(inputs, "ODX Fixel Scalar Select")?;
+            if dpf_name.is_empty() {
+                return Err("ODX Fixel Scalar Select needs a DPF name".to_string());
+            }
+            let values = catalog
+                .scene
+                .scalar_dpf_f32(dpf_name)
+                .map_err(|e| format!("Failed to load DPF '{dpf_name}': {e}"))?;
+            let scalars = FixelScalars::from_scalar(catalog.source_id, dpf_name.clone(), values);
+            Ok(vec![WorkflowValue::FixelScalars(scalars).into()])
+        }
+        WorkflowNodeKind::ColorByFixelScalars {
+            colormap,
+            range,
+            length_scale_by_scalar: _,
+        } => {
+            let mut field = expect_fixels_input(inputs, "Color By Fixel Scalars")?;
+            let scalars = expect_fixel_scalars_input(inputs, "Color By Fixel Scalars")?;
+            if scalars.fixel_count != field.scalars.fixel_count {
+                return Err(format!(
+                    "Fixel count mismatch: scalars have {} fixels, field has {}",
+                    scalars.fixel_count, field.scalars.fixel_count
+                ));
+            }
+            field.colormap_code = match colormap {
+                SurfaceColormap::BlueWhiteRed => 5,
+                SurfaceColormap::Viridis => 3,
+                SurfaceColormap::Inferno => 4,
+            };
+            field.scalar_range = range.unwrap_or(scalars.range);
+            field.scalars = scalars.clone();
+            Ok(vec![
+                WorkflowValue::Fixels(field).into(),
+                WorkflowValue::FixelScalars(scalars).into(),
+            ])
+        }
+        WorkflowNodeKind::Fixel3DDisplay {
+            line_width,
+            length_scale,
+            opacity,
+            offset_from_slice,
+            visible,
+        } => {
+            let field = expect_fixels_input(inputs, "Fixel 3D Display")?;
+            let colormap_code = field.colormap_code;
+            let scalar_range = field.scalar_range;
+            scene_plan.fixel_3d_draws.push(FixelDrawPlan {
+                node_uuid: node.uuid,
+                field,
+                line_width: *line_width,
+                length_scale: *length_scale,
+                opacity: *opacity,
+                offset_from_slice: *offset_from_slice,
+                slab_thickness_mm: 0.0,
+                visible: *visible,
+                colormap_code,
+                scalar_range,
+            });
+            Ok(Vec::new())
+        }
+        WorkflowNodeKind::Fixel2DDisplay {
+            line_width,
+            opacity,
+            slab_thickness_mm,
+            length_scale,
+            visible,
+        } => {
+            let field = expect_fixels_input(inputs, "Fixel 2D Display")?;
+            let colormap_code = field.colormap_code;
+            let scalar_range = field.scalar_range;
+            scene_plan.fixel_2d_draws.push(FixelDrawPlan {
+                node_uuid: node.uuid,
+                field,
+                line_width: *line_width,
+                length_scale: *length_scale,
+                opacity: *opacity,
+                offset_from_slice: 0.0,
+                slab_thickness_mm: *slab_thickness_mm,
+                visible: *visible,
+                colormap_code,
+                scalar_range,
+            });
+            Ok(Vec::new())
+        }
+        WorkflowNodeKind::OdfGlyphRenderer {
+            scale,
+            opacity,
+            offset_from_slice,
+            gloss,
+            vertex_colormap,
+            slice_axis,
+            opacity_gate,
+            size_gate,
+            visible,
+        } => {
+            let field = expect_odf_field_input(inputs, "ODF Glyph Renderer")?;
+            let opacity_scalars = optional_volume_scalars_input(inputs, 1);
+            let size_scalars = optional_volume_scalars_input(inputs, 2);
+            scene_plan.odf_glyph_draws.push(OdfGlyphDrawPlan {
+                node_uuid: node.uuid,
+                field,
+                scale: *scale,
+                opacity: *opacity,
+                offset_from_slice: *offset_from_slice,
+                gloss: *gloss,
+                vertex_colormap: *vertex_colormap,
+                slice_axis: *slice_axis,
+                opacity_gate: *opacity_gate,
+                size_gate: *size_gate,
+                opacity_scalars,
+                size_scalars,
+                visible: *visible,
+            });
+            Ok(Vec::new())
+        }
+    }
+}
+
+fn expect_fixels_input(
+    inputs: &[Option<EvaluatedValue>],
+    label: &str,
+) -> Result<FixelField, String> {
+    for input in inputs.iter().flatten() {
+        if let WorkflowValue::Fixels(field) = &input.value {
+            return Ok(field.clone());
+        }
+    }
+    Err(format!("{label} needs a Fixels input"))
+}
+
+fn expect_fixel_scalars_input(
+    inputs: &[Option<EvaluatedValue>],
+    label: &str,
+) -> Result<FixelScalars, String> {
+    for input in inputs.iter().flatten() {
+        if let WorkflowValue::FixelScalars(s) = &input.value {
+            return Ok(s.clone());
+        }
+    }
+    Err(format!("{label} needs a FixelScalars input"))
+}
+
+fn expect_odf_field_input(
+    inputs: &[Option<EvaluatedValue>],
+    label: &str,
+) -> Result<OdfField, String> {
+    for input in inputs.iter().flatten() {
+        if let WorkflowValue::OdfField(f) = &input.value {
+            return Ok(f.clone());
+        }
+    }
+    Err(format!("{label} needs an OdfField input"))
+}
+
+fn expect_odx_catalog_input(
+    inputs: &[Option<EvaluatedValue>],
+    label: &str,
+) -> Result<OdxCatalog, String> {
+    for input in inputs.iter().flatten() {
+        if let WorkflowValue::OdxCatalog(c) = &input.value {
+            return Ok(c.clone());
+        }
+    }
+    Err(format!("{label} needs an OdxCatalog input"))
+}
+
+fn optional_volume_scalars_input(
+    inputs: &[Option<EvaluatedValue>],
+    index: usize,
+) -> Option<VolumeScalars> {
+    match inputs.get(index).cloned().flatten() {
+        Some(EvaluatedValue {
+            value: WorkflowValue::VolumeScalars(v),
+            ..
+        }) => Some(v),
+        _ => None,
     }
 }
 
@@ -1325,7 +1562,7 @@ fn evaluate_derived_streamline_plan(
     inputs: &[Option<EvaluatedValue>],
     execution_cache: &mut WorkflowExecutionCache,
     node_state: &mut NodeEvalState,
-) -> Result<Option<EvaluatedValue>, String> {
+) -> Result<Vec<EvaluatedValue>, String> {
     let fingerprint = workflow_reactive_streamline_fingerprint(&plan);
     let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
     let record = execution_cache.node_runs.entry(node.uuid).or_default();
@@ -1333,10 +1570,10 @@ fn evaluate_derived_streamline_plan(
     sync_node_state_from_run_record(node_state, record);
     if let Some(cache) = execution_cache.derived_streamline_cache.get(&node.uuid) {
         node_state.summary = format!("{} streamlines", cache.flow.selected_streamlines.len());
-        return Ok(Some(EvaluatedValue {
+        return Ok(vec![EvaluatedValue {
             value: WorkflowValue::Streamline(cache.flow.clone()),
             stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
-        }));
+        }]);
     }
     node_state.summary = node_state
         .execution
@@ -1344,7 +1581,7 @@ fn evaluate_derived_streamline_plan(
         .map(|status| status.label())
         .unwrap_or("Waiting")
         .to_string();
-    Ok(None)
+    Ok(Vec::new())
 }
 
 fn compose_surface_appearance(
@@ -1405,7 +1642,12 @@ fn surface_display_model_matrix(
     }
     let center = (surface.data.bbox_min + surface.data.bbox_max) * 0.5;
     let extents = surface.data.bbox_max - surface.data.bbox_min;
-    let span = extents.x.abs().max(extents.y.abs()).max(extents.z.abs()).max(1.0);
+    let span = extents
+        .x
+        .abs()
+        .max(extents.y.abs())
+        .max(extents.z.abs())
+        .max(1.0);
     let separation = span * 0.8;
     let (x_shift, turn_deg): (f32, f32) = match structure {
         Some(CiftiStructure::CortexLeft) => (separation, -90.0),
@@ -1456,7 +1698,9 @@ fn overlay_surface_scalars(
             continue;
         }
         let src = match scalars.kind {
-            ScalarKind::Label if layer.use_label_colors => label_rgba(*scalar as i32, &scalars.metadata),
+            ScalarKind::Label if layer.use_label_colors => {
+                label_rgba(*scalar as i32, &scalars.metadata)
+            }
             _ => {
                 if *scalar < layer.threshold_min || *scalar > layer.threshold_max {
                     continue;
@@ -1633,6 +1877,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
             &mut HashMap::new(),
             &mut 1_000_000usize,
             &mut WorkflowExecutionCache::default(),
@@ -1662,6 +1907,7 @@ mod tests {
 
         let runtime = evaluate_scene_plan_with_mode(
             &document,
+            &[],
             &[],
             &[],
             &[],
@@ -1736,10 +1982,12 @@ mod tests {
         .expect("appearance");
 
         assert_eq!(appearance.structure, Some(CiftiStructure::CortexLeft));
-        assert!(appearance
-            .vertex_rgba
-            .iter()
-            .any(|rgba| *rgba != DEFAULT_SURFACE_BASE_RGBA));
+        assert!(
+            appearance
+                .vertex_rgba
+                .iter()
+                .any(|rgba| *rgba != DEFAULT_SURFACE_BASE_RGBA)
+        );
         assert_eq!(appearance.legend_labels, vec!["Base".to_string()]);
     }
 }
@@ -1790,6 +2038,16 @@ fn summarize_value(value: &WorkflowValue) -> String {
                 plan.flow.selected_streamlines.len()
             )
         }
+        WorkflowValue::Fixels(field) => format!("Fixels ({} peaks)", field.scalars.fixel_count),
+        WorkflowValue::FixelScalars(s) => {
+            format!("Fixel scalars '{}' ({} values)", s.name, s.fixel_count)
+        }
+        WorkflowValue::OdfField(_) => "ODF field ready".to_string(),
+        WorkflowValue::OdxCatalog(c) => format!(
+            "ODX catalog ({} DPV, {} DPF)",
+            c.dpv_names.len(),
+            c.dpf_names.len()
+        ),
     }
 }
 

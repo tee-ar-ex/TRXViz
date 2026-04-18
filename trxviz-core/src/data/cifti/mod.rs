@@ -8,9 +8,7 @@ use flate2::read::GzDecoder;
 use glam::{Mat4, Vec4};
 use roxmltree::{Document, Node};
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum CiftiIntent {
     DenseScalar,
     DenseSeries,
@@ -18,18 +16,14 @@ pub enum CiftiIntent {
     DenseLabel,
 }
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum CiftiStructure {
     CortexLeft,
     CortexRight,
     Subcortical,
 }
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ScalarKind {
     Continuous,
     Label,
@@ -68,6 +62,36 @@ pub struct VolumeScalars {
     pub values: Vec<f32>,
     pub kind: ScalarKind,
     pub metadata: ScalarMetadata,
+}
+
+impl VolumeScalars {
+    /// Sample the scalar volume at a RAS+ world-space position using nearest-neighbor lookup.
+    pub fn sample_ras(&self, world_pos: glam::Vec3) -> Option<f32> {
+        if self.dims.contains(&0) {
+            return None;
+        }
+
+        let voxel = self.voxel_to_ras.inverse() * world_pos.extend(1.0);
+        let i = voxel.x.round() as isize;
+        let j = voxel.y.round() as isize;
+        let k = voxel.z.round() as isize;
+
+        if i < 0
+            || j < 0
+            || k < 0
+            || i >= self.dims[0] as isize
+            || j >= self.dims[1] as isize
+            || k >= self.dims[2] as isize
+        {
+            return None;
+        }
+
+        let i = i as usize;
+        let j = j as usize;
+        let k = k as usize;
+        let flat = i + self.dims[0] * (j + self.dims[1] * k);
+        self.values.get(flat).copied()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -320,7 +344,11 @@ fn parse_nifti2_data(
     data_len: usize,
     little_endian: bool,
 ) -> anyhow::Result<Vec<f32>> {
-    let slope = if header.scl_slope == 0.0 { 1.0 } else { header.scl_slope };
+    let slope = if header.scl_slope == 0.0 {
+        1.0
+    } else {
+        header.scl_slope
+    };
     let inter = header.scl_inter;
     let size_of = datatype_size(header.datatype)?;
     let end = header.vox_offset + size_of * data_len;
@@ -424,7 +452,9 @@ fn metadata_for_map(axis: &CiftiAxis, map_index: usize, map_values: &[f32]) -> S
                 suggested_range: None,
                 series_index: None,
                 series_value: None,
-                label_table: map.map(|entry| entry.label_table.clone()).unwrap_or_default(),
+                label_table: map
+                    .map(|entry| entry.label_table.clone())
+                    .unwrap_or_default(),
             }
         }
         _ => ScalarMetadata {
@@ -674,7 +704,10 @@ fn parse_cifti_xml(xml_text: &str) -> anyhow::Result<CiftiXml> {
         .find(|node| node.has_tag_name("Matrix"))
         .ok_or_else(|| anyhow::anyhow!("CIFTI Matrix node not found"))?;
     let mut axes = HashMap::new();
-    for axis_node in matrix.children().filter(|node| node.has_tag_name("MatrixIndicesMap")) {
+    for axis_node in matrix
+        .children()
+        .filter(|node| node.has_tag_name("MatrixIndicesMap"))
+    {
         let dim = attr_usize(axis_node, "AppliesToMatrixDimension")?;
         let axis_type = axis_node
             .attribute("IndicesMapToDataType")
@@ -718,8 +751,9 @@ fn parse_brain_models_axis(node: Node<'_, '_>) -> anyhow::Result<BrainModelsAxis
                 };
                 let index_offset = attr_usize(child, "IndexOffset")?;
                 let index_count = attr_usize(child, "IndexCount")?;
-                let surface_number_of_vertices =
-                    child.attribute("SurfaceNumberOfVertices").and_then(|value| value.parse().ok());
+                let surface_number_of_vertices = child
+                    .attribute("SurfaceNumberOfVertices")
+                    .and_then(|value| value.parse().ok());
                 match kind {
                     BrainModelKind::Surface(CiftiStructure::CortexLeft) => {
                         left_vertices = left_vertices.or(surface_number_of_vertices);
@@ -1108,7 +1142,8 @@ fn read_f64_array<const N: usize>(
 
 #[cfg(test)]
 mod tests {
-    use super::{CiftiIntent, LoadedCifti, ScalarKind};
+    use super::{CiftiIntent, LoadedCifti, ScalarKind, ScalarMetadata, VolumeScalars};
+    use glam::Mat4;
     use std::path::PathBuf;
 
     fn sample_path(file_name: &str) -> PathBuf {
@@ -1156,5 +1191,30 @@ mod tests {
             .expect("left cortex labels");
         assert_eq!(first.kind, ScalarKind::Label);
         assert!(!first.metadata.label_table.is_empty());
+    }
+
+    #[test]
+    fn volume_scalars_sample_ras_uses_nearest_voxel() {
+        let volume = VolumeScalars {
+            dims: [2, 2, 2],
+            voxel_to_ras: Mat4::IDENTITY,
+            values: (0..8).map(|v| v as f32).collect(),
+            kind: ScalarKind::Continuous,
+            metadata: ScalarMetadata {
+                map_name: "test".into(),
+                suggested_range: None,
+                series_index: None,
+                series_value: None,
+                label_table: Vec::new(),
+            },
+        };
+
+        assert_eq!(volume.sample_ras(glam::Vec3::new(0.1, 0.1, 0.1)), Some(0.0));
+        assert_eq!(volume.sample_ras(glam::Vec3::new(1.0, 1.0, 1.0)), Some(7.0));
+        assert_eq!(
+            volume.sample_ras(glam::Vec3::new(1.49, 0.51, 0.49)),
+            Some(3.0)
+        );
+        assert_eq!(volume.sample_ras(glam::Vec3::new(3.0, 0.0, 0.0)), None);
     }
 }

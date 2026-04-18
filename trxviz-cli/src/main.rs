@@ -44,6 +44,8 @@ struct RenderArgs {
     surface_paths: Vec<PathBuf>,
     #[arg(long = "parcellation")]
     parcellation_paths: Vec<PathBuf>,
+    #[arg(long = "odx")]
+    odx_paths: Vec<PathBuf>,
     #[arg(long)]
     out: PathBuf,
     #[arg(long, default_value_t = 1920)]
@@ -74,6 +76,8 @@ struct ExportSceneArgs {
     surface_paths: Vec<PathBuf>,
     #[arg(long = "parcellation")]
     parcellation_paths: Vec<PathBuf>,
+    #[arg(long = "odx")]
+    odx_paths: Vec<PathBuf>,
     #[arg(long)]
     out: PathBuf,
     #[arg(long, default_value_t = 1920)]
@@ -150,6 +154,7 @@ fn run_render(args: RenderArgs) -> anyhow::Result<()> {
         nifti_paths: args.nifti_paths,
         surface_paths: args.surface_paths,
         parcellation_paths: args.parcellation_paths,
+        odx_paths: args.odx_paths,
     };
     render_assets_png(&assets, &args.out, &options)
         .with_context(|| format!("rendering scene to {}", args.out.display()))?;
@@ -194,6 +199,7 @@ fn run_export_scene(args: ExportSceneArgs) -> anyhow::Result<()> {
         nifti_paths: args.nifti_paths,
         surface_paths: args.surface_paths,
         parcellation_paths: args.parcellation_paths,
+        odx_paths: args.odx_paths,
     };
     export_assets_glb(&assets, &args.out, &options)
         .with_context(|| format!("exporting scene to {}", args.out.display()))?;

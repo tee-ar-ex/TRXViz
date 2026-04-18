@@ -84,3 +84,12 @@ pub struct LoadedCifti {
     pub data: Arc<LoadedCiftiData>,
     pub visible: bool,
 }
+
+/// Loaded ODX (ODF/fixel/DPV) file asset.
+pub struct LoadedOdx {
+    pub id: FileId,
+    pub name: String,
+    pub path: PathBuf,
+    pub scene: Arc<crate::data::odx_data::OdxScene>,
+    pub visible: bool,
+}

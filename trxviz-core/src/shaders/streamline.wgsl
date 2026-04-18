@@ -1,11 +1,10 @@
 struct Uniforms {
     view_proj: mat4x4<f32>,
-    // camera_pos packed with render_style to avoid vec3 alignment waste
     camera_pos: vec3<f32>,
-    render_style: u32,   // 0=flat, 1=illuminated, 2=tubes (unused here), 3=depth_cue
-    slab_axis: u32,      // 0=X, 1=Y, 2=Z, 3=disabled
-    slab_min: f32,
-    slab_max: f32,
+    render_style: u32,      // 0=flat, 1=illuminated, 2=tubes (unused here), 3=depth_cue
+    slab_normal: vec3<f32>, // unit normal to slice plane
+    slab_half_width: f32,   // 0 = disabled
+    slab_center: vec3<f32>, // world-space point on slice plane
     tube_radius: f32,
     ambient_strength: f32,
     key_strength: f32,
@@ -72,17 +71,10 @@ fn apply_post_color(color: vec3<f32>, ndc_xy: vec2<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Slab clipping
-    if uniforms.slab_axis < 3u {
-        var coord: f32;
-        if uniforms.slab_axis == 0u {
-            coord = in.world_pos.x;
-        } else if uniforms.slab_axis == 1u {
-            coord = in.world_pos.y;
-        } else {
-            coord = in.world_pos.z;
-        }
-        if coord < uniforms.slab_min || coord > uniforms.slab_max {
+    // Slab clipping: plane-distance test (works for oblique slices).
+    if uniforms.slab_half_width > 0.0 {
+        let dist = dot(in.world_pos - uniforms.slab_center, uniforms.slab_normal);
+        if abs(dist) > uniforms.slab_half_width {
             discard;
         }
     }

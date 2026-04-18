@@ -204,15 +204,12 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
         };
         match &node.kind {
             WorkflowNodeKind::SurfaceSource { source_id } => {
-                let guess = self
-                    .assets
-                    .iter()
-                    .find_map(|asset| match asset {
-                        WorkflowAssetDocument::Surface { id, path } if id == source_id => {
-                            guess_surface_hemisphere(path)
-                        }
-                        _ => None,
-                    });
+                let guess = self.assets.iter().find_map(|asset| match asset {
+                    WorkflowAssetDocument::Surface { id, path } if id == source_id => {
+                        guess_surface_hemisphere(path)
+                    }
+                    _ => None,
+                });
                 match guess {
                     Some(HemisphereGuess::Left) => format!("{base} (Left)"),
                     Some(HemisphereGuess::Right) => format!("{base} (Right)"),
@@ -249,8 +246,13 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
         ui: &mut egui::Ui,
         snarl: &mut Snarl<WorkflowNode>,
     ) -> impl egui_snarl::ui::SnarlPin + 'static {
-        ui.label(port_name(snarl[pin.id.node].kind.outputs()[pin.id.output]));
-        pin_info_for_port(snarl[pin.id.node].kind.outputs()[pin.id.output])
+        let port = snarl[pin.id.node].kind.outputs()[pin.id.output];
+        ui.horizontal(|ui| {
+            ui.label(port_name(port));
+            // Reserve space so the pin circle doesn't overlap the trailing label glyphs.
+            ui.add_space(10.0);
+        });
+        pin_info_for_port(port)
     }
 
     fn has_body(&mut self, _node: &WorkflowNode) -> bool {
@@ -700,6 +702,10 @@ fn port_name(port: PortKind) -> &'static str {
         PortKind::SurfaceAppearance => "Surface Appearance",
         PortKind::BundleSurface => "Bundle Surface",
         PortKind::BoundaryField => "Boundary Field",
+        PortKind::Fixels => "Fixels",
+        PortKind::FixelScalars => "Fixel Scalars",
+        PortKind::OdfField => "ODF Field",
+        PortKind::OdxCatalog => "ODX Catalog",
     }
 }
 
@@ -763,6 +769,10 @@ fn pin_info_for_port(port: PortKind) -> PinInfo {
         PortKind::SurfaceAppearance => egui::Color32::from_rgb(170, 226, 145),
         PortKind::BundleSurface => egui::Color32::from_rgb(143, 224, 201),
         PortKind::BoundaryField => egui::Color32::from_rgb(255, 160, 96),
+        PortKind::Fixels => egui::Color32::from_rgb(255, 112, 112),
+        PortKind::FixelScalars => egui::Color32::from_rgb(232, 112, 180),
+        PortKind::OdfField => egui::Color32::from_rgb(196, 112, 232),
+        PortKind::OdxCatalog => egui::Color32::from_rgb(160, 120, 220),
     };
     PinInfo::circle().with_fill(color)
 }

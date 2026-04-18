@@ -9,9 +9,11 @@ use glam::Vec3;
 use trxviz_core::data::gifti_data::GiftiSurfaceData;
 use trxviz_core::data::loaded_files::{FileId, LoadedCifti, LoadedNifti};
 use trxviz_core::data::nifti_data::NiftiVolume;
+use trxviz_core::data::odx_data::OdxScene;
 use trxviz_core::data::orientation_field::BoundaryContactField;
 pub use trxviz_core::lighting::{SceneLightingParams, WorkflowBackground3D, WorkflowRender3D};
 use trxviz_core::renderer::camera::{OrbitCamera, OrthoSliceCamera};
+use trxviz_core::renderer::glyph_renderer::OdxGlyphResourceKey;
 use trxviz_core::renderer::slice_renderer::SliceAxis;
 pub use trxviz_core::scene::{
     HeadlessScene as SceneState, LoadedGiftiSurface, LoadedParcellationSource,
@@ -453,6 +455,8 @@ impl ViewportState {
         &mut self,
         nifti_files: &[LoadedNifti],
         gifti_surfaces: &[LoadedGiftiSurface],
+        odx_dims: Option<[u64; 3]>,
+        odx_voxel_to_ras: Option<glam::Mat4>,
         axis_index: usize,
         delta: isize,
     ) -> bool {
@@ -467,6 +471,36 @@ impl ViewportState {
                 .clamp(0, max_idx as isize) as usize;
             if new_idx != self.slice_indices[axis_index] {
                 self.slice_indices[axis_index] = new_idx;
+                self.slices_dirty = true;
+                return true;
+            }
+            return false;
+        }
+
+        // ODX voxel-grid stepping (same logic as NIfTI but uses ODX dimensions).
+        if let Some(dims) = odx_dims {
+            let max_idx = match axis_index {
+                0 => dims[2].saturating_sub(1) as usize,
+                1 => dims[1].saturating_sub(1) as usize,
+                _ => dims[0].saturating_sub(1) as usize,
+            };
+            let new_idx = (self.slice_indices[axis_index] as isize + delta)
+                .clamp(0, max_idx as isize) as usize;
+            if new_idx != self.slice_indices[axis_index] {
+                self.slice_indices[axis_index] = new_idx;
+                if let Some(affine) = odx_voxel_to_ras {
+                    let v = match axis_index {
+                        0 => glam::Vec3::new(0.0, 0.0, new_idx as f32),
+                        1 => glam::Vec3::new(0.0, new_idx as f32, 0.0),
+                        _ => glam::Vec3::new(new_idx as f32, 0.0, 0.0),
+                    };
+                    let world = affine.transform_point3(v);
+                    self.slice_world_offsets[axis_index] = match axis_index {
+                        0 => world.z,
+                        1 => world.y,
+                        _ => world.x,
+                    };
+                }
                 self.slices_dirty = true;
                 return true;
             }
@@ -539,6 +573,9 @@ pub struct WorkflowState {
     pub last_settled_revision: u64,
     pub last_runtime_revision: u64,
     pub last_resource_sync_revision: u64,
+    pub uploaded_dpv_by_source: HashMap<FileId, (WorkflowNodeUuid, String)>,
+    pub uploaded_odx_glyph_resource_key: Option<OdxGlyphResourceKey>,
+    pub uploaded_fixel_fingerprint: u64,
     pub editor_interaction_active: bool,
     pub last_semantic_edit_at: f64,
     pub job_tx: mpsc::Sender<WorkflowJobMessage>,
@@ -573,6 +610,9 @@ impl WorkflowState {
             last_settled_revision: 0,
             last_runtime_revision: 0,
             last_resource_sync_revision: 0,
+            uploaded_dpv_by_source: HashMap::new(),
+            uploaded_odx_glyph_resource_key: None,
+            uploaded_fixel_fingerprint: 0,
             editor_interaction_active: false,
             last_semantic_edit_at: 0.0,
             job_tx,
@@ -617,6 +657,11 @@ pub enum WorkerMessage {
         job_id: u64,
         path: PathBuf,
         result: Result<LoadedParcellationSource, String>,
+    },
+    OdxLoaded {
+        job_id: u64,
+        path: PathBuf,
+        result: Result<OdxScene, String>,
     },
 }
 

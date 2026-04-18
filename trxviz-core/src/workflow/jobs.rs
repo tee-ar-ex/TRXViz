@@ -2,10 +2,10 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::data::cifti::{ScalarKind, ScalarMetadata, SurfaceScalars};
 use crate::data::bundle_mesh::{
     BundleMesh, BundleMeshColorStrategy, build_bundle_mesh, build_streamtube_bundle_mesh,
 };
+use crate::data::cifti::{ScalarKind, ScalarMetadata, SurfaceScalars};
 use crate::data::orientation_field::{BoundaryContactField, StreamlineSet};
 use crate::data::trx_data::{TrxGpuData, build_tube_vertices_from_data, group_name_color};
 

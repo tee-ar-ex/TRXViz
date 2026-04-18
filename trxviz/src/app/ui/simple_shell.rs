@@ -44,6 +44,17 @@ impl super::super::TrxVizApp {
                         return;
                     }
 
+                    if let Some(ref name) = self.odx_name.clone() {
+                        let label = truncate_simple_label(name, 36);
+                        egui::CollapsingHeader::new(label)
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                ui.checkbox(&mut self.odx_show_glyphs, "ODF Glyphs (3D view)");
+                                ui.checkbox(&mut self.odx_show_fixels, "Fixels (slice views)");
+                            });
+                        ui.add_space(4.0);
+                    }
+
                     for asset in assets {
                         match (&editability, asset) {
                             (
@@ -125,6 +136,13 @@ impl super::super::TrxVizApp {
                                     true,
                                 );
                             }
+                            (_, WorkflowAssetDocument::Odx { id, path, .. }) => {
+                                ui.group(|ui| {
+                                    ui.strong(format!("ODX {}", id));
+                                    ui.small(path.display().to_string());
+                                    ui.small("ODX assets are available in Advanced mode.");
+                                });
+                            }
                         }
                     }
                 });
@@ -135,7 +153,7 @@ impl super::super::TrxVizApp {
                 ui.centered_and_justified(|ui| {
                     ui.vertical(|ui| {
                         ui.heading("Drop files to start");
-                        ui.small("TRX, TRK, TCK, VTK, TinyTrack, NIfTI, GIFTI, CIFTI (.dscalar/.dtseries/.dlabel/.pscalar), and parcellations are supported.");
+                        ui.small("TRX, TRK, TCK, VTK, TinyTrack, NIfTI, GIFTI, CIFTI (.dscalar/.dtseries/.dlabel/.pscalar), parcellations, and ODX/fib.gz/fz/pam5/mif are supported.");
                         ui.add_space(12.0);
                         if ui.button("Open Files...").clicked() {
                             open_files_requested = true;

@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::data::gifti_data::GiftiSurfaceData;
-use crate::data::loaded_files::{FileId, LoadedCifti, LoadedNifti, LoadedTrx, StreamlineBacking};
+use crate::data::loaded_files::{
+    FileId, LoadedCifti, LoadedNifti, LoadedOdx, LoadedTrx, StreamlineBacking,
+};
+use crate::data::odx_data::OdxScene;
 use crate::data::orientation_field::BoundaryContactField;
 use crate::data::parcellation_data::ParcellationVolume;
 use crate::data::trx_data::TrxGpuData;
@@ -63,6 +66,8 @@ pub struct HeadlessScene {
     pub slice_visible: [bool; 3],
     pub boundary_field: Option<Arc<BoundaryContactField>>,
     pub boundary_field_revision: u64,
+    pub odx_scene: Option<Arc<OdxScene>>,
+    pub odx_files: Vec<LoadedOdx>,
 }
 
 impl Default for HeadlessScene {
@@ -81,6 +86,8 @@ impl Default for HeadlessScene {
             slice_visible: [true; 3],
             boundary_field: None,
             boundary_field_revision: 0,
+            odx_scene: None,
+            odx_files: Vec::new(),
         }
     }
 }

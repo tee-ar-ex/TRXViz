@@ -84,9 +84,9 @@ pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEdi
             .map(|binding| {
                 bindings.volume.insert(*id, binding);
             }),
-            WorkflowAssetDocument::Cifti { .. } => Err(
-                "CIFTI workflow branches are only editable in Advanced mode.".to_string(),
-            ),
+            WorkflowAssetDocument::Cifti { .. } => {
+                Err("CIFTI workflow branches are only editable in Advanced mode.".to_string())
+            }
             WorkflowAssetDocument::Surface { id, .. } => match_simple_display_asset(
                 *id,
                 &kinds,
@@ -111,6 +111,9 @@ pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEdi
             .map(|binding| {
                 bindings.parcellation.insert(*id, binding);
             }),
+            WorkflowAssetDocument::Odx { .. } => {
+                Err("ODX workflow branches are only editable in Advanced mode.".to_string())
+            }
         };
 
         if let Err(reason) = result {
