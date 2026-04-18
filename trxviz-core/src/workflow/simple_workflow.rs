@@ -8,16 +8,12 @@ use super::{WorkflowAssetDocument, WorkflowDocument, WorkflowNodeKind, WorkflowN
 pub struct SimpleWorkflowBindings {
     pub streamline: HashMap<FileId, SimpleStreamlineBinding>,
     pub volume: HashMap<FileId, SimpleDisplayBinding>,
-    pub surface: HashMap<FileId, SimpleDisplayBinding>,
+    pub surface: HashMap<FileId, SimpleSurfaceBinding>,
     pub parcellation: HashMap<FileId, SimpleDisplayBinding>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct SimpleStreamlineBinding {
-    pub source: WorkflowNodeUuid,
-    pub group_select: WorkflowNodeUuid,
-    pub limit: WorkflowNodeUuid,
-    pub color: WorkflowNodeUuid,
     pub display: WorkflowNodeUuid,
 }
 
@@ -26,23 +22,36 @@ pub struct SimpleDisplayBinding {
     pub display: WorkflowNodeUuid,
 }
 
-#[derive(Clone, Debug)]
-pub enum WorkflowEditability {
-    Simple(SimpleWorkflowBindings),
-    AdvancedOnly { reason: String },
+#[derive(Clone, Copy, Debug)]
+pub struct SimpleSurfaceBinding {
+    pub display: WorkflowNodeUuid,
+    pub overlay_stack: Option<WorkflowNodeUuid>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct WorkflowEditability {
+    pub bindings: SimpleWorkflowBindings,
+    pub read_only_reasons: HashMap<FileId, String>,
 }
 
 impl WorkflowEditability {
-    pub fn reason(&self) -> Option<&str> {
-        match self {
-            Self::Simple(_) => None,
-            Self::AdvancedOnly { reason } => Some(reason),
-        }
+    pub fn has_read_only_assets(&self) -> bool {
+        !self.read_only_reasons.is_empty()
+    }
+
+    pub fn first_reason(&self) -> Option<&str> {
+        self.read_only_reasons
+            .values()
+            .next()
+            .map(String::as_str)
+    }
+
+    pub fn reason_for(&self, asset_id: FileId) -> Option<&str> {
+        self.read_only_reasons.get(&asset_id).map(String::as_str)
     }
 }
 
 pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEditability {
-    let mut incoming = HashMap::<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>::new();
     let mut outgoing = HashMap::<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>::new();
     let mut kinds = HashMap::<WorkflowNodeUuid, &WorkflowNodeKind>::new();
 
@@ -55,84 +64,70 @@ pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEdi
             .entry(wire.from.node)
             .or_default()
             .push(wire.to.node);
-        incoming
-            .entry(wire.to.node)
-            .or_default()
-            .push(wire.from.node);
     }
 
-    let mut bindings = SimpleWorkflowBindings::default();
-    let mut used = HashSet::<WorkflowNodeUuid>::new();
+    let mut editability = WorkflowEditability::default();
 
     for asset in &document.assets {
         let result = match asset {
             WorkflowAssetDocument::Streamlines { id, .. } => match_streamline_asset(
-                *id, &kinds, &incoming, &outgoing, &mut used,
+                *id,
+                &kinds,
+                &outgoing,
             )
             .map(|binding| {
-                bindings.streamline.insert(*id, binding);
+                editability.bindings.streamline.insert(*id, binding);
             }),
             WorkflowAssetDocument::Volume { id, .. } => match_simple_display_asset(
                 *id,
                 &kinds,
-                &incoming,
                 &outgoing,
-                &mut used,
                 is_volume_source,
                 is_volume_display,
             )
             .map(|binding| {
-                bindings.volume.insert(*id, binding);
+                editability.bindings.volume.insert(*id, binding);
             }),
-            WorkflowAssetDocument::Cifti { .. } => Err(
-                "CIFTI workflow branches are only editable in Advanced mode.".to_string(),
-            ),
-            WorkflowAssetDocument::Surface { id, .. } => match_simple_display_asset(
+            WorkflowAssetDocument::Cifti { .. } => {
+                Err("CIFTI workflow branches are only editable in Advanced mode.".to_string())
+            }
+            WorkflowAssetDocument::Surface { id, .. } => match_surface_asset(
                 *id,
                 &kinds,
-                &incoming,
                 &outgoing,
-                &mut used,
-                is_surface_source,
-                is_surface_display,
             )
             .map(|binding| {
-                bindings.surface.insert(*id, binding);
+                editability.bindings.surface.insert(*id, binding);
             }),
             WorkflowAssetDocument::Parcellation { id, .. } => match_simple_display_asset(
                 *id,
                 &kinds,
-                &incoming,
                 &outgoing,
-                &mut used,
                 is_parcellation_source,
                 is_parcellation_display,
             )
             .map(|binding| {
-                bindings.parcellation.insert(*id, binding);
+                editability.bindings.parcellation.insert(*id, binding);
             }),
+            WorkflowAssetDocument::Odx { .. } => {
+                Err("ODX workflow branches are only editable in Advanced mode.".to_string())
+            }
         };
 
         if let Err(reason) = result {
-            return WorkflowEditability::AdvancedOnly { reason };
+            editability
+                .read_only_reasons
+                .insert(workflow_asset_id(asset), reason);
         }
     }
 
-    if used.len() != kinds.len() {
-        return WorkflowEditability::AdvancedOnly {
-            reason: "This project contains extra workflow nodes that are only editable in Advanced mode.".to_string(),
-        };
-    }
-
-    WorkflowEditability::Simple(bindings)
+    editability
 }
 
 fn match_streamline_asset(
     asset_id: FileId,
     kinds: &HashMap<WorkflowNodeUuid, &WorkflowNodeKind>,
-    incoming: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
     outgoing: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
-    used: &mut HashSet<WorkflowNodeUuid>,
 ) -> Result<SimpleStreamlineBinding, String> {
     let source = find_single_node(kinds, |kind| {
         matches!(
@@ -141,81 +136,43 @@ fn match_streamline_asset(
         )
     })
     .ok_or_else(|| format!("Streamline asset {asset_id} is missing its source node."))?;
-
-    let group_select = expect_next(source, outgoing, incoming, kinds, |kind| {
-        matches!(kind, WorkflowNodeKind::GroupSelect { .. })
-    })
-    .ok_or_else(|| {
-        "This project does not match the default Simple streamline chain (source -> group -> limit -> color -> display).".to_string()
-    })?;
-
-    let limit = expect_next(group_select, outgoing, incoming, kinds, |kind| {
-        matches!(kind, WorkflowNodeKind::LimitStreamlines { .. })
-    })
-    .ok_or_else(|| {
-        "This project does not match the default Simple streamline chain (source -> group -> limit -> color -> display).".to_string()
-    })?;
-
-    let color = expect_next(limit, outgoing, incoming, kinds, is_simple_streamline_color)
-        .ok_or_else(|| {
-            "This project does not match the default Simple streamline chain (source -> group -> limit -> color -> display).".to_string()
-        })?;
-
-    let display = expect_next(color, outgoing, incoming, kinds, |kind| {
+    let display = find_unique_reachable_display(source, kinds, outgoing, |kind| {
         matches!(kind, WorkflowNodeKind::StreamlineDisplay { .. })
-    })
-    .ok_or_else(|| {
-        "This project does not match the default Simple streamline chain (source -> group -> limit -> color -> display).".to_string()
     })?;
 
-    if !incoming.get(&source).map_or(true, Vec::is_empty)
-        || !outgoing.get(&display).map_or(true, Vec::is_empty)
-    {
-        return Err(
-            "This project branches or feeds the default streamline view in a way that requires Advanced mode."
-                .to_string(),
-        );
-    }
-
-    used.extend([source, group_select, limit, color, display]);
-
-    Ok(SimpleStreamlineBinding {
-        source,
-        group_select,
-        limit,
-        color,
-        display,
-    })
+    Ok(SimpleStreamlineBinding { display })
 }
 
 fn match_simple_display_asset(
     asset_id: FileId,
     kinds: &HashMap<WorkflowNodeUuid, &WorkflowNodeKind>,
-    incoming: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
     outgoing: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
-    used: &mut HashSet<WorkflowNodeUuid>,
     is_source: impl Fn(&WorkflowNodeKind, FileId) -> bool,
     is_display: impl Fn(&WorkflowNodeKind) -> bool,
 ) -> Result<SimpleDisplayBinding, String> {
     let source = find_single_node(kinds, |kind| is_source(kind, asset_id))
         .ok_or_else(|| format!("Asset {asset_id} is missing its source node."))?;
-    let display = expect_next(source, outgoing, incoming, kinds, is_display).ok_or_else(|| {
-        "This project does not match the default Simple asset chain (source -> display)."
-            .to_string()
-    })?;
-
-    if !incoming.get(&source).map_or(true, Vec::is_empty)
-        || !outgoing.get(&display).map_or(true, Vec::is_empty)
-    {
-        return Err(
-            "This project branches or feeds a default asset view in a way that requires Advanced mode."
-                .to_string(),
-        );
-    }
-
-    used.extend([source, display]);
+    let display = find_unique_reachable_display(source, kinds, outgoing, is_display)?;
 
     Ok(SimpleDisplayBinding { display })
+}
+
+fn match_surface_asset(
+    asset_id: FileId,
+    kinds: &HashMap<WorkflowNodeUuid, &WorkflowNodeKind>,
+    outgoing: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
+) -> Result<SimpleSurfaceBinding, String> {
+    let source = find_single_node(kinds, |kind| is_surface_source(kind, asset_id))
+        .ok_or_else(|| format!("Asset {asset_id} is missing its source node."))?;
+    let display = find_unique_reachable_display(source, kinds, outgoing, is_surface_display)?;
+    let overlay_stack = find_unique_reachable_optional_node(source, kinds, outgoing, |kind| {
+        matches!(kind, WorkflowNodeKind::SurfaceOverlayStack { .. })
+    })?;
+
+    Ok(SimpleSurfaceBinding {
+        display,
+        overlay_stack,
+    })
 }
 
 fn find_single_node(
@@ -234,30 +191,98 @@ fn find_single_node(
     found
 }
 
-fn expect_next(
-    current: WorkflowNodeUuid,
-    outgoing: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
-    incoming: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
+fn find_unique_reachable_display(
+    source: WorkflowNodeUuid,
     kinds: &HashMap<WorkflowNodeUuid, &WorkflowNodeKind>,
+    outgoing: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
     predicate: impl Fn(&WorkflowNodeKind) -> bool,
-) -> Option<WorkflowNodeUuid> {
-    let next = match outgoing.get(&current) {
-        Some(children) if children.len() == 1 => children[0],
-        _ => return None,
-    };
-    if incoming.get(&next).map_or(0, Vec::len) != 1 {
-        return None;
+) -> Result<WorkflowNodeUuid, String> {
+    let mut stack = vec![source];
+    let mut visited = HashSet::from([source]);
+    let mut matches = Vec::new();
+
+    while let Some(current) = stack.pop() {
+        let Some(children) = outgoing.get(&current) else {
+            continue;
+        };
+        for &child in children {
+            if !visited.insert(child) {
+                continue;
+            }
+            if let Some(kind) = kinds.get(&child) {
+                if predicate(kind) {
+                    if outgoing.get(&child).is_some_and(|children| !children.is_empty()) {
+                        return Err(
+                            "This project routes a display node into additional workflow nodes, which requires Advanced mode."
+                                .to_string(),
+                        );
+                    }
+                    matches.push(child);
+                }
+                stack.push(child);
+            }
+        }
     }
-    predicate(kinds.get(&next)?).then_some(next)
+
+    match matches.len() {
+        1 => Ok(matches[0]),
+        0 => Err(
+            "This project does not expose a unique terminal display node for this asset in Simple mode."
+                .to_string(),
+        ),
+        _ => Err(
+            "This asset feeds multiple display branches; edit it in Advanced mode."
+                .to_string(),
+        ),
+    }
 }
 
-fn is_simple_streamline_color(kind: &WorkflowNodeKind) -> bool {
-    matches!(
-        kind,
-        WorkflowNodeKind::ColorByDirection
-            | WorkflowNodeKind::ColorByGroup
-            | WorkflowNodeKind::UniformColor { .. }
-    )
+fn find_unique_reachable_optional_node(
+    source: WorkflowNodeUuid,
+    kinds: &HashMap<WorkflowNodeUuid, &WorkflowNodeKind>,
+    outgoing: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
+    predicate: impl Fn(&WorkflowNodeKind) -> bool,
+) -> Result<Option<WorkflowNodeUuid>, String> {
+    let mut stack = vec![source];
+    let mut visited = HashSet::from([source]);
+    let mut matches = Vec::new();
+
+    while let Some(current) = stack.pop() {
+        let Some(children) = outgoing.get(&current) else {
+            continue;
+        };
+        for &child in children {
+            if !visited.insert(child) {
+                continue;
+            }
+            if let Some(kind) = kinds.get(&child) {
+                if predicate(kind) {
+                    matches.push(child);
+                }
+                stack.push(child);
+            }
+        }
+    }
+
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(Some(matches[0])),
+        _ => Err(
+            "This asset feeds multiple surface appearance branches; edit it in Advanced mode."
+                .to_string(),
+        ),
+    }
+}
+
+fn workflow_asset_id(asset: &WorkflowAssetDocument) -> FileId {
+    match asset {
+        WorkflowAssetDocument::Streamlines { id, .. }
+        | WorkflowAssetDocument::Volume { id, .. }
+        | WorkflowAssetDocument::Cifti { id, .. }
+        | WorkflowAssetDocument::Surface { id, .. }
+        | WorkflowAssetDocument::Parcellation { id, .. }
+        | WorkflowAssetDocument::Odx { id, .. } => *id,
+    }
 }
 
 fn is_volume_source(kind: &WorkflowNodeKind, asset_id: FileId) -> bool {
@@ -296,7 +321,7 @@ fn is_parcellation_display(kind: &WorkflowNodeKind) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workflow::{GraphPos, add_default_nodes_for_asset, default_document};
+    use crate::workflow::{GraphPos, InPort, OutPort, add_default_nodes_for_asset, default_document, make_node};
     use std::path::PathBuf;
 
     #[test]
@@ -311,6 +336,99 @@ mod tests {
         add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, Some(10_000));
 
         let editability = classify_workflow_editability(&document);
-        assert!(matches!(editability, WorkflowEditability::Simple(_)));
+        let binding = editability.bindings.streamline.get(&1).copied();
+        assert!(binding.is_some());
+        assert!(!editability.has_read_only_assets());
+    }
+
+    #[test]
+    fn default_surface_branch_is_simple_editable() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Surface {
+            id: 7,
+            path: PathBuf::from("surface.gii"),
+        };
+        document.assets.push(asset.clone());
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+
+        let editability = classify_workflow_editability(&document);
+        let binding = editability.bindings.surface.get(&7).copied();
+        assert!(binding.is_some());
+        assert!(!editability.has_read_only_assets());
+    }
+
+    #[test]
+    fn mixed_project_keeps_simple_bindings_for_compatible_assets() {
+        let mut document = default_document();
+        let streamline = WorkflowAssetDocument::Streamlines {
+            id: 1,
+            path: PathBuf::from("sample.trx"),
+            imported: false,
+        };
+        let cifti = WorkflowAssetDocument::Cifti {
+            id: 2,
+            path: PathBuf::from("sample.dscalar.nii"),
+            intent: crate::data::cifti::CiftiIntent::DenseScalar,
+        };
+        document.assets.push(streamline.clone());
+        document.assets.push(cifti);
+        add_default_nodes_for_asset(&mut document, &streamline, GraphPos::ZERO, Some(10_000));
+
+        let editability = classify_workflow_editability(&document);
+        assert!(editability.bindings.streamline.contains_key(&1));
+        assert_eq!(
+            editability.reason_for(2),
+            Some("CIFTI workflow branches are only editable in Advanced mode.")
+        );
+    }
+
+    #[test]
+    fn multiple_display_endpoints_make_asset_read_only() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Volume {
+            id: 3,
+            path: PathBuf::from("volume.nii.gz"),
+        };
+        document.assets.push(asset.clone());
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+
+        let source = document
+            .graph
+            .nodes()
+            .find_map(|(id, node)| {
+                matches!(
+                    node.kind,
+                    WorkflowNodeKind::VolumeSource { source_id } if source_id == 3
+                )
+                .then_some(id)
+            })
+            .unwrap();
+        let extra_display = make_node(
+            &mut document,
+            WorkflowNodeKind::VolumeDisplay {
+                colormap: crate::data::loaded_files::VolumeColormap::Hot,
+                opacity: 0.5,
+                window_center: 0.5,
+                window_width: 1.0,
+            },
+            GraphPos::new(200.0, 200.0),
+        );
+        document.graph.connect(
+            OutPort {
+                node: source,
+                output: 0,
+            },
+            InPort {
+                node: extra_display,
+                input: 0,
+            },
+        );
+
+        let editability = classify_workflow_editability(&document);
+        assert!(!editability.bindings.volume.contains_key(&3));
+        assert_eq!(
+            editability.reason_for(3),
+            Some("This asset feeds multiple display branches; edit it in Advanced mode.")
+        );
     }
 }

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use glam::Vec3;
@@ -12,11 +12,13 @@ use trxviz_core::data::loaded_files::{
     FileId, LoadedCifti, LoadedNifti, LoadedTrx, StreamlineBacking, VolumeColormap,
 };
 use trxviz_core::data::nifti_data::NiftiVolume;
+use trxviz_core::data::odx_data::OdxScene;
 use trxviz_core::data::orientation_field::BoundaryContactField;
 use trxviz_core::data::parcellation_data::{ParcellationVolume, guess_label_table_path};
 use trxviz_core::data::trx_data::TrxGpuData;
 use trxviz_core::renderer::background_renderer::BackgroundResources;
 use trxviz_core::renderer::camera::{OrbitCamera, OrthoSliceCamera};
+use trxviz_core::renderer::fixel_renderer::FixelResources;
 use trxviz_core::renderer::glyph_renderer::GlyphResources;
 use trxviz_core::renderer::mesh_renderer::{MeshResources, SurfaceColormap};
 use trxviz_core::renderer::slice_renderer::{AllSliceResources, SliceAxis, SliceResources};
@@ -673,6 +675,190 @@ impl super::TrxVizApp {
         self.status_msg = None;
     }
 
+    pub(super) fn begin_load_odx(&mut self, path: PathBuf) {
+        let job_id = self.next_job_id;
+        self.next_job_id += 1;
+        let tx = self.worker_tx.clone();
+        let label = path
+            .file_name()
+            .map(|n| format!("Loading {}", n.to_string_lossy()))
+            .unwrap_or_else(|| "Loading ODX".to_string());
+        self.pending_file_loads
+            .push(super::state::PendingFileLoad { job_id, label });
+        std::thread::spawn(move || {
+            let result = load_odx_any_format(&path);
+            let _ = tx.send(WorkerMessage::OdxLoaded {
+                job_id,
+                path,
+                result,
+            });
+        });
+    }
+
+    pub(super) fn apply_loaded_odx(
+        &mut self,
+        _path: PathBuf,
+        scene: OdxScene,
+        rs: &egui_wgpu::RenderState,
+    ) {
+        self.workflow.uploaded_odx_glyph_resource_key = None;
+        self.workflow.uploaded_fixel_fingerprint = 0;
+
+        let is_first = self.scene.trx_files.is_empty()
+            && self.scene.nifti_files.is_empty()
+            && self.scene.gifti_surfaces.is_empty();
+
+        // Frame camera from ODX spatial bounds.
+        if !scene.centers_ras().is_empty() {
+            let (mut min, mut max) = (
+                Vec3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY),
+                Vec3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY),
+            );
+            for c in scene.centers_ras() {
+                let p = Vec3::from_array(*c);
+                min = min.min(p);
+                max = max.max(p);
+            }
+            let center = (min + max) * 0.5;
+            let extent = (max - min).length().max(1.0);
+            self.viewport.volume_center = center;
+            self.viewport.volume_extent = extent;
+            if is_first {
+                self.viewport.camera_3d = OrbitCamera::new(center, extent * 0.8);
+                self.reset_slice_cameras();
+                self.viewport.slice_world_offsets = [center.z, center.y, center.x];
+            }
+        }
+
+        // Set up default slice indices from the ODX occupied-voxel range so the
+        // initial axial slice lands on a populated K-plane (the geometric midpoint
+        // of the full dim can be empty for masked data).
+        let dims = scene.dimensions();
+        if is_first && self.scene.nifti_files.is_empty() {
+            let mut mid = [
+                (dims[2] / 2) as usize,
+                (dims[1] / 2) as usize,
+                (dims[0] / 2) as usize,
+            ];
+            let lookup = scene.ijk_lookup();
+            if !lookup.is_empty() {
+                // Use the median IJK per axis — this is guaranteed to be a value
+                // actually present in ijk_lookup (unlike (min+max)/2, which can
+                // fall on an empty slice for sparse masks).
+                for axis in 0..3 {
+                    let mut vals: Vec<u32> = lookup.iter().map(|ijk| ijk[axis]).collect();
+                    vals.sort_unstable();
+                    let median = vals[vals.len() / 2] as usize;
+                    let slot = match axis {
+                        2 => 0,
+                        1 => 1,
+                        _ => 2,
+                    };
+                    mid[slot] = median;
+                }
+            }
+            self.viewport.slice_indices = mid;
+            // Seed slice_world_offsets from the ODX affine so slab_center for 2D
+            // slice views tracks the voxel-grid slice position.
+            let affine = scene.voxel_to_ras();
+            let w0 = affine.transform_point3(Vec3::new(0.0, 0.0, mid[0] as f32));
+            let w1 = affine.transform_point3(Vec3::new(0.0, mid[1] as f32, 0.0));
+            let w2 = affine.transform_point3(Vec3::new(mid[2] as f32, 0.0, 0.0));
+            self.viewport.slice_world_offsets = [w0.z, w1.y, w2.x];
+        }
+
+        let scene = Arc::new(scene);
+        if scene.has_glyph_field() {
+            let current_axial = self.viewport.slice_indices[0] as u32;
+            if let Some(nonempty_axial) = scene.nearest_nonempty_slice(2, current_axial) {
+                self.viewport.slice_indices[0] = nonempty_axial as usize;
+                let w = scene.voxel_to_ras().transform_point3(Vec3::new(
+                    0.0,
+                    0.0,
+                    nonempty_axial as f32,
+                ));
+                self.viewport.slice_world_offsets[0] = w.z;
+            }
+        }
+        if scene.glyph_source_kind()
+            == Some(trxviz_core::data::odx_data::OdxGlyphSourceKind::Odf)
+            && let Some(rows_per_chunk) = scene
+                .odf_rows_per_chunk(rs.device.limits().max_storage_buffer_binding_size as usize)
+        {
+            scene.prewarm_odf_slice_metadata(2, self.viewport.slice_indices[0] as u32, rows_per_chunk);
+        }
+        // Upload ALL fixels — the 2D slice views slab-clip in the shader so only
+        // the fixels on the current slice are visible, no CPU re-upload needed.
+        let fixel_instances = scene.all_fixels();
+
+        // Ensure GPU resources exist and upload data.
+        {
+            let mut renderer = rs.renderer.write();
+            if renderer
+                .callback_resources
+                .get::<GlyphResources>()
+                .is_none()
+            {
+                renderer
+                    .callback_resources
+                    .insert(GlyphResources::new(&rs.device, rs.target_format));
+            }
+            if renderer
+                .callback_resources
+                .get::<FixelResources>()
+                .is_none()
+            {
+                renderer
+                    .callback_resources
+                    .insert(FixelResources::new(&rs.device, rs.target_format));
+            }
+            if let Some(fr) = renderer.callback_resources.get_mut::<FixelResources>() {
+                fr.set_fixels(&rs.device, &fixel_instances);
+            }
+        }
+
+        self.scene.odx_scene = Some(scene.clone());
+        {
+            let mut renderer = rs.renderer.write();
+            self.ensure_active_odx_glyph_resources(
+                &mut renderer.callback_resources,
+                &rs.device,
+                &rs.queue,
+            );
+        }
+
+        // Record display name for the asset we register below.
+        let display_name = _path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "ODX".to_string());
+
+        // Register as a workflow asset so the graph seeds OdxSource with the
+        // Fixel3D / Fixel2D / OdfGlyph / OdxVolumeSelect→VolumeDisplay chain.
+        let id = self.allocate_file_id(None);
+        self.scene
+            .odx_files
+            .push(trxviz_core::data::loaded_files::LoadedOdx {
+                id,
+                name: display_name,
+                path: _path.clone(),
+                scene: scene.clone(),
+                visible: true,
+            });
+        let show_fixel_3d_by_default = scene.glyph_source_kind().is_none();
+        self.register_workflow_asset(WorkflowAssetDocument::Odx { id, path: _path }, true, None);
+        if workflow::set_default_odx_fixel_3d_visibility(
+            &mut self.workflow.document,
+            id,
+            show_fixel_3d_by_default,
+        ) {
+            self.rebuild_workflow_editor_from_document();
+        }
+
+        self.error_msg = None;
+        self.status_msg = None;
+    }
+
     pub(super) fn reset_slice_cameras(&mut self) {
         let half_extents = self
             .scene
@@ -737,6 +923,24 @@ impl super::TrxVizApp {
         ];
         self.viewport.slice_world_offsets = [center.z, center.y, center.x];
     }
+}
+
+fn load_odx_any_format(path: &Path) -> Result<OdxScene, String> {
+    use odx_rs::cli_support::{LoadDatasetOptions, load_dataset};
+
+    // Try native ODX format first (cheapest — memory-mapped).
+    if let Ok(scene) = OdxScene::open(path) {
+        return Ok(scene);
+    }
+
+    // Fall back to auto-detection + conversion via odx-rs.
+    let options = LoadDatasetOptions {
+        sh_path: None,
+        fixel_dir: None,
+        reference_affine: None,
+    };
+    let (dataset, _format) = load_dataset(path, options).map_err(|e| e.to_string())?;
+    OdxScene::from_dataset(dataset).map_err(|e| e.to_string())
 }
 
 fn create_merged_streamline_source(

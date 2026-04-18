@@ -39,6 +39,39 @@ struct ViewerRenderData {
     glyph_color_mode: BoundaryGlyphColorMode,
     glyph_density_3d_step: u32,
     glyph_slice_density_step: u32,
+    /// Show ODF glyphs — only used in the 3D view.
+    odx_show_glyphs: bool,
+    /// Show fixel line segments — only used in the 2D slice views.
+    odx_show_fixels: bool,
+    /// Plan-driven style for the 3D ODF glyph pass.
+    odx_glyph_opacity: f32,
+    odx_glyph_gloss: f32,
+    /// Plan-driven style for the 2D fixel slice pass.
+    odx_fixel_line_width: f32,
+    odx_fixel_opacity: f32,
+    odx_fixel_slab_half_width_mm: f32,
+    /// Plan-driven multipliers for glyph scale and fixel length.
+    odx_glyph_scale: f32,
+    odx_fixel_length_scale: f32,
+    /// Per-callback fixel style (2D path uses its own plan entry).
+    odx_fixel_2d_line_width: f32,
+    odx_fixel_2d_opacity: f32,
+    odx_fixel_2d_length_scale: f32,
+    odx_fixel_2d_visible: bool,
+    odx_fixel_3d_visible: bool,
+    /// Glyph vertex colormap (Directional vs scalar LUT placeholder).
+    odx_glyph_colormap: trxviz_core::workflow::GlyphColormap,
+    /// Piecewise gate uniforms for ODX glyph opacity and size.
+    odx_opacity_gate: [f32; 4],
+    odx_size_gate: [f32; 4],
+    /// Current slice-local amplitude normalization divisor.
+    odx_amp_norm: f32,
+    /// Active fixel colormap code (0=directional, 2=plasma, 3=viridis, 4=inferno, 5=bwr)
+    /// and scalar normalization range, sourced from the Fixel display plan's field.
+    odx_fixel_colormap_code: u32,
+    odx_fixel_scalar_range: [f32; 2],
+    odx_fixel_2d_colormap_code: u32,
+    odx_fixel_2d_scalar_range: [f32; 2],
 }
 
 impl super::super::TrxVizApp {
@@ -413,8 +446,7 @@ impl super::super::TrxVizApp {
                 return;
             }
             let available = ui.available_size();
-            let (rect, response) =
-                ui.allocate_exact_size(available, egui::Sense::click_and_drag());
+            let (rect, response) = ui.allocate_exact_size(available, egui::Sense::click_and_drag());
             self.draw_stage_scene3d_rect(ui, rect, interactive.then_some(&response), &render_data);
         });
 
@@ -464,7 +496,12 @@ impl super::super::TrxVizApp {
 
         let center = (bounds_min + bounds_max) * 0.5;
         let extents = bounds_max - bounds_min;
-        let span = extents.x.abs().max(extents.y.abs()).max(extents.z.abs()).max(1.0);
+        let span = extents
+            .x
+            .abs()
+            .max(extents.y.abs())
+            .max(extents.z.abs())
+            .max(1.0);
         Some((center, span))
     }
 
@@ -603,6 +640,7 @@ impl super::super::TrxVizApp {
             rect,
             interactive.then_some(&response),
             axis_index,
+            self.viewport.slice_indices[axis_index],
             self.viewport
                 .slice_world_position(&self.scene.nifti_files, axis_index),
             render_data,
@@ -632,6 +670,7 @@ impl super::super::TrxVizApp {
                         rect,
                         interactive.then_some(&response),
                         axis_index,
+                        self.viewport.slice_indices[axis_index],
                         self.viewport
                             .slice_world_position(&self.scene.nifti_files, axis_index),
                         render_data,
@@ -650,6 +689,7 @@ impl super::super::TrxVizApp {
                     rect0,
                     interactive.then_some(&response0),
                     0,
+                    self.viewport.slice_indices[0],
                     self.viewport
                         .slice_world_position(&self.scene.nifti_files, 0),
                     render_data,
@@ -665,6 +705,7 @@ impl super::super::TrxVizApp {
                         rect1,
                         interactive.then_some(&response1),
                         1,
+                        self.viewport.slice_indices[1],
                         self.viewport
                             .slice_world_position(&self.scene.nifti_files, 1),
                         render_data,
@@ -679,6 +720,7 @@ impl super::super::TrxVizApp {
                         rect2,
                         interactive.then_some(&response2),
                         2,
+                        self.viewport.slice_indices[2],
                         self.viewport
                             .slice_world_position(&self.scene.nifti_files, 2),
                         render_data,
@@ -740,6 +782,7 @@ impl super::super::TrxVizApp {
                         rect,
                         interactive.then_some(&response),
                         axis_index,
+                        index,
                         slice_pos,
                         render_data,
                         tile == center_tile,
@@ -780,6 +823,39 @@ impl super::super::TrxVizApp {
 
         let aspect = rect.width() / rect.height().max(1.0);
         let vp = self.viewport.camera_3d.view_projection(aspect);
+        let scene_plan = &self.workflow.runtime.scene_plan;
+        let active_odx_scene = scene_plan
+            .odf_glyph_draws
+            .iter()
+            .find(|p| p.visible)
+            .or_else(|| scene_plan.odf_glyph_draws.first())
+            .map(|p| p.field.scene.as_ref())
+            .or_else(|| {
+                scene_plan
+                    .fixel_3d_draws
+                    .iter()
+                    .find(|p| p.visible)
+                    .or_else(|| scene_plan.fixel_3d_draws.first())
+                    .map(|p| p.field.scene.as_ref())
+            })
+            .or_else(|| {
+                scene_plan
+                    .fixel_2d_draws
+                    .iter()
+                    .find(|p| p.visible)
+                    .or_else(|| scene_plan.fixel_2d_draws.first())
+                    .map(|p| p.field.scene.as_ref())
+            })
+            .or(self.scene.odx_scene.as_deref());
+        let (fixel_slab_center, fixel_slab_half_width) = if let Some(odx) = active_odx_scene {
+            let z = self.viewport.slice_world_offsets[0];
+            (
+                glam::Vec3::new(0.0, 0.0, z),
+                (odx.glyph_scale() * 0.5).max(0.001),
+            )
+        } else {
+            (glam::Vec3::ZERO, 0.0)
+        };
         let fog_span = (self.viewport.camera_3d.distance + self.viewport.volume_extent).max(1.0);
         let render_3d = self.viewport.workflow_render_3d();
         let fog_near = fog_span * render_3d.fog_start_fraction;
@@ -799,6 +875,24 @@ impl super::super::TrxVizApp {
                 show_boundary_glyphs: render_data.glyph_visible,
                 boundary_glyph_color_mode: render_data.glyph_color_mode,
                 boundary_glyph_draw_step: render_data.glyph_density_3d_step,
+                show_odx_glyphs: render_data.odx_show_glyphs,
+                show_odx_fixels: render_data.odx_show_fixels,
+                odx_glyph_opacity: render_data.odx_glyph_opacity,
+                odx_glyph_gloss: render_data.odx_glyph_gloss,
+                odx_glyph_scale: render_data.odx_glyph_scale,
+                odx_glyph_colormap: render_data.odx_glyph_colormap,
+                odx_opacity_gate: render_data.odx_opacity_gate,
+                odx_size_gate: render_data.odx_size_gate,
+                odx_amp_norm: render_data.odx_amp_norm,
+                odx_fixel_line_width: render_data.odx_fixel_line_width,
+                odx_fixel_opacity: render_data.odx_fixel_opacity,
+                odx_fixel_length_scale: render_data.odx_fixel_length_scale,
+                odx_fixel_visible: render_data.odx_fixel_3d_visible,
+                odx_fixel_colormap_code: render_data.odx_fixel_colormap_code,
+                odx_fixel_scalar_range: render_data.odx_fixel_scalar_range,
+                odx_fixel_3d_slab_normal: glam::Vec3::Z,
+                odx_fixel_3d_slab_center: fixel_slab_center,
+                odx_fixel_3d_slab_half_width: fixel_slab_half_width,
                 scene_lighting: self.viewport.scene_lighting(),
                 render_3d,
                 fog_near,
@@ -820,19 +914,27 @@ impl super::super::TrxVizApp {
             if response.dragged_by(egui::PointerButton::Primary) {
                 let delta = ui.input(|i| i.pointer.delta());
                 if modifiers.shift {
-                    self.viewport.inflated_stage_camera.pan_screen(delta.x, delta.y);
+                    self.viewport
+                        .inflated_stage_camera
+                        .pan_screen(delta.x, delta.y);
                 } else {
-                    self.viewport.inflated_stage_camera.handle_drag(delta.x, delta.y);
+                    self.viewport
+                        .inflated_stage_camera
+                        .handle_drag(delta.x, delta.y);
                 }
             }
             if response.dragged_by(egui::PointerButton::Middle) {
                 let delta = ui.input(|i| i.pointer.delta());
-                self.viewport.inflated_stage_camera.pan_screen(delta.x, delta.y);
+                self.viewport
+                    .inflated_stage_camera
+                    .pan_screen(delta.x, delta.y);
             }
             if response.hovered() {
                 let scroll = ui.input(|i| i.smooth_scroll_delta.y);
                 if scroll.abs() > 0.0 {
-                    self.viewport.inflated_stage_camera.handle_scroll(scroll * 0.01);
+                    self.viewport
+                        .inflated_stage_camera
+                        .handle_scroll(scroll * 0.01);
                 }
             }
         }
@@ -859,6 +961,24 @@ impl super::super::TrxVizApp {
                 show_boundary_glyphs: false,
                 boundary_glyph_color_mode: BoundaryGlyphColorMode::DirectionRgb,
                 boundary_glyph_draw_step: 1,
+                show_odx_glyphs: false,
+                show_odx_fixels: false,
+                odx_glyph_opacity: 0.95,
+                odx_glyph_gloss: 0.0,
+                odx_glyph_scale: 1.0,
+                odx_glyph_colormap: trxviz_core::workflow::GlyphColormap::Directional,
+                odx_opacity_gate: [0.0, 1.0, 1.0, 1.0],
+                odx_size_gate: [0.0, 1.0, 1.0, 1.0],
+                odx_amp_norm: 1.0,
+                odx_fixel_line_width: 0.006,
+                odx_fixel_opacity: 1.0,
+                odx_fixel_length_scale: 1.0,
+                odx_fixel_visible: false,
+                odx_fixel_colormap_code: 0,
+                odx_fixel_scalar_range: [0.0, 1.0],
+                odx_fixel_3d_slab_normal: glam::Vec3::Z,
+                odx_fixel_3d_slab_center: glam::Vec3::ZERO,
+                odx_fixel_3d_slab_half_width: 0.0,
                 scene_lighting: self.viewport.scene_lighting(),
                 render_3d,
                 fog_near,
@@ -873,6 +993,7 @@ impl super::super::TrxVizApp {
         rect: egui::Rect,
         response: Option<&egui::Response>,
         axis_index: usize,
+        slice_index: usize,
         slice_pos: f32,
         render_data: &ViewerRenderData,
         show_crosshairs: bool,
@@ -892,6 +1013,8 @@ impl super::super::TrxVizApp {
                     self.viewport.step_slice(
                         &self.scene.nifti_files,
                         &self.scene.gifti_surfaces,
+                        self.scene.odx_scene.as_ref().map(|s| s.dimensions()),
+                        self.scene.odx_scene.as_ref().map(|s| s.voxel_to_ras()),
                         axis_index,
                         step,
                     );
@@ -912,11 +1035,37 @@ impl super::super::TrxVizApp {
             .boundary_field
             .as_ref()
             .map(|field| 0.5 * field.grid.voxel_size_mm)
-            .unwrap_or(0.0);
-        let slab_axis = match axis_index {
-            0 => 2u32,
-            1 => 1u32,
-            _ => 0u32,
+            .or_else(|| {
+                self.workflow
+                    .runtime
+                    .scene_plan
+                    .odf_glyph_draws
+                    .iter()
+                    .find(|p| p.visible)
+                    .or_else(|| self.workflow.runtime.scene_plan.odf_glyph_draws.first())
+                    .map(|p| p.field.scene.glyph_scale())
+            })
+            .or_else(|| self.scene.odx_scene.as_ref().map(|s| s.glyph_scale()))
+            .unwrap_or(1.0);
+
+        // Compute the slice plane normal and center from the NIfTI affine.
+        // For oblique volumes this is the true plane orientation; for axis-aligned
+        // volumes it degenerates to the familiar X/Y/Z world axis.
+        let (slab_normal, slab_center) = if let Some(nf) = self.scene.nifti_files.first() {
+            nf.volume.slice_plane(axis_index, slice_index)
+        } else {
+            // No NIfTI loaded — fall back to world-axis normals.
+            let normal = match axis_index {
+                0 => glam::Vec3::Z,
+                1 => glam::Vec3::Y,
+                _ => glam::Vec3::X,
+            };
+            let center = match axis_index {
+                0 => glam::Vec3::new(0.0, 0.0, slice_pos),
+                1 => glam::Vec3::new(0.0, slice_pos, 0.0),
+                _ => glam::Vec3::new(slice_pos, 0.0, 0.0),
+            };
+            (normal, center)
         };
 
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
@@ -928,12 +1077,28 @@ impl super::super::TrxVizApp {
                 volume_draws: render_data.volume_draws.clone(),
                 streamline_draws: render_data.streamline_draws.clone(),
                 show_streamlines: render_data.any_visible_streamlines,
-                slab_axis,
-                slab_min: slice_pos - glyph_slab_half_width,
-                slab_max: slice_pos + glyph_slab_half_width,
+                slab_normal,
+                slab_center,
+                slab_half_width: glyph_slab_half_width,
                 show_boundary_glyphs: render_data.glyph_visible,
                 boundary_glyph_color_mode: render_data.glyph_color_mode,
                 boundary_glyph_draw_step: render_data.glyph_slice_density_step,
+                show_odx_glyphs: false, // glyphs are in the 3D view only
+                show_odx_fixels: render_data.odx_show_fixels,
+                odx_glyph_opacity: render_data.odx_glyph_opacity,
+                odx_glyph_gloss: render_data.odx_glyph_gloss,
+                odx_fixel_line_width: render_data.odx_fixel_2d_line_width,
+                odx_fixel_opacity: render_data.odx_fixel_2d_opacity,
+                odx_fixel_slab_half_width_mm: render_data.odx_fixel_slab_half_width_mm,
+                odx_glyph_scale: render_data.odx_glyph_scale,
+                odx_fixel_length_scale: render_data.odx_fixel_2d_length_scale,
+                odx_fixel_visible: render_data.odx_fixel_2d_visible,
+                odx_fixel_colormap_code: render_data.odx_fixel_2d_colormap_code,
+                odx_fixel_scalar_range: render_data.odx_fixel_2d_scalar_range,
+                odx_glyph_colormap: render_data.odx_glyph_colormap,
+                odx_opacity_gate: render_data.odx_opacity_gate,
+                odx_size_gate: render_data.odx_size_gate,
+                odx_amp_norm: render_data.odx_amp_norm,
                 scene_lighting: self.viewport.scene_lighting(),
             },
         ));
@@ -1023,7 +1188,31 @@ impl super::super::TrxVizApp {
             .boundary_glyph_draws
             .iter()
             .find(|draw| draw.visible);
-
+        let odf_draw = self
+            .workflow
+            .runtime
+            .scene_plan
+            .odf_glyph_draws
+            .iter()
+            .find(|p| p.visible)
+            .or_else(|| self.workflow.runtime.scene_plan.odf_glyph_draws.first());
+        let odx_glyphs_active =
+            odf_draw.map(|p| p.visible).unwrap_or(self.scene.odx_scene.is_some());
+        let odx_fixels_active = self
+            .workflow
+            .runtime
+            .scene_plan
+            .fixel_3d_draws
+            .iter()
+            .any(|p| p.visible)
+            || self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_2d_draws
+                .iter()
+                .any(|p| p.visible)
+            || self.scene.odx_scene.is_some();
         ViewerRenderData {
             any_visible_streamlines: streamline_draws.iter().any(|draw| draw.visible),
             surface_draws,
@@ -1040,6 +1229,144 @@ impl super::super::TrxVizApp {
             glyph_slice_density_step: glyph_draw
                 .map(|draw| draw.slice_density_step as u32)
                 .unwrap_or(1),
+            odx_show_glyphs: odx_glyphs_active,
+            odx_show_fixels: odx_fixels_active,
+            odx_glyph_opacity: odf_draw.map(|p| p.opacity).unwrap_or(0.95),
+            odx_glyph_gloss: odf_draw.map(|p| p.gloss).unwrap_or(0.0),
+            odx_fixel_line_width: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_3d_draws
+                .first()
+                .or_else(|| self.workflow.runtime.scene_plan.fixel_2d_draws.first())
+                .map(|p| p.line_width)
+                .unwrap_or(0.006),
+            odx_fixel_opacity: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_2d_draws
+                .first()
+                .or_else(|| self.workflow.runtime.scene_plan.fixel_3d_draws.first())
+                .map(|p| p.opacity)
+                .unwrap_or(1.0),
+            odx_fixel_slab_half_width_mm: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_2d_draws
+                .first()
+                .map(|p| (p.slab_thickness_mm * 0.5).max(0.0))
+                .unwrap_or(1.5),
+            odx_glyph_scale: odf_draw.map(|p| p.scale).unwrap_or(1.0),
+            odx_fixel_length_scale: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_3d_draws
+                .first()
+                .or_else(|| self.workflow.runtime.scene_plan.fixel_2d_draws.first())
+                .map(|p| p.length_scale)
+                .unwrap_or(1.0),
+            odx_fixel_2d_line_width: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_2d_draws
+                .first()
+                .map(|p| p.line_width)
+                .unwrap_or(0.006),
+            odx_fixel_2d_opacity: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_2d_draws
+                .first()
+                .map(|p| p.opacity)
+                .unwrap_or(1.0),
+            odx_fixel_2d_length_scale: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_2d_draws
+                .first()
+                .map(|p| p.length_scale)
+                .unwrap_or(1.0),
+            odx_fixel_2d_visible: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_2d_draws
+                .first()
+                .map(|p| p.visible)
+                .unwrap_or(true),
+            odx_fixel_3d_visible: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_3d_draws
+                .first()
+                .map(|p| p.visible)
+                .unwrap_or(true),
+            odx_glyph_colormap: odf_draw
+                .map(|p| p.vertex_colormap)
+                .unwrap_or(trxviz_core::workflow::GlyphColormap::Directional),
+            odx_opacity_gate: odf_draw
+                .map(|p| {
+                    [
+                        p.opacity_gate.range.0,
+                        p.opacity_gate.range.1,
+                        p.opacity_gate.below,
+                        p.opacity_gate.above,
+                    ]
+                })
+                .unwrap_or([0.0, 1.0, 1.0, 1.0]),
+            odx_size_gate: odf_draw
+                .map(|p| {
+                    [
+                        p.size_gate.range.0,
+                        p.size_gate.range.1,
+                        p.size_gate.min_scale,
+                        p.size_gate.max_scale,
+                    ]
+                })
+                .unwrap_or([0.0, 1.0, 1.0, 1.0]),
+            odx_amp_norm: self.odx_amp_norm,
+            odx_fixel_colormap_code: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_3d_draws
+                .first()
+                .or_else(|| self.workflow.runtime.scene_plan.fixel_2d_draws.first())
+                .map(|p| p.colormap_code)
+                .unwrap_or(0),
+            odx_fixel_scalar_range: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_3d_draws
+                .first()
+                .or_else(|| self.workflow.runtime.scene_plan.fixel_2d_draws.first())
+                .map(|p| [p.scalar_range.0, p.scalar_range.1])
+                .unwrap_or([0.0, 1.0]),
+            odx_fixel_2d_colormap_code: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_2d_draws
+                .first()
+                .map(|p| p.colormap_code)
+                .unwrap_or(0),
+            odx_fixel_2d_scalar_range: self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_2d_draws
+                .first()
+                .map(|p| [p.scalar_range.0, p.scalar_range.1])
+                .unwrap_or([0.0, 1.0]),
         }
     }
 
@@ -1055,6 +1382,28 @@ impl super::super::TrxVizApp {
             glyph_color_mode: BoundaryGlyphColorMode::DirectionRgb,
             glyph_density_3d_step: 1,
             glyph_slice_density_step: 1,
+            odx_show_glyphs: false,
+            odx_show_fixels: false,
+            odx_glyph_opacity: 0.95,
+            odx_glyph_gloss: 0.0,
+            odx_fixel_line_width: 0.006,
+            odx_fixel_opacity: 1.0,
+            odx_fixel_slab_half_width_mm: 1.5,
+            odx_glyph_scale: 1.0,
+            odx_fixel_length_scale: 1.0,
+            odx_fixel_2d_line_width: 0.006,
+            odx_fixel_2d_opacity: 1.0,
+            odx_fixel_2d_length_scale: 1.0,
+            odx_fixel_2d_visible: true,
+            odx_fixel_3d_visible: true,
+            odx_glyph_colormap: trxviz_core::workflow::GlyphColormap::Directional,
+            odx_opacity_gate: [0.0, 1.0, 1.0, 1.0],
+            odx_size_gate: [0.0, 1.0, 1.0, 1.0],
+            odx_amp_norm: 1.0,
+            odx_fixel_colormap_code: 0,
+            odx_fixel_scalar_range: [0.0, 1.0],
+            odx_fixel_2d_colormap_code: 0,
+            odx_fixel_2d_scalar_range: [0.0, 1.0],
         }
     }
 
@@ -1105,18 +1454,26 @@ impl super::super::TrxVizApp {
             && self.scene.nifti_files.is_empty()
             && self.scene.gifti_surfaces.is_empty()
             && self.scene.parcellations.is_empty()
+            && self.scene.odx_scene.is_none()
     }
 
     fn max_slice_index(&self, axis_index: usize) -> usize {
-        self.scene
-            .nifti_files
-            .first()
-            .map(|nf| match axis_index {
+        if let Some(nf) = self.scene.nifti_files.first() {
+            return match axis_index {
                 0 => nf.volume.dims[2].saturating_sub(1),
                 1 => nf.volume.dims[1].saturating_sub(1),
                 _ => nf.volume.dims[0].saturating_sub(1),
-            })
-            .unwrap_or(self.viewport.slice_indices[axis_index].saturating_add(128))
+            };
+        }
+        if let Some(odx) = &self.scene.odx_scene {
+            let dims = odx.dimensions();
+            return match axis_index {
+                0 => (dims[2] as usize).saturating_sub(1),
+                1 => (dims[1] as usize).saturating_sub(1),
+                _ => (dims[0] as usize).saturating_sub(1),
+            };
+        }
+        self.viewport.slice_indices[axis_index].saturating_add(128)
     }
 }
 
@@ -1165,7 +1522,12 @@ fn stage_instance_model_matrices(
 ) -> Vec<Mat4> {
     let center = (bbox_min + bbox_max) * 0.5;
     let extents = bbox_max - bbox_min;
-    let span = extents.x.abs().max(extents.y.abs()).max(extents.z.abs()).max(1.0);
+    let span = extents
+        .x
+        .abs()
+        .max(extents.y.abs())
+        .max(extents.z.abs())
+        .max(1.0);
     let separation = span * 0.55;
     let lateral_row_z = span * 0.42;
     let medial_row_z = -span * 0.42;

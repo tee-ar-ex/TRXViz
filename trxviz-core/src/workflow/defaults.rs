@@ -3,10 +3,10 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use crate::data::loaded_files::VolumeColormap;
-use crate::renderer::mesh_renderer::SurfaceColormap;
 use crate::data::cifti::CiftiStructure;
+use crate::data::loaded_files::{FileId, VolumeColormap};
 use crate::data::trx_data::RenderStyle;
+use crate::renderer::mesh_renderer::SurfaceColormap;
 
 use super::graph::{GraphPos, GraphRect, InPort, OutPort};
 use super::*;
@@ -184,18 +184,30 @@ pub fn add_default_nodes_for_asset(
                 offset(pos, 240.0, 80.0),
             );
             document.graph.connect(
-                OutPort { node: source, output: 0 },
-                InPort { node: left, input: 0 },
+                OutPort {
+                    node: source,
+                    output: 0,
+                },
+                InPort {
+                    node: left,
+                    input: 0,
+                },
             );
             document.graph.connect(
-                OutPort { node: source, output: 0 },
+                OutPort {
+                    node: source,
+                    output: 0,
+                },
                 InPort {
                     node: right,
                     input: 0,
                 },
             );
             document.graph.connect(
-                OutPort { node: source, output: 0 },
+                OutPort {
+                    node: source,
+                    output: 0,
+                },
                 InPort {
                     node: subcortical,
                     input: 0,
@@ -269,7 +281,165 @@ pub fn add_default_nodes_for_asset(
                 primary_selection: WorkflowSelection::Node(source),
             }
         }
+        WorkflowAssetDocument::Odx { id, .. } => {
+            let source = make_node(
+                document,
+                WorkflowNodeKind::OdxSource { source_id: *id },
+                pos,
+            );
+            let fixel_3d = make_node(
+                document,
+                WorkflowNodeKind::Fixel3DDisplay {
+                    line_width: default_fixel_line_width(),
+                    length_scale: default_fixel_length_scale(),
+                    opacity: default_full_opacity(),
+                    offset_from_slice: 0.0,
+                    visible: true,
+                },
+                offset(pos, 260.0, -180.0),
+            );
+            let fixel_2d = make_node(
+                document,
+                WorkflowNodeKind::Fixel2DDisplay {
+                    line_width: default_fixel_line_width(),
+                    opacity: default_full_opacity(),
+                    slab_thickness_mm: default_fixel_slab_thickness_mm(),
+                    length_scale: default_fixel_length_scale(),
+                    visible: true,
+                },
+                offset(pos, 260.0, -80.0),
+            );
+            let glyph = make_node(
+                document,
+                WorkflowNodeKind::OdfGlyphRenderer {
+                    scale: default_odf_glyph_scale(),
+                    opacity: default_full_opacity(),
+                    offset_from_slice: 0.0,
+                    gloss: 0.0,
+                    vertex_colormap: GlyphColormap::default(),
+                    slice_axis: WorkflowSliceViewKind::Axial,
+                    opacity_gate: OpacityGate::default(),
+                    size_gate: SizeGate::default(),
+                    visible: true,
+                },
+                offset(pos, 260.0, 40.0),
+            );
+            let dpv_select = make_node(
+                document,
+                WorkflowNodeKind::OdxVolumeSelect {
+                    dpv_name: String::new(),
+                },
+                offset(pos, 260.0, 140.0),
+            );
+            let volume_display = make_node(
+                document,
+                WorkflowNodeKind::VolumeDisplay {
+                    colormap: VolumeColormap::Grayscale,
+                    opacity: 1.0,
+                    window_center: 0.5,
+                    window_width: 1.0,
+                },
+                offset(pos, 520.0, 140.0),
+            );
+            document.graph.connect(
+                OutPort {
+                    node: source,
+                    output: 0,
+                },
+                InPort {
+                    node: fixel_3d,
+                    input: 0,
+                },
+            );
+            document.graph.connect(
+                OutPort {
+                    node: source,
+                    output: 0,
+                },
+                InPort {
+                    node: fixel_2d,
+                    input: 0,
+                },
+            );
+            document.graph.connect(
+                OutPort {
+                    node: source,
+                    output: 1,
+                },
+                InPort {
+                    node: glyph,
+                    input: 0,
+                },
+            );
+            document.graph.connect(
+                OutPort {
+                    node: source,
+                    output: 2,
+                },
+                InPort {
+                    node: dpv_select,
+                    input: 0,
+                },
+            );
+            connect_chain(document, dpv_select, volume_display);
+            SeededWorkflowBranch {
+                bounds: branch_bounds(
+                    document,
+                    &[
+                        source,
+                        fixel_3d,
+                        fixel_2d,
+                        glyph,
+                        dpv_select,
+                        volume_display,
+                    ],
+                ),
+                primary_selection: WorkflowSelection::Node(source),
+            }
+        }
     }
+}
+
+pub fn set_default_odx_fixel_3d_visibility(
+    document: &mut WorkflowDocument,
+    asset_id: FileId,
+    visible: bool,
+) -> bool {
+    let source_nodes: Vec<_> = document
+        .graph
+        .nodes()
+        .filter_map(|(uuid, node)| match node.kind {
+            WorkflowNodeKind::OdxSource { source_id } if source_id == asset_id => Some(uuid),
+            _ => None,
+        })
+        .collect();
+
+    let targets: Vec<_> = document
+        .graph
+        .wires()
+        .filter(|wire| source_nodes.contains(&wire.from.node))
+        .map(|wire| wire.to.node)
+        .collect();
+
+    let mut changed = false;
+    for uuid in targets {
+        let Some(node) = document.graph.get_mut(uuid) else {
+            continue;
+        };
+        let WorkflowNodeKind::Fixel3DDisplay {
+            visible: node_visible,
+            ..
+        } = &mut node.kind
+        else {
+            continue;
+        };
+        if *node_visible != visible {
+            *node_visible = visible;
+            changed = true;
+        }
+    }
+
+    changed
 }
 
 fn guess_non_anatomical_surface(path: &Path) -> bool {
@@ -289,8 +459,13 @@ fn non_anatomical_surface_regex() -> &'static Regex {
 
 #[cfg(test)]
 mod tests {
-    use super::guess_non_anatomical_surface;
+    use super::{guess_non_anatomical_surface, set_default_odx_fixel_3d_visibility};
+    use crate::workflow::{
+        GraphPos, WorkflowAssetDocument, WorkflowNodeKind, add_default_nodes_for_asset,
+        default_document,
+    };
     use std::path::Path;
+    use std::path::PathBuf;
 
     #[test]
     fn guesses_inflated_surface_as_non_anatomical() {
@@ -311,5 +486,55 @@ mod tests {
         assert!(!guess_non_anatomical_surface(Path::new(
             "subject.L.midthickness.surf.gii"
         )));
+    }
+
+    #[test]
+    fn hides_default_odx_fixel_3d_display_when_requested() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Odx {
+            id: 7,
+            path: PathBuf::from("subject.odx"),
+        };
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+
+        let changed = set_default_odx_fixel_3d_visibility(&mut document, 7, false);
+
+        assert!(changed);
+        assert_eq!(odx_fixel_3d_visibility(&document, 7), Some(false));
+    }
+
+    #[test]
+    fn keeps_default_odx_fixel_3d_display_visible_without_glyph_field() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Odx {
+            id: 9,
+            path: PathBuf::from("subject.odx"),
+        };
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+
+        let changed = set_default_odx_fixel_3d_visibility(&mut document, 9, true);
+
+        assert!(!changed);
+        assert_eq!(odx_fixel_3d_visibility(&document, 9), Some(true));
+    }
+
+    fn odx_fixel_3d_visibility(
+        document: &crate::workflow::WorkflowDocument,
+        asset_id: crate::data::loaded_files::FileId,
+    ) -> Option<bool> {
+        let source = document.graph.nodes().find_map(|(uuid, node)| match node.kind {
+            WorkflowNodeKind::OdxSource { source_id } if source_id == asset_id => Some(uuid),
+            _ => None,
+        })?;
+
+        document
+            .graph
+            .wires()
+            .find(|wire| wire.from.node == source)
+            .and_then(|wire| document.graph.get(wire.to.node))
+            .and_then(|node| match &node.kind {
+                WorkflowNodeKind::Fixel3DDisplay { visible, .. } => Some(*visible),
+                _ => None,
+            })
     }
 }

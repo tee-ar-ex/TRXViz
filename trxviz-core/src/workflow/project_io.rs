@@ -17,7 +17,8 @@ pub fn save_workflow_project_to_path(
 
 pub fn load_workflow_project_from_path(path: &Path) -> Result<WorkflowProject, String> {
     let contents = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
-    let value = serde_json::from_str::<serde_json::Value>(&contents).map_err(|err| err.to_string())?;
+    let value =
+        serde_json::from_str::<serde_json::Value>(&contents).map_err(|err| err.to_string())?;
     load_workflow_project_from_value(value)
 }
 
@@ -28,8 +29,7 @@ fn load_workflow_project_from_value(value: serde_json::Value) -> Result<Workflow
     }
 
     if let Some(project_value) = value.get("project")
-        && let Ok(mut project) =
-            serde_json::from_value::<WorkflowProject>(project_value.clone())
+        && let Ok(mut project) = serde_json::from_value::<WorkflowProject>(project_value.clone())
     {
         ensure_node_uuids(&mut project.document);
         return Ok(project);
@@ -53,7 +53,8 @@ fn asset_path_mut(asset: &mut WorkflowAssetDocument) -> &mut PathBuf {
         | WorkflowAssetDocument::Volume { path, .. }
         | WorkflowAssetDocument::Cifti { path, .. }
         | WorkflowAssetDocument::Surface { path, .. }
-        | WorkflowAssetDocument::Parcellation { path, .. } => path,
+        | WorkflowAssetDocument::Parcellation { path, .. }
+        | WorkflowAssetDocument::Odx { path, .. } => path,
     }
 }
 

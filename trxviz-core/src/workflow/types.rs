@@ -4,9 +4,7 @@ use std::sync::Arc;
 
 use super::graph::{GraphRect, WorkflowGraph};
 use crate::data::bundle_mesh::BundleMesh;
-use crate::data::cifti::{
-    CiftiIntent, CiftiStructure, SurfaceScalars, VolumeScalars,
-};
+use crate::data::cifti::{CiftiIntent, CiftiStructure, SurfaceScalars, VolumeScalars};
 use crate::data::gifti_data::GiftiSurfaceData;
 use crate::data::loaded_files::{FileId, StreamlineBacking, VolumeColormap};
 use crate::data::orientation_field::{
@@ -188,6 +186,145 @@ pub enum WorkflowNodeKind {
     SaveStreamlines {
         output_path: String,
     },
+    OdxSource {
+        source_id: FileId,
+    },
+    OdxFixelScalarSelect {
+        #[serde(default)]
+        dpf_name: String,
+    },
+    OdxVolumeSelect {
+        #[serde(default)]
+        dpv_name: String,
+    },
+    ColorByFixelScalars {
+        #[serde(default = "default_fixel_colormap")]
+        colormap: SurfaceColormap,
+        #[serde(default)]
+        range: Option<(f32, f32)>,
+        #[serde(default)]
+        length_scale_by_scalar: bool,
+    },
+    Fixel3DDisplay {
+        #[serde(default = "default_fixel_line_width")]
+        line_width: f32,
+        #[serde(default = "default_fixel_length_scale")]
+        length_scale: f32,
+        #[serde(default = "default_full_opacity")]
+        opacity: f32,
+        #[serde(default)]
+        offset_from_slice: f32,
+        #[serde(default = "default_enabled")]
+        visible: bool,
+    },
+    Fixel2DDisplay {
+        #[serde(default = "default_fixel_line_width")]
+        line_width: f32,
+        #[serde(default = "default_full_opacity")]
+        opacity: f32,
+        #[serde(default = "default_fixel_slab_thickness_mm")]
+        slab_thickness_mm: f32,
+        #[serde(default = "default_fixel_length_scale")]
+        length_scale: f32,
+        #[serde(default = "default_enabled")]
+        visible: bool,
+    },
+    OdfGlyphRenderer {
+        #[serde(default = "default_odf_glyph_scale")]
+        scale: f32,
+        #[serde(default = "default_full_opacity")]
+        opacity: f32,
+        #[serde(default)]
+        offset_from_slice: f32,
+        #[serde(default)]
+        gloss: f32,
+        #[serde(default)]
+        vertex_colormap: GlyphColormap,
+        #[serde(default = "default_workflow_slice_view_kind")]
+        slice_axis: WorkflowSliceViewKind,
+        #[serde(default)]
+        opacity_gate: OpacityGate,
+        #[serde(default)]
+        size_gate: SizeGate,
+        #[serde(default = "default_enabled")]
+        visible: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum GlyphColormap {
+    #[default]
+    Directional,
+    Plasma,
+    Viridis,
+    Inferno,
+    BlueWhiteRed,
+}
+
+/// Piecewise opacity curve driven by a voxel-scalar input.
+/// Below `range.0` → `below`, above `range.1` → `above`, linear in between.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct OpacityGate {
+    pub range: (f32, f32),
+    pub below: f32,
+    pub above: f32,
+}
+
+impl Default for OpacityGate {
+    fn default() -> Self {
+        Self {
+            range: (0.0, 1.0),
+            below: 0.0,
+            above: 1.0,
+        }
+    }
+}
+
+/// Piecewise size-scaling curve driven by a voxel-scalar input.
+/// Below `range.0` → `min_scale`, above `range.1` → `max_scale`, linear in between.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SizeGate {
+    pub range: (f32, f32),
+    pub min_scale: f32,
+    pub max_scale: f32,
+}
+
+impl Default for SizeGate {
+    fn default() -> Self {
+        Self {
+            range: (0.0, 1.0),
+            min_scale: 0.5,
+            max_scale: 1.5,
+        }
+    }
+}
+
+pub fn default_fixel_colormap() -> SurfaceColormap {
+    SurfaceColormap::Inferno
+}
+
+pub fn default_fixel_line_width() -> f32 {
+    0.006
+}
+
+pub fn default_fixel_length_scale() -> f32 {
+    1.0
+}
+
+pub fn default_full_opacity() -> f32 {
+    1.0
+}
+
+pub fn default_fixel_slab_thickness_mm() -> f32 {
+    1.0
+}
+
+pub fn default_odf_glyph_scale() -> f32 {
+    3.25
+}
+
+pub fn default_workflow_slice_view_kind() -> WorkflowSliceViewKind {
+    WorkflowSliceViewKind::Axial
 }
 
 pub fn default_enabled() -> bool {
@@ -367,6 +504,10 @@ pub enum WorkflowAssetDocument {
         path: PathBuf,
         label_table_path: Option<PathBuf>,
     },
+    Odx {
+        id: FileId,
+        path: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -389,6 +530,32 @@ pub enum WorkflowSliceViewKind {
     Axial,
     Coronal,
     Sagittal,
+}
+
+impl WorkflowSliceViewKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Axial => "Axial",
+            Self::Coronal => "Coronal",
+            Self::Sagittal => "Sagittal",
+        }
+    }
+
+    pub fn viewport_index(self) -> usize {
+        match self {
+            Self::Axial => 0,
+            Self::Coronal => 1,
+            Self::Sagittal => 2,
+        }
+    }
+
+    pub fn odx_axis(self) -> usize {
+        match self {
+            Self::Axial => 2,
+            Self::Coronal => 1,
+            Self::Sagittal => 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -547,6 +714,13 @@ pub struct CachedBundleSurfaceMeshes {
     pub meshes: Vec<(BundleMesh, String)>,
 }
 
+#[derive(Clone)]
+pub struct OdxDpvMaterialization {
+    pub source_id: FileId,
+    pub dpv_name: String,
+    pub volume: Arc<crate::data::nifti_data::NiftiVolume>,
+}
+
 #[derive(Clone, Default)]
 pub struct WorkflowExecutionCache {
     pub node_runs: HashMap<WorkflowNodeUuid, ExpensiveNodeRunRecord>,
@@ -556,6 +730,7 @@ pub struct WorkflowExecutionCache {
     pub tube_geometry_cache: HashMap<WorkflowNodeUuid, CachedTubeGeometry>,
     pub bundle_surface_mesh_cache: HashMap<WorkflowNodeUuid, CachedBundleSurfaceMeshes>,
     pub boundary_field_cache: HashMap<WorkflowNodeUuid, CachedBoundaryField>,
+    pub odx_dpv_materializations: HashMap<WorkflowNodeUuid, OdxDpvMaterialization>,
 }
 
 #[derive(Clone)]
@@ -573,6 +748,40 @@ pub struct SceneFramePlan {
     pub parcellation_draws: Vec<ParcellationDrawPlan>,
     pub boundary_field_plans: Vec<BoundaryFieldPlan>,
     pub boundary_glyph_draws: Vec<BoundaryGlyphDrawPlan>,
+    pub fixel_3d_draws: Vec<FixelDrawPlan>,
+    pub fixel_2d_draws: Vec<FixelDrawPlan>,
+    pub odf_glyph_draws: Vec<OdfGlyphDrawPlan>,
+}
+
+#[derive(Clone)]
+pub struct FixelDrawPlan {
+    pub node_uuid: WorkflowNodeUuid,
+    pub field: crate::data::odx_data::FixelField,
+    pub line_width: f32,
+    pub length_scale: f32,
+    pub opacity: f32,
+    pub offset_from_slice: f32,
+    pub slab_thickness_mm: f32,
+    pub visible: bool,
+    pub colormap_code: u32,
+    pub scalar_range: (f32, f32),
+}
+
+#[derive(Clone)]
+pub struct OdfGlyphDrawPlan {
+    pub node_uuid: WorkflowNodeUuid,
+    pub field: crate::data::odx_data::OdfField,
+    pub scale: f32,
+    pub opacity: f32,
+    pub offset_from_slice: f32,
+    pub gloss: f32,
+    pub vertex_colormap: GlyphColormap,
+    pub slice_axis: WorkflowSliceViewKind,
+    pub opacity_gate: OpacityGate,
+    pub size_gate: SizeGate,
+    pub opacity_scalars: Option<VolumeScalars>,
+    pub size_scalars: Option<VolumeScalars>,
+    pub visible: bool,
 }
 
 impl Default for SceneFramePlan {
@@ -591,6 +800,9 @@ impl Default for SceneFramePlan {
             parcellation_draws: Vec::new(),
             boundary_field_plans: Vec::new(),
             boundary_glyph_draws: Vec::new(),
+            fixel_3d_draws: Vec::new(),
+            fixel_2d_draws: Vec::new(),
+            odf_glyph_draws: Vec::new(),
         }
     }
 }
@@ -848,6 +1060,10 @@ pub(super) enum WorkflowValue {
     SurfaceAppearance(SurfaceAppearance),
     BundleSurface(BundleSurfacePlan),
     BoundaryField(BoundaryFieldPlan),
+    Fixels(crate::data::odx_data::FixelField),
+    FixelScalars(crate::data::odx_data::FixelScalars),
+    OdfField(crate::data::odx_data::OdfField),
+    OdxCatalog(crate::data::odx_data::OdxCatalog),
 }
 
 #[derive(Clone)]
@@ -959,6 +1175,10 @@ pub enum PortKind {
     SurfaceAppearance,
     BundleSurface,
     BoundaryField,
+    Fixels,
+    FixelScalars,
+    OdfField,
+    OdxCatalog,
 }
 
 pub struct SeededWorkflowBranch {
@@ -1038,6 +1258,13 @@ impl WorkflowNodeKind {
             Self::BoundaryGlyphDisplay { .. } => "Boundary Glyph Display",
             Self::ParcellationDisplay { .. } => "Parcellation Display",
             Self::SaveStreamlines { .. } => "Save Streamlines",
+            Self::OdxSource { .. } => "ODX Source",
+            Self::OdxFixelScalarSelect { .. } => "ODX Fixel Scalar Select",
+            Self::OdxVolumeSelect { .. } => "ODX Volume Select",
+            Self::ColorByFixelScalars { .. } => "Color By Fixel Scalars",
+            Self::Fixel3DDisplay { .. } => "Fixel 3D Display",
+            Self::Fixel2DDisplay { .. } => "Fixel 2D Display",
+            Self::OdfGlyphRenderer { .. } => "ODF Glyph Renderer",
         }
     }
 
@@ -1097,6 +1324,16 @@ impl WorkflowNodeKind {
                 ports
             }
             Self::SurfaceDisplay { .. } => vec![PortKind::SurfaceAppearance],
+            Self::OdxSource { .. } => Vec::new(),
+            Self::OdxFixelScalarSelect { .. } => vec![PortKind::OdxCatalog],
+            Self::OdxVolumeSelect { .. } => vec![PortKind::OdxCatalog],
+            Self::ColorByFixelScalars { .. } => vec![PortKind::Fixels, PortKind::FixelScalars],
+            Self::Fixel3DDisplay { .. } | Self::Fixel2DDisplay { .. } => vec![PortKind::Fixels],
+            Self::OdfGlyphRenderer { .. } => vec![
+                PortKind::OdfField,
+                PortKind::VolumeScalars,
+                PortKind::VolumeScalars,
+            ],
         }
     }
 
@@ -1136,6 +1373,15 @@ impl WorkflowNodeKind {
             Self::SurfaceOverlayStack { .. } => vec![PortKind::SurfaceAppearance],
             Self::BundleSurfaceBuild { .. } => vec![PortKind::BundleSurface],
             Self::BoundaryFieldBuild { .. } => vec![PortKind::BoundaryField],
+            Self::OdxSource { .. } => vec![
+                PortKind::Fixels,
+                PortKind::OdfField,
+                PortKind::OdxCatalog,
+                PortKind::FixelScalars,
+            ],
+            Self::OdxFixelScalarSelect { .. } => vec![PortKind::FixelScalars],
+            Self::OdxVolumeSelect { .. } => vec![PortKind::Volume],
+            Self::ColorByFixelScalars { .. } => vec![PortKind::Fixels],
             Self::ParcelSurfaceBuild
             | Self::StreamlineDisplay { .. }
             | Self::VolumeDisplay { .. }
@@ -1144,7 +1390,10 @@ impl WorkflowNodeKind {
             | Self::BoundaryGlyphDisplay { .. }
             | Self::ParcellationDisplay { .. }
             | Self::BundleSurfaceDisplay { .. }
-            | Self::SaveStreamlines { .. } => Vec::new(),
+            | Self::SaveStreamlines { .. }
+            | Self::Fixel3DDisplay { .. }
+            | Self::Fixel2DDisplay { .. }
+            | Self::OdfGlyphRenderer { .. } => Vec::new(),
         }
     }
 }

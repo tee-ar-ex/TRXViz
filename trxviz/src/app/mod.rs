@@ -28,6 +28,8 @@ pub struct TrxVizApp {
     pub(crate) pending_file_loads: Vec<PendingFileLoad>,
     pub(crate) import_dialog: ImportDialogState,
     pub(crate) merge_streamlines_dialog: MergeStreamlinesDialogState,
+    /// Slice-local ODX glyph amplitude normalization used by the shader LUT path.
+    pub(crate) odx_amp_norm: f32,
 }
 
 impl TrxVizApp {
@@ -174,6 +176,21 @@ impl TrxVizApp {
                         }
                     }
                 }
+                WorkerMessage::OdxLoaded {
+                    job_id,
+                    path,
+                    result,
+                } => {
+                    self.pending_file_loads.retain(|job| job.job_id != job_id);
+                    match result {
+                        Ok(scene) => {
+                            if let Some(rs) = frame.wgpu_render_state() {
+                                self.apply_loaded_odx(path, scene, rs);
+                            }
+                        }
+                        Err(err) => self.error_msg = Some(format!("Failed to load ODX: {err}")),
+                    }
+                }
             }
         }
     }
@@ -265,6 +282,7 @@ impl TrxVizApp {
             helpers::DroppedPathKind::OpenCifti => self.begin_load_cifti(path),
             helpers::DroppedPathKind::OpenParcellation => self.begin_load_parcellation(path),
             helpers::DroppedPathKind::OpenGifti => self.begin_load_gifti_surface(path),
+            helpers::DroppedPathKind::OpenOdx => self.begin_load_odx(path),
             helpers::DroppedPathKind::Unsupported => {
                 self.error_msg = Some(format!(
                     "Unknown or unsupported file type: {}",
@@ -294,6 +312,7 @@ impl TrxVizApp {
             pending_file_loads: Vec::new(),
             import_dialog: ImportDialogState::default(),
             merge_streamlines_dialog: MergeStreamlinesDialogState::default(),
+            odx_amp_norm: 1.0,
         };
 
         if cc.wgpu_render_state.is_some() {
@@ -317,31 +336,56 @@ impl eframe::App for TrxVizApp {
         // Update slice positions if dirty
         if self.viewport.slices_dirty {
             if let Some(rs) = frame.wgpu_render_state() {
-                let renderer = rs.renderer.read();
-                if let Some(all) = renderer.callback_resources.get::<AllSliceResources>() {
-                    for (file_id, sr) in &all.entries {
-                        if let Some(nf) = self.scene.nifti_files.iter().find(|n| n.id == *file_id) {
-                            sr.update_slice(
-                                &rs.queue,
-                                SliceAxis::Axial,
-                                self.viewport.slice_indices[0],
-                                &nf.volume,
-                            );
-                            sr.update_slice(
-                                &rs.queue,
-                                SliceAxis::Coronal,
-                                self.viewport.slice_indices[1],
-                                &nf.volume,
-                            );
-                            sr.update_slice(
-                                &rs.queue,
-                                SliceAxis::Sagittal,
-                                self.viewport.slice_indices[2],
-                                &nf.volume,
-                            );
+                {
+                    let renderer = rs.renderer.read();
+                    if let Some(all) = renderer.callback_resources.get::<AllSliceResources>() {
+                        for (file_id, sr) in &all.entries {
+                            let vol_ref = self
+                                .scene
+                                .nifti_files
+                                .iter()
+                                .find(|n| n.id == *file_id)
+                                .map(|nf| &nf.volume as &trxviz_core::data::nifti_data::NiftiVolume)
+                                .or_else(|| {
+                                    self.workflow
+                                        .execution_cache
+                                        .odx_dpv_materializations
+                                        .values()
+                                        .find(|m| m.source_id == *file_id)
+                                        .map(|m| m.volume.as_ref())
+                                });
+                            if let Some(vol) = vol_ref {
+                                sr.update_slice(
+                                    &rs.queue,
+                                    SliceAxis::Axial,
+                                    self.viewport.slice_indices[0],
+                                    vol,
+                                );
+                                sr.update_slice(
+                                    &rs.queue,
+                                    SliceAxis::Coronal,
+                                    self.viewport.slice_indices[1],
+                                    vol,
+                                );
+                                sr.update_slice(
+                                    &rs.queue,
+                                    SliceAxis::Sagittal,
+                                    self.viewport.slice_indices[2],
+                                    vol,
+                                );
+                            }
                         }
                     }
                 }
+                // Re-upload ODX glyphs for the new axial slice (3D view).
+                // Fixels are full-volume and don't need re-uploading on slice change —
+                // the 2D slice views use shader slab clipping to show only the current slice.
+                let mut renderer = rs.renderer.write();
+                self.update_active_odx_slice_state(
+                    &mut renderer.callback_resources,
+                    &rs.device,
+                    &rs.queue,
+                );
             }
             self.viewport.slices_dirty = false;
         }

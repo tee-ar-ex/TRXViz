@@ -2,6 +2,7 @@
 
 pub mod background_renderer;
 pub mod camera;
+pub mod fixel_renderer;
 pub mod glyph_renderer;
 pub mod mesh_renderer;
 pub mod slice_renderer;

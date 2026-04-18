@@ -259,4 +259,35 @@ impl NiftiVolume {
             self.voxel_to_world(Vec3::new(if_, j0, k1)),
         ]
     }
+
+    /// Return `(normal, center)` for the slice plane at the given voxel index.
+    ///
+    /// `axis_index`: 0 = axial (k-slices), 1 = coronal (j-slices), 2 = sagittal (i-slices).
+    ///
+    /// `normal` is the unit normal to the slice plane in RAS+ space.  For an
+    /// axis-aligned volume it is exactly one of ±X/±Y/±Z; for oblique volumes
+    /// it follows the affine column direction.
+    ///
+    /// `center` is the world-space centre of the slice quad (mid-i, mid-j or mid-k
+    /// for the two in-plane axes, `slice_index` for the slice axis).
+    pub fn slice_plane(&self, axis_index: usize, slice_index: usize) -> (Vec3, Vec3) {
+        // The column of the affine that corresponds to the varying voxel axis.
+        let col = match axis_index {
+            0 => self.voxel_to_ras.col(2), // k-column
+            1 => self.voxel_to_ras.col(1), // j-column
+            _ => self.voxel_to_ras.col(0), // i-column
+        };
+        let normal = Vec3::new(col.x, col.y, col.z).normalize();
+
+        let ci = self.dims[0] as f32 / 2.0;
+        let cj = self.dims[1] as f32 / 2.0;
+        let ck = self.dims[2] as f32 / 2.0;
+        let si = slice_index as f32;
+        let center_voxel = match axis_index {
+            0 => Vec3::new(ci, cj, si),
+            1 => Vec3::new(ci, si, ck),
+            _ => Vec3::new(si, cj, ck),
+        };
+        (normal, self.voxel_to_world(center_voxel))
+    }
 }

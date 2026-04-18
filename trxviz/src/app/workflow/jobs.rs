@@ -1,4 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -11,12 +13,12 @@ use trxviz_core::data::trx_data::{RenderStyle, TrxGpuData};
 use trxviz_core::headless::{
     HeadlessSceneExportFormat, HeadlessSceneExportOptions, HeadlessView, export_state_glb,
 };
-use trxviz_core::scene::HeadlessWorkflowState;
 use trxviz_core::renderer::background_renderer::BackgroundResources;
-use trxviz_core::renderer::glyph_renderer::GlyphResources;
+use trxviz_core::renderer::glyph_renderer::{GlyphResources, OdxGlyphResourceKey, OdxGpuGlyphMode};
 use trxviz_core::renderer::mesh_renderer::MeshResources;
 use trxviz_core::renderer::slice_renderer::AllSliceResources;
 use trxviz_core::renderer::streamline_renderer::{AllStreamlineResources, StreamlineResources};
+use trxviz_core::scene::HeadlessWorkflowState;
 use trxviz_core::scene::direct_streamline_import_warnings;
 
 use super::*;
@@ -32,7 +34,265 @@ pub(crate) fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
     }
 }
 
+fn hash_f32(hasher: &mut DefaultHasher, value: f32) {
+    value.to_bits().hash(hasher);
+}
+
+fn hash_volume_scalars(
+    hasher: &mut DefaultHasher,
+    scalars: Option<&trxviz_core::data::cifti::VolumeScalars>,
+) {
+    match scalars {
+        Some(volume) => {
+            true.hash(hasher);
+            volume.dims.hash(hasher);
+            volume.values.len().hash(hasher);
+            volume.metadata.map_name.hash(hasher);
+            volume.metadata.series_index.hash(hasher);
+            volume
+                .metadata
+                .suggested_range
+                .map(|(lo, hi)| (lo.to_bits(), hi.to_bits()))
+                .hash(hasher);
+            volume.metadata.series_value.map(f32::to_bits).hash(hasher);
+            for entry in volume.voxel_to_ras.to_cols_array() {
+                hash_f32(hasher, entry);
+            }
+            for idx in [
+                0,
+                volume.values.len() / 2,
+                volume.values.len().saturating_sub(1),
+            ] {
+                if let Some(value) = volume.values.get(idx) {
+                    hash_f32(hasher, *value);
+                }
+            }
+        }
+        None => false.hash(hasher),
+    }
+}
+
+fn active_odx_glyph_plan(
+    app: &crate::app::TrxVizApp,
+) -> Option<&trxviz_core::workflow::OdfGlyphDrawPlan> {
+    app.workflow
+        .runtime
+        .scene_plan
+        .odf_glyph_draws
+        .iter()
+        .find(|plan| plan.visible)
+        .or_else(|| app.workflow.runtime.scene_plan.odf_glyph_draws.first())
+}
+
+fn active_odx_glyph_scene(
+    app: &crate::app::TrxVizApp,
+) -> Option<&Arc<trxviz_core::data::odx_data::OdxScene>> {
+    active_odx_glyph_plan(app)
+        .map(|plan| &plan.field.scene)
+        .or(app.scene.odx_scene.as_ref())
+}
+
+fn active_odx_slice_state(app: &crate::app::TrxVizApp) -> Option<(usize, u32)> {
+    if let Some(plan) = active_odx_glyph_plan(app) {
+        let viewport_index = plan.slice_axis.viewport_index();
+        return Some((
+            plan.slice_axis.odx_axis(),
+            app.viewport.slice_indices[viewport_index] as u32,
+        ));
+    }
+    app.scene
+        .odx_scene
+        .as_ref()
+        .map(|_| (2usize, app.viewport.slice_indices[0] as u32))
+}
+
+fn active_odx_glyph_resource_key(
+    app: &crate::app::TrxVizApp,
+    _device: &wgpu::Device,
+) -> Option<OdxGlyphResourceKey> {
+    let scene = active_odx_glyph_scene(app)?;
+    let source_kind = scene.glyph_source_kind()?;
+    let slice_state = active_odx_slice_state(app);
+    let mode = match source_kind {
+        trxviz_core::data::odx_data::OdxGlyphSourceKind::Odf => OdxGpuGlyphMode::OdfSliceGather,
+        trxviz_core::data::odx_data::OdxGlyphSourceKind::Sh => OdxGpuGlyphMode::ShCompute,
+    };
+    let mut opacity_hasher = DefaultHasher::new();
+    hash_volume_scalars(
+        &mut opacity_hasher,
+        active_odx_glyph_plan(app).and_then(|plan| plan.opacity_scalars.as_ref()),
+    );
+    let mut size_hasher = DefaultHasher::new();
+    hash_volume_scalars(
+        &mut size_hasher,
+        active_odx_glyph_plan(app).and_then(|plan| plan.size_scalars.as_ref()),
+    );
+    Some(OdxGlyphResourceKey {
+        scene_ptr: Arc::as_ptr(scene) as usize,
+        source_kind,
+        mode,
+        sphere_vertex_count: scene.sphere_vertices.len(),
+        sphere_index_count: scene.sphere_indices.len(),
+        sh_order: scene.sh_order(),
+        slice_axis: slice_state.map(|(axis, _)| axis as u8),
+        slice_index: slice_state.map(|(_, slice_idx)| slice_idx),
+        opacity_gate_fingerprint: opacity_hasher.finish(),
+        size_gate_fingerprint: size_hasher.finish(),
+    })
+}
+
+fn odf_rows_per_chunk(
+    scene: &trxviz_core::data::odx_data::OdxScene,
+    device: &wgpu::Device,
+) -> usize {
+    scene
+        .odf_rows_per_chunk(device.limits().max_storage_buffer_binding_size as usize)
+        .unwrap_or(1)
+}
+
+fn sample_odx_gate_buffers(
+    app: &crate::app::TrxVizApp,
+    instances: &[trxviz_core::renderer::glyph_renderer::GlyphInstance],
+) -> (Option<Vec<f32>>, Option<Vec<f32>>) {
+    use trxviz_core::data::odx_data::sample_volume_scalars_for_glyphs;
+
+    let Some(plan) = active_odx_glyph_plan(app) else {
+        return (None, None);
+    };
+    let opacity = plan
+        .opacity_scalars
+        .as_ref()
+        .map(|volume| sample_volume_scalars_for_glyphs(instances, Some(volume)));
+    let size = plan
+        .size_scalars
+        .as_ref()
+        .map(|volume| sample_volume_scalars_for_glyphs(instances, Some(volume)));
+    (opacity, size)
+}
+
 impl crate::app::TrxVizApp {
+    pub(in crate::app) fn ensure_active_odx_glyph_resources(
+        &mut self,
+        callback_resources: &mut egui_wgpu::CallbackResources,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) {
+        let Some(glyph_resources) = callback_resources.get_mut::<GlyphResources>() else {
+            return;
+        };
+        let Some(resource_key) = active_odx_glyph_resource_key(self, device) else {
+            self.odx_amp_norm = 1.0;
+            self.workflow.uploaded_odx_glyph_resource_key = None;
+            return;
+        };
+        if self.workflow.uploaded_odx_glyph_resource_key == Some(resource_key)
+            && glyph_resources.has_geometry()
+        {
+            return;
+        }
+
+        let scene = active_odx_glyph_scene(self)
+            .expect("ODX scene for active resource key")
+            .clone();
+        let (axis, slice_idx) =
+            active_odx_slice_state(self).expect("slice state for ODX glyph mode");
+
+        match resource_key.mode {
+            OdxGpuGlyphMode::PreSampledOdf => unreachable!("ODX glyphs now use slice-local upload"),
+            OdxGpuGlyphMode::OdfSliceGather => {
+                let rows_per_chunk = odf_rows_per_chunk(&scene, device);
+                let metadata = scene
+                    .odf_slice_metadata(axis, slice_idx, rows_per_chunk)
+                    .expect("ODF slice metadata should exist for ODF glyph mode");
+                if metadata.instances.is_empty() {
+                    glyph_resources.clear();
+                    self.odx_amp_norm = 1.0;
+                    self.workflow.uploaded_odx_glyph_resource_key = None;
+                    return;
+                }
+                let odf_view = scene
+                    .odf_view_f32()
+                    .expect("ODF amplitudes should exist for ODF glyph mode");
+                let (opacity_samples, size_samples) =
+                    sample_odx_gate_buffers(self, &metadata.instances);
+                self.odx_amp_norm = 1.0;
+                glyph_resources.set_odx_slice_gather(
+                    device,
+                    queue,
+                    resource_key.scene_ptr,
+                    &scene.sphere_vertices,
+                    &scene.sphere_indices,
+                    &metadata.instances,
+                    odf_view.as_flat_slice(),
+                    scene.compact_voxel_count(),
+                    scene
+                        .odf_source_row_width()
+                        .expect("ODF row width should exist for ODF glyph mode"),
+                    scene.glyph_row_width(),
+                    rows_per_chunk,
+                    &metadata.chunk_worklists,
+                    metadata.amp_norm,
+                    opacity_samples.as_deref(),
+                    size_samples.as_deref(),
+                );
+            }
+            OdxGpuGlyphMode::ShCompute => {
+                let instances = scene.glyph_instances_for_slice(axis, slice_idx);
+                if instances.is_empty() {
+                    glyph_resources.clear();
+                    self.odx_amp_norm = 1.0;
+                    self.workflow.uploaded_odx_glyph_resource_key = None;
+                    return;
+                }
+                let coefficients = scene
+                    .sh_coefficients_for_slice(axis, slice_idx)
+                    .expect("SH coefficients should exist for SH glyph mode");
+                let ncoeffs = scene
+                    .sh_view_f32()
+                    .expect("SH coefficients should exist for SH glyph mode")
+                    .ncols();
+                let transform = scene
+                    .sh_transform_flat()
+                    .expect("SH transform should exist for SH glyph mode");
+                let source_bins = scene
+                    .sh_source_dir_count()
+                    .expect("SH source dir count should exist for SH glyph mode");
+                let (opacity_samples, size_samples) = sample_odx_gate_buffers(self, &instances);
+                self.odx_amp_norm = 1.0;
+                glyph_resources.set_odx_sh_volume(
+                    device,
+                    &scene.sphere_vertices,
+                    &scene.sphere_indices,
+                    &instances,
+                    &coefficients,
+                    ncoeffs,
+                    transform,
+                    source_bins,
+                    scene.glyph_row_width(),
+                    opacity_samples.as_deref(),
+                    size_samples.as_deref(),
+                );
+                let slice_indices: Vec<u32> = (0..instances.len() as u32).collect();
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("interactive_odx_sh_slice_encoder"),
+                });
+                glyph_resources.dispatch_odx_sh_slice(device, queue, &mut encoder, &slice_indices);
+                queue.submit(std::iter::once(encoder.finish()));
+            }
+        }
+
+        self.workflow.uploaded_odx_glyph_resource_key = Some(resource_key);
+    }
+
+    pub(in crate::app) fn update_active_odx_slice_state(
+        &mut self,
+        callback_resources: &mut egui_wgpu::CallbackResources,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) {
+        self.ensure_active_odx_glyph_resources(callback_resources, device, queue);
+    }
+
     pub(in crate::app) fn rebuild_workflow_editor_from_document(&mut self) {
         self.workflow.editor_snarl = snarl_from_graph(&self.workflow.document.graph);
     }
@@ -109,7 +369,8 @@ impl crate::app::TrxVizApp {
                                 changed = true;
                             }
                             WorkflowJobOutput::SurfaceMap(map) => {
-                                let summary = format!("Surface scalars ({} values)", map.values.len());
+                                let summary =
+                                    format!("Surface scalars ({} values)", map.values.len());
                                 self.workflow
                                     .execution_cache
                                     .surface_streamline_map_cache
@@ -452,6 +713,7 @@ impl crate::app::TrxVizApp {
             &self.scene.cifti_files,
             &self.scene.gifti_surfaces,
             &self.scene.parcellations,
+            &self.scene.odx_files,
             &mut self.workflow.display_runtimes,
             &mut self.workflow.next_draw_id,
             &mut self.workflow.execution_cache,
@@ -462,7 +724,8 @@ impl crate::app::TrxVizApp {
 
     pub(in crate::app) fn refresh_workflow_runtime_if_needed(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
-        let needs_interactive = self.workflow.document_revision != self.workflow.last_interactive_revision
+        let needs_interactive = self.workflow.document_revision
+            != self.workflow.last_interactive_revision
             || self.workflow.render_only_changed
             || self.workflow.pending_job_completion;
         if needs_interactive {
@@ -525,6 +788,7 @@ impl crate::app::TrxVizApp {
             renderer
                 .callback_resources
                 .insert(GlyphResources::new(&rs.device, rs.target_format));
+            self.workflow.uploaded_odx_glyph_resource_key = None;
         }
 
         let active_streamline_ids: HashSet<FileId> = self
@@ -616,7 +880,11 @@ impl crate::app::TrxVizApp {
                 .chain(self.workflow.runtime.scene_plan.stage_surface_draws.iter())
             {
                 if !draw.vertex_rgba.is_empty() {
-                    mesh_resources.update_surface_colors(&rs.queue, draw.source_id, &draw.vertex_rgba);
+                    mesh_resources.update_surface_colors(
+                        &rs.queue,
+                        draw.source_id,
+                        &draw.vertex_rgba,
+                    );
                 }
                 if let Some(scalars) = &draw.projection_scalars {
                     mesh_resources.update_surface_scalars(&rs.queue, draw.source_id, scalars);
@@ -671,6 +939,7 @@ impl crate::app::TrxVizApp {
                     let boundary_field_changed =
                         self.viewport.boundary_field_revision != cache.fingerprint;
                     let field = cache.field.clone();
+                    self.workflow.uploaded_odx_glyph_resource_key = None;
                     glyph_resources.set_field(
                         &rs.device,
                         field.clone(),
@@ -682,17 +951,31 @@ impl crate::app::TrxVizApp {
                     if boundary_field_changed && self.scene.nifti_files.is_empty() {
                         self.reset_slice_view_to_boundary_field(field.as_ref());
                     }
-                } else {
+                } else if self.scene.odx_scene.is_none() {
                     glyph_resources.clear();
+                    self.workflow.uploaded_odx_glyph_resource_key = None;
+                    self.viewport.boundary_field = None;
+                    self.viewport.boundary_field_revision = 0;
+                } else {
                     self.viewport.boundary_field = None;
                     self.viewport.boundary_field_revision = 0;
                 }
-            } else {
+            } else if self.scene.odx_scene.is_none() {
                 glyph_resources.clear();
+                self.workflow.uploaded_odx_glyph_resource_key = None;
+                self.viewport.boundary_field = None;
+                self.viewport.boundary_field_revision = 0;
+            } else {
                 self.viewport.boundary_field = None;
                 self.viewport.boundary_field_revision = 0;
             }
         }
+        self.ensure_active_odx_glyph_resources(
+            &mut renderer.callback_resources,
+            &rs.device,
+            &rs.queue,
+        );
+        self.update_active_odx_slice_state(&mut renderer.callback_resources, &rs.device, &rs.queue);
 
         if let Some(mesh_resources) = renderer.callback_resources.get_mut::<MeshResources>() {
             for draw in &self.workflow.runtime.scene_plan.bundle_draws {
@@ -764,6 +1047,148 @@ impl crate::app::TrxVizApp {
                 }
             }
         }
+        // Re-upload fixel instances with per-fixel scalars when ColorByFixelScalars
+        // is active (colormap_code != 0 and scalar variant). A stable fingerprint
+        // over (source_id, dpf name, colormap_code) avoids churn.
+        {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            use trxviz_core::data::odx_data::FixelScalarValues;
+            use trxviz_core::renderer::fixel_renderer::FixelResources;
+
+            let active = self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_3d_draws
+                .iter()
+                .find(|p| p.visible)
+                .or_else(|| {
+                    self.workflow
+                        .runtime
+                        .scene_plan
+                        .fixel_2d_draws
+                        .iter()
+                        .find(|p| p.visible)
+                })
+                .or_else(|| self.workflow.runtime.scene_plan.fixel_3d_draws.first())
+                .or_else(|| self.workflow.runtime.scene_plan.fixel_2d_draws.first());
+            if let Some(plan) = active {
+                let mut hasher = DefaultHasher::new();
+                plan.field.source_id.hash(&mut hasher);
+                plan.field.colormap_code.hash(&mut hasher);
+                plan.field.scalars.name.hash(&mut hasher);
+                match &plan.field.scalars.values {
+                    FixelScalarValues::Rgb(_) => 0u8.hash(&mut hasher),
+                    FixelScalarValues::Scalar(_) => 1u8.hash(&mut hasher),
+                }
+                let fp = hasher.finish();
+                if fp != self.workflow.uploaded_fixel_fingerprint {
+                    let scalars_vec: Option<Vec<f32>> = match &plan.field.scalars.values {
+                        FixelScalarValues::Scalar(v) if plan.field.colormap_code != 0 => {
+                            Some((**v).clone())
+                        }
+                        _ => None,
+                    };
+                    let instances = plan
+                        .field
+                        .scene
+                        .all_fixels_with_scalars(scalars_vec.as_deref());
+                    if let Some(fr) = renderer.callback_resources.get_mut::<FixelResources>() {
+                        fr.set_fixels(&rs.device, &instances);
+                        self.workflow.uploaded_fixel_fingerprint = fp;
+                    }
+                }
+            } else if let Some(odx) = self.scene.odx_scene.as_ref() {
+                let mut hasher = DefaultHasher::new();
+                (Arc::as_ptr(odx) as usize).hash(&mut hasher);
+                0x0df1_0001_u64.hash(&mut hasher);
+                let fp = hasher.finish();
+                if fp != self.workflow.uploaded_fixel_fingerprint {
+                    let instances = odx.all_fixels();
+                    if let Some(fr) = renderer.callback_resources.get_mut::<FixelResources>() {
+                        fr.set_fixels(&rs.device, &instances);
+                        self.workflow.uploaded_fixel_fingerprint = fp;
+                    }
+                }
+            }
+        }
+
+        // Upload materialized ODX DPV volumes into AllSliceResources so that
+        // OdxVolumeSelect → VolumeDisplay actually renders.
+        {
+            use trxviz_core::renderer::slice_renderer::{SliceAxis, SliceResources};
+            let plan_source_ids: HashSet<FileId> = self
+                .workflow
+                .runtime
+                .scene_plan
+                .volume_draws
+                .iter()
+                .map(|d| d.source_id)
+                .collect();
+            // Find a materialization per source_id referenced by the plan.
+            let mut pending: HashMap<FileId, (WorkflowNodeUuid, String, Arc<NiftiVolume>)> =
+                HashMap::new();
+            for (node_uuid, m) in &self.workflow.execution_cache.odx_dpv_materializations {
+                if plan_source_ids.contains(&m.source_id) {
+                    pending.insert(
+                        m.source_id,
+                        (*node_uuid, m.dpv_name.clone(), m.volume.clone()),
+                    );
+                }
+            }
+            for (source_id, (node_uuid, dpv_name, volume)) in pending {
+                let already = self
+                    .workflow
+                    .uploaded_dpv_by_source
+                    .get(&source_id)
+                    .map(|(n, d)| *n == node_uuid && d == &dpv_name)
+                    .unwrap_or(false);
+                let exists = renderer
+                    .callback_resources
+                    .get::<AllSliceResources>()
+                    .map(|all| all.entries.iter().any(|(id, _)| *id == source_id))
+                    .unwrap_or(false);
+                if already && exists {
+                    continue;
+                }
+                let vol_ref: &NiftiVolume = &volume;
+                let slice_resources =
+                    SliceResources::new(&rs.device, &rs.queue, rs.target_format, vol_ref);
+                slice_resources.update_slice(
+                    &rs.queue,
+                    SliceAxis::Axial,
+                    self.viewport.slice_indices[0],
+                    vol_ref,
+                );
+                slice_resources.update_slice(
+                    &rs.queue,
+                    SliceAxis::Coronal,
+                    self.viewport.slice_indices[1],
+                    vol_ref,
+                );
+                slice_resources.update_slice(
+                    &rs.queue,
+                    SliceAxis::Sagittal,
+                    self.viewport.slice_indices[2],
+                    vol_ref,
+                );
+                if let Some(all) = renderer.callback_resources.get_mut::<AllSliceResources>() {
+                    if let Some(entry) = all.entries.iter_mut().find(|(id, _)| *id == source_id) {
+                        *entry = (source_id, slice_resources);
+                    } else {
+                        all.entries.push((source_id, slice_resources));
+                    }
+                } else {
+                    renderer.callback_resources.insert(AllSliceResources {
+                        entries: vec![(source_id, slice_resources)],
+                    });
+                }
+                self.workflow
+                    .uploaded_dpv_by_source
+                    .insert(source_id, (node_uuid, dpv_name));
+            }
+        }
         self.workflow.last_resource_sync_revision = self.workflow.last_runtime_revision;
     }
 
@@ -816,6 +1241,9 @@ impl crate::app::TrxVizApp {
         self.workflow.last_settled_revision = 0;
         self.workflow.last_runtime_revision += 1;
         self.workflow.last_resource_sync_revision = 0;
+        self.workflow.uploaded_dpv_by_source.clear();
+        self.workflow.uploaded_odx_glyph_resource_key = None;
+        self.workflow.uploaded_fixel_fingerprint = 0;
         self.workflow.editor_interaction_active = false;
         self.workflow.last_semantic_edit_at = 0.0;
     }
@@ -1112,6 +1540,26 @@ impl crate::app::TrxVizApp {
                             Some(id),
                             false,
                         );
+                    }),
+                WorkflowAssetDocument::Odx {
+                    id,
+                    path: asset_path,
+                } => trxviz_core::data::odx_data::OdxScene::open(&asset_path)
+                    .map_err(|err| err.to_string())
+                    .map(|odx_scene| {
+                        let name = asset_path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "odx".to_string());
+                        self.scene
+                            .odx_files
+                            .push(trxviz_core::data::loaded_files::LoadedOdx {
+                                id,
+                                name,
+                                path: asset_path,
+                                scene: Arc::new(odx_scene),
+                                visible: true,
+                            });
                     }),
             };
 

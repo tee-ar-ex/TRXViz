@@ -35,25 +35,24 @@ pub struct StreamlineResources {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
-    view_proj: [[f32; 4]; 4],
-    camera_pos: [f32; 3],
+    view_proj: [[f32; 4]; 4], // [0..64]
+    camera_pos: [f32; 3],     // [64..76]
     /// 0=flat, 1=illuminated, 2=tubes (unused in line shader), 3=depth_cue
-    render_style: u32,
-    /// Slab clipping axis: 0=X, 1=Y, 2=Z, 3=disabled.
-    slab_axis: u32,
-    slab_min: f32,
-    slab_max: f32,
+    render_style: u32, // [76..80]
+    slab_normal: [f32; 3],    // [80..92]  unit normal to slice plane
+    slab_half_width: f32,     // [92..96]  0 = disabled
+    slab_center: [f32; 3],    // [96..108] world-space point on slice plane
     /// Tube radius (mm). Reused as depth_far for depth-cue mode.
-    tube_radius: f32,
-    ambient_strength: f32,
-    key_strength: f32,
-    fill_strength: f32,
-    headlight_mix: f32,
-    specular_strength: f32,
-    _pad0: [f32; 3],
-    fog_color: [f32; 4],
-    fog_params: [f32; 4],
-    post_params: [f32; 4],
+    tube_radius: f32, // [108..112]
+    ambient_strength: f32,    // [112..116]
+    key_strength: f32,        // [116..120]
+    fill_strength: f32,       // [120..124]
+    headlight_mix: f32,       // [124..128]
+    specular_strength: f32,   // [128..132]
+    _pad0: [f32; 3],          // [132..144]
+    fog_color: [f32; 4],      // [144..160]
+    fog_params: [f32; 4],     // [160..176]
+    post_params: [f32; 4],    // [176..192]
 }
 
 impl StreamlineResources {
@@ -90,9 +89,9 @@ impl StreamlineResources {
             view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(),
             camera_pos: [0.0; 3],
             render_style: 0,
-            slab_axis: 3,
-            slab_min: 0.0,
-            slab_max: 0.0,
+            slab_normal: [0.0, 0.0, 1.0],
+            slab_half_width: 0.0,
+            slab_center: [0.0; 3],
             tube_radius: 0.5,
             ambient_strength: 0.46,
             key_strength: 0.34,
@@ -359,9 +358,9 @@ impl StreamlineResources {
         view_proj: glam::Mat4,
         camera_pos: glam::Vec3,
         render_style: u32,
-        slab_axis: u32,
-        slab_min: f32,
-        slab_max: f32,
+        slab_normal: glam::Vec3,
+        slab_center: glam::Vec3,
+        slab_half_width: f32,
         tube_radius: f32,
         scene_lighting: SceneLightingParams,
         render_3d: &WorkflowRender3D,
@@ -372,9 +371,9 @@ impl StreamlineResources {
             view_proj: view_proj.to_cols_array_2d(),
             camera_pos: camera_pos.into(),
             render_style,
-            slab_axis,
-            slab_min,
-            slab_max,
+            slab_normal: slab_normal.into(),
+            slab_half_width,
+            slab_center: slab_center.into(),
             tube_radius,
             ambient_strength: scene_lighting.ambient_strength(),
             key_strength: scene_lighting.key_strength(),

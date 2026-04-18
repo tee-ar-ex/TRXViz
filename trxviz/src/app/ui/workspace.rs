@@ -137,6 +137,16 @@ impl super::super::TrxVizApp {
                             self.workflow.selection = Some(WorkflowSelection::Asset(*id));
                         }
                     }
+                    workflow::WorkflowAssetDocument::Odx { id, path, .. } => {
+                        let selected =
+                            self.workflow.selection == Some(WorkflowSelection::Asset(*id));
+                        if ui
+                            .selectable_label(selected, format!("ODX\n{}", path.display()))
+                            .clicked()
+                        {
+                            self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                        }
+                    }
                 }
                 ui.add_space(6.0);
             }
@@ -363,6 +373,23 @@ impl super::super::TrxVizApp {
             return;
         };
 
+        // Snapshot the loaded ODX's DPV/DPF name lists so the inspector can render
+        // a dropdown while the workflow graph is borrowed mutably below.
+        let (odx_dpv_names, odx_dpf_names): (Vec<String>, Vec<String>) =
+            match self.scene.odx_scene.as_ref() {
+                Some(scene) => {
+                    let dpv = scene.dpv_names().iter().map(|s| s.to_string()).collect();
+                    let dpf = scene
+                        .dataset()
+                        .dpf_names()
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect();
+                    (dpv, dpf)
+                }
+                None => (Vec::new(), Vec::new()),
+            };
+
         let mut save_now = false;
         let node_changed = {
             let node = self
@@ -548,7 +575,9 @@ impl super::super::TrxVizApp {
                             );
                             ui.checkbox(&mut layer.use_label_colors, "Use label table colors");
                             if layer.use_label_colors {
-                                ui.small("Label overlays use the attached label-table RGBA colors.");
+                                ui.small(
+                                    "Label overlays use the attached label-table RGBA colors.",
+                                );
                             }
                             ui.add_enabled_ui(!layer.use_label_colors, |ui| {
                                 show_surface_colormap_picker(
@@ -857,6 +886,192 @@ impl super::super::TrxVizApp {
                         ui.small("Connect a streamline input to enable export.");
                     }
                 }
+                workflow::WorkflowNodeKind::OdfGlyphRenderer {
+                    scale,
+                    opacity,
+                    offset_from_slice,
+                    gloss,
+                    vertex_colormap,
+                    slice_axis,
+                    opacity_gate,
+                    size_gate,
+                    visible,
+                } => {
+                    ui.checkbox(visible, "Visible");
+                    ui.add(egui::Slider::new(scale, 0.1..=5.0).text("Scale"));
+                    ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
+                    ui.add(egui::Slider::new(gloss, 0.0..=1.0).text("Gloss"));
+                    ui.add(
+                        egui::DragValue::new(offset_from_slice)
+                            .speed(0.25)
+                            .prefix("Slice offset "),
+                    );
+                    egui::ComboBox::from_id_salt(format!("glyph_colormap_{}", node_uuid.0))
+                        .selected_text(format!("{vertex_colormap:?}"))
+                        .show_ui(ui, |ui| {
+                            for value in [
+                                workflow::GlyphColormap::Directional,
+                                workflow::GlyphColormap::Plasma,
+                                workflow::GlyphColormap::Viridis,
+                                workflow::GlyphColormap::Inferno,
+                                workflow::GlyphColormap::BlueWhiteRed,
+                            ] {
+                                ui.selectable_value(vertex_colormap, value, format!("{value:?}"));
+                            }
+                        });
+                    egui::ComboBox::from_id_salt(format!("glyph_slice_axis_{}", node_uuid.0))
+                        .selected_text(slice_axis.label())
+                        .show_ui(ui, |ui| {
+                            for value in [
+                                workflow::WorkflowSliceViewKind::Axial,
+                                workflow::WorkflowSliceViewKind::Coronal,
+                                workflow::WorkflowSliceViewKind::Sagittal,
+                            ] {
+                                ui.selectable_value(slice_axis, value, value.label());
+                            }
+                        });
+                    ui.collapsing("Opacity gate (VolumeScalars input)", |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::DragValue::new(&mut opacity_gate.range.0)
+                                    .speed(0.01)
+                                    .prefix("Min "),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut opacity_gate.range.1)
+                                    .speed(0.01)
+                                    .prefix("Max "),
+                            );
+                        });
+                        ui.add(egui::Slider::new(&mut opacity_gate.below, 0.0..=1.0).text("Below"));
+                        ui.add(egui::Slider::new(&mut opacity_gate.above, 0.0..=1.0).text("Above"));
+                    });
+                    ui.collapsing("Size gate (VolumeScalars input)", |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::DragValue::new(&mut size_gate.range.0)
+                                    .speed(0.01)
+                                    .prefix("Min "),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut size_gate.range.1)
+                                    .speed(0.01)
+                                    .prefix("Max "),
+                            );
+                        });
+                        ui.add(
+                            egui::Slider::new(&mut size_gate.min_scale, 0.0..=5.0)
+                                .text("Below scale"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut size_gate.max_scale, 0.0..=5.0)
+                                .text("Above scale"),
+                        );
+                    });
+                }
+                workflow::WorkflowNodeKind::Fixel3DDisplay {
+                    line_width,
+                    length_scale,
+                    opacity,
+                    offset_from_slice,
+                    visible,
+                } => {
+                    ui.checkbox(visible, "Visible");
+                    ui.add(egui::Slider::new(line_width, 0.001..=0.05).text("Line width"));
+                    ui.add(egui::Slider::new(length_scale, 0.1..=5.0).text("Length scale"));
+                    ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
+                    ui.add(
+                        egui::DragValue::new(offset_from_slice)
+                            .speed(0.25)
+                            .prefix("Slice offset "),
+                    );
+                }
+                workflow::WorkflowNodeKind::Fixel2DDisplay {
+                    line_width,
+                    opacity,
+                    slab_thickness_mm,
+                    length_scale,
+                    visible,
+                } => {
+                    ui.checkbox(visible, "Visible");
+                    ui.add(egui::Slider::new(line_width, 0.001..=0.05).text("Line width"));
+                    ui.add(egui::Slider::new(length_scale, 0.1..=5.0).text("Length scale"));
+                    ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
+                    ui.add(
+                        egui::Slider::new(slab_thickness_mm, 0.1..=20.0)
+                            .text("Slab thickness (mm)"),
+                    );
+                }
+                workflow::WorkflowNodeKind::OdxFixelScalarSelect { dpf_name } => {
+                    ui.label("DPF");
+                    let label = if dpf_name.is_empty() {
+                        "<none>".to_string()
+                    } else {
+                        dpf_name.clone()
+                    };
+                    egui::ComboBox::from_id_salt(format!("dpf_select_{}", node_uuid.0))
+                        .selected_text(label)
+                        .show_ui(ui, |ui| {
+                            if odx_dpf_names.is_empty() {
+                                ui.small("No DPFs available — load an ODX file first.");
+                            } else {
+                                for name in &odx_dpf_names {
+                                    ui.selectable_value(dpf_name, name.clone(), name);
+                                }
+                            }
+                        });
+                }
+                workflow::WorkflowNodeKind::OdxVolumeSelect { dpv_name } => {
+                    ui.label("DPV");
+                    let label = if dpv_name.is_empty() {
+                        "<none>".to_string()
+                    } else {
+                        dpv_name.clone()
+                    };
+                    egui::ComboBox::from_id_salt(format!("dpv_select_{}", node_uuid.0))
+                        .selected_text(label)
+                        .show_ui(ui, |ui| {
+                            if odx_dpv_names.is_empty() {
+                                ui.small("No DPVs available — load an ODX file first.");
+                            } else {
+                                for name in &odx_dpv_names {
+                                    ui.selectable_value(dpv_name, name.clone(), name);
+                                }
+                            }
+                        });
+                }
+                workflow::WorkflowNodeKind::ColorByFixelScalars {
+                    colormap,
+                    range,
+                    length_scale_by_scalar: _,
+                } => {
+                    egui::ComboBox::from_id_salt(("fixel_cmap", node_uuid))
+                        .selected_text(surface_colormap_label(*colormap))
+                        .show_ui(ui, |ui| {
+                            for cm in [
+                                SurfaceColormap::BlueWhiteRed,
+                                SurfaceColormap::Viridis,
+                                SurfaceColormap::Inferno,
+                            ] {
+                                ui.selectable_value(colormap, cm, surface_colormap_label(cm));
+                            }
+                        });
+                    let mut custom_range = range.is_some();
+                    if ui
+                        .checkbox(&mut custom_range, "Override scalar range")
+                        .changed()
+                    {
+                        *range = if custom_range { Some((0.0, 1.0)) } else { None };
+                    }
+                    if let Some((lo, hi)) = range.as_mut() {
+                        ui.horizontal(|ui| {
+                            ui.label("min");
+                            ui.add(egui::DragValue::new(lo).speed(0.01));
+                            ui.label("max");
+                            ui.add(egui::DragValue::new(hi).speed(0.01));
+                        });
+                    }
+                }
                 _ => {
                     ui.small("This node has no editable parameters yet.");
                 }
@@ -907,7 +1122,7 @@ impl super::super::TrxVizApp {
             {
                 info.value = node_copy.clone();
             }
-            if is_render_only_change(&original_node.kind, &node_copy.kind) {
+            if workflow::is_render_only_change(&original_node.kind, &node_copy.kind) {
                 self.mark_render_only_edit();
             } else {
                 self.mark_workflow_semantic_edit(ui.ctx().input(|input| input.time));
@@ -917,105 +1132,6 @@ impl super::super::TrxVizApp {
 
     fn show_preview_pane(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.show_embedded_preview(ui);
-    }
-}
-
-/// Returns `true` when the only difference between `before` and `after` is in
-/// parameters that are render-only (GPU uniforms / visibility flags). These
-/// changes can be applied immediately via `mark_render_only_edit` without
-/// touching `document_revision` or triggering the expensive-job machinery.
-///
-/// Returns `false` for any change that may affect a fingerprinted computation
-/// (mesh geometry, colormap baking, scalar projection, etc.), which must go
-/// through `mark_workflow_semantic_edit`.
-fn is_render_only_change(
-    before: &workflow::WorkflowNodeKind,
-    after: &workflow::WorkflowNodeKind,
-) -> bool {
-    use workflow::WorkflowNodeKind as K;
-    match (before, after) {
-        // All VolumeDisplay params are consumed as GPU uniforms every frame.
-        (K::VolumeDisplay { .. }, K::VolumeDisplay { .. }) => true,
-
-        // All BoundaryGlyphDisplay params are consumed as GPU uniforms / draw
-        // settings every frame (no mesh rebuild).
-        (K::BoundaryGlyphDisplay { .. }, K::BoundaryGlyphDisplay { .. }) => true,
-
-        // All SurfaceDisplay params feed directly into SurfaceDrawPlan which is
-        // read from the scene plan every frame. No expensive job exists for this node.
-        (K::SurfaceDisplay { .. }, K::SurfaceDisplay { .. }) => true,
-
-        // StreamlineDisplay: enabled and slab_half_width_mm are render-only (visibility
-        // toggle and shader clipping uniform). render_style / tube geometry params are
-        // compute (may trigger TubeGeometry job).
-        (
-            K::StreamlineDisplay {
-                enabled: e1,
-                render_style: rs1,
-                tube_radius_mm: tr1,
-                tube_sides: ts1,
-                slab_half_width_mm: sw1,
-            },
-            K::StreamlineDisplay {
-                enabled: e2,
-                render_style: rs2,
-                tube_radius_mm: tr2,
-                tube_sides: ts2,
-                slab_half_width_mm: sw2,
-            },
-        ) => {
-            // Render-only iff the compute params (render_style, tube geometry) are
-            // unchanged. The only remaining mutable params are enabled and
-            // slab_half_width_mm, which are consumed as GPU uniforms each frame.
-            // (node_changed is already true at the call site, so we don't need to
-            // assert that something actually did differ.)
-            let _ = (e1, e2, sw1, sw2); // explicitly acknowledged as render-only
-            rs1 == rs2 && tr1 == tr2 && ts1 == ts2
-        }
-
-        // BundleSurfaceBuild: opacity is a render-only GPU uniform (excluded from the
-        // build fingerprint after the Task 1 fix). All other params affect mesh geometry.
-        (
-            K::BundleSurfaceBuild {
-                per_group: pg1,
-                build_mode: bm1,
-                voxel_size_mm: vs1,
-                threshold: t1,
-                smooth_sigma: ss1,
-                min_component_volume_mm3: mc1,
-                tube_radius_mm: tr1,
-                tube_sides: ts1,
-                opacity: _,
-            },
-            K::BundleSurfaceBuild {
-                per_group: pg2,
-                build_mode: bm2,
-                voxel_size_mm: vs2,
-                threshold: t2,
-                smooth_sigma: ss2,
-                min_component_volume_mm3: mc2,
-                tube_radius_mm: tr2,
-                tube_sides: ts2,
-                opacity: _,
-            },
-        ) => {
-            // Only render-only if every compute param is unchanged.
-            pg1 == pg2
-                && bm1 == bm2
-                && vs1 == vs2
-                && t1 == t2
-                && ss1 == ss2
-                && mc1 == mc2
-                && tr1 == tr2
-                && ts1 == ts2
-        }
-
-        // ParcellationDisplay: both params (labels and opacity) go straight to the
-        // scene plan, no expensive computation.
-        (K::ParcellationDisplay { .. }, K::ParcellationDisplay { .. }) => true,
-
-        // All other variants either have no parameters or contain compute params.
-        _ => false,
     }
 }
 

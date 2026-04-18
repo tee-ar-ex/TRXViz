@@ -3,56 +3,36 @@ struct Uniforms {
     camera_pos: vec3<f32>,
     slab_half_width: f32,   // 0 = disabled
     slab_normal: vec3<f32>, // unit normal to slice plane
-    color_mode: u32,
-    slab_center: vec3<f32>, // world-space point on slice plane
     draw_step: u32,
+    slab_center: vec3<f32>, // world-space point on slice plane
+    line_width: f32,
     ambient_strength: f32,
     key_strength: f32,
     fill_strength: f32,
-    headlight_mix: f32,
-    specular_strength: f32,
     opacity: f32,
-    gloss: f32,
-    scale_mul: f32,
     fog_color: vec4<f32>,
     fog_params: vec4<f32>,
     post_params: vec4<f32>,
-    opacity_gate: vec4<f32>,
-    size_gate: vec4<f32>,
-}
-
-struct Amplitudes {
-    values: array<f32>,
-}
-
-struct GateSamples {
-    values: array<f32>,
+    color_params: vec4<f32>, // x=colormap u32-as-f32, y=scalar_min, z=scalar_max, w=reserved
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage, read> amplitudes: Amplitudes;
-@group(0) @binding(2) var<storage, read> opacity_samples: GateSamples;
-@group(0) @binding(3) var<storage, read> size_samples: GateSamples;
 
 struct VertexInput {
-    @location(0) direction: vec3<f32>,
+    @location(0) quad_pos: vec2<f32>,
     @location(1) center: vec3<f32>,
-    @location(2) scale: f32,
-    @location(3) amplitude_offset: u32,
-    @location(4) min_contacts: u32,
-    @location(5) contact_count: u32,
-    @builtin(vertex_index) vertex_index: u32,
+    @location(2) direction: vec3<f32>,
+    @location(3) length: f32,
+    @location(4) scalar: f32,
     @builtin(instance_index) instance_index: u32,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) world_pos: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) color: vec3<f32>,
-    @location(3) center: vec3<f32>,
-    @location(4) draw_alpha: f32,
-    @location(5) ndc_xy: vec2<f32>,
+    @location(0) color: vec3<f32>,
+    @location(1) center: vec3<f32>,
+    @location(2) draw_alpha: f32,
+    @location(3) ndc_xy: vec2<f32>,
 }
 
 fn palette_plasma(t: f32) -> vec3<f32> {
@@ -108,51 +88,51 @@ fn sample_palette(mode: u32, t: f32) -> vec3<f32> {
     return palette_bwr(t);
 }
 
-fn gate_factor(sample: f32, params: vec4<f32>) -> f32 {
-    // Treat NaN/Inf samples (our sentinel for "no scalars connected") as gate-disabled.
-    // Direct `sample != sample` can be folded away under fast-math on some backends,
-    // so inspect the bit pattern: exponent all-1s means NaN or Inf.
-    let bits = bitcast<u32>(sample);
-    if (bits & 0x7F800000u) == 0x7F800000u {
-        return 1.0;
-    }
-    let lo = params.x;
-    let hi = params.y;
-    if sample <= lo {
-        return params.z;
-    }
-    if sample >= hi {
-        return params.w;
-    }
-    let t = clamp((sample - lo) / max(hi - lo, 1e-6), 0.0, 1.0);
-    return mix(params.z, params.w, t);
-}
-
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let amp = amplitudes.values[in.amplitude_offset + in.vertex_index];
-    let sm = select(1.0, uniforms.scale_mul, uniforms.scale_mul > 0.0);
-    let size_factor = gate_factor(size_samples.values[in.instance_index], uniforms.size_gate);
-    let world = in.center + in.direction * amp * in.scale * sm * size_factor;
-    out.clip_position = uniforms.view_proj * vec4<f32>(world, 1.0);
-    out.world_pos = world;
-    out.normal = normalize(in.direction);
-    if uniforms.color_mode == 0u {
+
+    let lm = select(1.0, uniforms.post_params.w, uniforms.post_params.w > 0.0);
+    let eff_len = in.length * lm;
+    let along = in.direction * eff_len * in.quad_pos.x;
+    let world = in.center + along;
+
+    let clip = uniforms.view_proj * vec4<f32>(world, 1.0);
+    let clip_end = uniforms.view_proj * vec4<f32>(in.center + in.direction * eff_len, 1.0);
+    let clip_start = uniforms.view_proj * vec4<f32>(in.center - in.direction * eff_len, 1.0);
+
+    let ndc_a = clip_start.xy / clip_start.w;
+    let ndc_b = clip_end.xy / clip_end.w;
+    let screen_dir = normalize(ndc_b - ndc_a);
+    let perp = vec2<f32>(-screen_dir.y, screen_dir.x);
+
+    var final_clip = clip;
+    final_clip = vec4<f32>(
+        final_clip.x + perp.x * in.quad_pos.y * uniforms.line_width * final_clip.w,
+        final_clip.y + perp.y * in.quad_pos.y * uniforms.line_width * final_clip.w,
+        final_clip.z,
+        final_clip.w,
+    );
+
+    out.clip_position = final_clip;
+
+    let cmap = u32(uniforms.color_params.x);
+    if cmap == 0u {
         out.color = abs(in.direction);
-    } else if uniforms.color_mode == 1u {
-        out.color = vec3<f32>(0.92, 0.92, 0.92);
     } else {
-        let an = select(1.0, uniforms.post_params.w, uniforms.post_params.w > 0.0);
-        out.color = sample_palette(uniforms.color_mode, clamp(amp / an, 0.0, 1.0));
+        let lo = uniforms.color_params.y;
+        let hi = uniforms.color_params.z;
+        let denom = max(hi - lo, 1e-6);
+        let t = clamp((in.scalar - lo) / denom, 0.0, 1.0);
+        out.color = sample_palette(cmap, t);
     }
     out.center = in.center;
-    out.draw_alpha = select(0.0, 1.0, in.contact_count >= in.min_contacts);
-    out.draw_alpha *= gate_factor(opacity_samples.values[in.instance_index], uniforms.opacity_gate);
+    out.draw_alpha = 1.0;
+
     if uniforms.draw_step > 1u && (in.instance_index % uniforms.draw_step) != 0u {
         out.draw_alpha = 0.0;
     }
-    out.ndc_xy = out.clip_position.xy / out.clip_position.w;
+    out.ndc_xy = final_clip.xy / final_clip.w;
     return out;
 }
 
@@ -184,7 +164,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if in.draw_alpha <= 0.0 {
         discard;
     }
-    // Slab clipping: plane-distance test (works for oblique slices).
     if uniforms.slab_half_width > 0.0 {
         let dist = dot(in.center - uniforms.slab_center, uniforms.slab_normal);
         if abs(dist) > uniforms.slab_half_width {
@@ -192,21 +171,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    var lit = in.color;
-    if uniforms.ambient_strength < 0.999 {
-        let n = normalize(in.normal);
-        let view_dir = normalize(uniforms.camera_pos - in.world_pos);
-        let key = max(dot(n, normalize(vec3<f32>(0.45, 0.55, 1.0))), 0.0);
-        let fill = max(dot(n, normalize(vec3<f32>(-0.7, 0.2, 0.65))), 0.0);
-        let head = max(dot(n, view_dir), 0.0);
-        let shiny = 4.0 + uniforms.gloss * 60.0;
-        let spec = pow(head, shiny) * (uniforms.specular_strength + uniforms.gloss);
-        let shade = uniforms.ambient_strength
-            + uniforms.key_strength * key
-            + uniforms.fill_strength * fill
-            + uniforms.headlight_mix * head;
-        lit = in.color * shade + vec3<f32>(spec);
-    }
-    let faded = apply_depth_fade(lit, in.world_pos);
+    let lit = in.color * (uniforms.ambient_strength + uniforms.key_strength);
+    let faded = apply_depth_fade(lit, in.center);
     return vec4<f32>(apply_post_color(faded, in.ndc_xy), uniforms.opacity);
 }
