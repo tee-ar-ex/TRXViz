@@ -1,11 +1,8 @@
-use std::collections::BTreeSet;
-
 use crate::app::workflow::{
-    SimpleDisplayBinding, SimpleStreamlineBinding, WorkflowAssetDocument, WorkflowEditability,
-    WorkflowNodeKind, WorkflowNodeUuid, classify_workflow_editability,
+    self, SimpleDisplayBinding, SimpleStreamlineBinding, SimpleSurfaceBinding,
+    WorkflowAssetDocument, WorkflowNodeKind, WorkflowNodeUuid, classify_workflow_editability,
 };
 use trxviz_core::data::loaded_files::VolumeColormap;
-use trxviz_core::data::trx_data::RenderStyle;
 
 impl super::super::TrxVizApp {
     pub(in crate::app) fn show_simple_shell(&mut self, ctx: &egui::Context) -> bool {
@@ -28,10 +25,12 @@ impl super::super::TrxVizApp {
                     ui.add_space(8.0);
                     self.show_messages(ui);
 
-                    if let Some(reason) = editability.reason() {
+                    if editability.has_read_only_assets() {
                         egui::Frame::group(ui.style()).show(ui, |ui| {
-                            ui.strong("Advanced workflow loaded");
-                            ui.small(reason);
+                            ui.strong("Some workflow branches are Advanced-only");
+                            if let Some(reason) = editability.first_reason() {
+                                ui.small(reason);
+                            }
                             if ui.button("Switch to Advanced").clicked() {
                                 self.ui_mode = crate::app::state::UiMode::Advanced;
                             }
@@ -44,103 +43,71 @@ impl super::super::TrxVizApp {
                         return;
                     }
 
-                    if let Some(ref name) = self.odx_name.clone() {
-                        let label = truncate_simple_label(name, 36);
-                        egui::CollapsingHeader::new(label)
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                ui.checkbox(&mut self.odx_show_glyphs, "ODF Glyphs (3D view)");
-                                ui.checkbox(&mut self.odx_show_fixels, "Fixels (slice views)");
-                            });
-                        ui.add_space(4.0);
-                    }
-
                     for asset in assets {
-                        match (&editability, asset) {
-                            (
-                                WorkflowEditability::Simple(bindings),
-                                WorkflowAssetDocument::Streamlines { id, .. },
-                            ) => {
-                                if let Some(binding) = bindings.streamline.get(&id).copied() {
-                                    self.show_simple_streamline_asset(ui, id, binding, false);
+                        match asset {
+                            WorkflowAssetDocument::Streamlines { id, .. } => {
+                                if let Some(binding) = editability.bindings.streamline.get(&id).copied()
+                                {
+                                    self.show_simple_streamline_asset(ui, id, binding, None);
                                 } else {
-                                    self.show_simple_streamline_summary(ui, id);
+                                    self.show_simple_streamline_asset(
+                                        ui,
+                                        id,
+                                        self.fallback_streamline_binding(id),
+                                        editability.reason_for(id),
+                                    );
                                 }
                             }
-                            (
-                                WorkflowEditability::Simple(bindings),
-                                WorkflowAssetDocument::Volume { id, .. },
-                            ) => {
-                                if let Some(binding) = bindings.volume.get(&id).copied() {
-                                    self.show_simple_volume_asset(ui, id, binding, false);
+                            WorkflowAssetDocument::Volume { id, .. } => {
+                                if let Some(binding) = editability.bindings.volume.get(&id).copied() {
+                                    self.show_simple_volume_asset(ui, id, binding, None);
                                 } else {
-                                    self.show_simple_volume_summary(ui, id);
+                                    self.show_simple_volume_asset(
+                                        ui,
+                                        id,
+                                        self.fallback_display_binding(id),
+                                        editability.reason_for(id),
+                                    );
                                 }
                             }
-                            (
-                                WorkflowEditability::Simple(bindings),
-                                WorkflowAssetDocument::Surface { id, .. },
-                            ) => {
-                                if let Some(binding) = bindings.surface.get(&id).copied() {
-                                    self.show_simple_surface_asset(ui, id, binding, false);
+                            WorkflowAssetDocument::Surface { id, .. } => {
+                                if let Some(binding) = editability.bindings.surface.get(&id).copied() {
+                                    self.show_simple_surface_asset(ui, id, binding, None);
                                 } else {
-                                    self.show_simple_surface_summary(ui, id);
+                                    self.show_simple_surface_asset(
+                                        ui,
+                                        id,
+                                        self.fallback_surface_binding(id),
+                                        editability.reason_for(id),
+                                    );
                                 }
                             }
-                            (
-                                WorkflowEditability::Simple(bindings),
-                                WorkflowAssetDocument::Parcellation { id, .. },
-                            ) => {
-                                if let Some(binding) = bindings.parcellation.get(&id).copied() {
-                                    self.show_simple_parcellation_asset(ui, id, binding, false);
+                            WorkflowAssetDocument::Parcellation { id, .. } => {
+                                if let Some(binding) =
+                                    editability.bindings.parcellation.get(&id).copied()
+                                {
+                                    self.show_simple_parcellation_asset(ui, id, binding, None);
                                 } else {
-                                    self.show_simple_parcellation_summary(ui, id);
+                                    self.show_simple_parcellation_asset(
+                                        ui,
+                                        id,
+                                        self.fallback_display_binding(id),
+                                        editability.reason_for(id),
+                                    );
                                 }
                             }
-                            (_, WorkflowAssetDocument::Cifti { id, path, .. }) => {
+                            WorkflowAssetDocument::Cifti { id, path, .. } => {
                                 ui.group(|ui| {
                                     ui.strong(format!("CIFTI {}", id));
                                     ui.small(path.display().to_string());
-                                    ui.small("CIFTI assets are available in Advanced mode.");
+                                    show_advanced_only_reason(ui, editability.reason_for(id));
                                 });
                             }
-                            (_, WorkflowAssetDocument::Streamlines { id, .. }) => {
-                                self.show_simple_streamline_asset(
-                                    ui,
-                                    id,
-                                    self.fallback_streamline_binding(id),
-                                    true,
-                                );
-                            }
-                            (_, WorkflowAssetDocument::Volume { id, .. }) => {
-                                self.show_simple_volume_asset(
-                                    ui,
-                                    id,
-                                    self.fallback_display_binding(id),
-                                    true,
-                                );
-                            }
-                            (_, WorkflowAssetDocument::Surface { id, .. }) => {
-                                self.show_simple_surface_asset(
-                                    ui,
-                                    id,
-                                    self.fallback_display_binding(id),
-                                    true,
-                                );
-                            }
-                            (_, WorkflowAssetDocument::Parcellation { id, .. }) => {
-                                self.show_simple_parcellation_asset(
-                                    ui,
-                                    id,
-                                    self.fallback_display_binding(id),
-                                    true,
-                                );
-                            }
-                            (_, WorkflowAssetDocument::Odx { id, path, .. }) => {
+                            WorkflowAssetDocument::Odx { id, path, .. } => {
                                 ui.group(|ui| {
                                     ui.strong(format!("ODX {}", id));
                                     ui.small(path.display().to_string());
-                                    ui.small("ODX assets are available in Advanced mode.");
+                                    show_advanced_only_reason(ui, editability.reason_for(id));
                                 });
                             }
                         }
@@ -224,7 +191,7 @@ impl super::super::TrxVizApp {
         ui: &mut egui::Ui,
         id: usize,
         binding: SimpleStreamlineBinding,
-        read_only: bool,
+        read_only_reason: Option<&str>,
     ) {
         let Some(trx) = self.scene.trx_files.iter().find(|asset| asset.id == id) else {
             return;
@@ -235,15 +202,9 @@ impl super::super::TrxVizApp {
         let nb_vertices = trx.data.nb_vertices;
         let group_count = trx.data.groups.len();
         let import_warnings = trx.import_warnings.clone();
-        let available_groups = self
-            .workflow
-            .runtime
-            .node_state
-            .get(&binding.source)
-            .map(|state| state.available_streamline_groups.clone())
-            .unwrap_or_default();
 
         egui::CollapsingHeader::new(title)
+            .id_salt(("simple_streamline_asset", id))
             .default_open(true)
             .show(ui, |ui| {
                 ui.small(path);
@@ -253,52 +214,27 @@ impl super::super::TrxVizApp {
                 for warning in &import_warnings {
                     ui.colored_label(egui::Color32::from_rgb(255, 214, 102), warning);
                 }
-                if read_only {
-                    ui.small("Switch to Advanced mode to edit this workflow.");
+                if let Some(reason) = read_only_reason {
+                    show_advanced_only_reason(ui, Some(reason));
                     return;
                 }
 
+                let original_kind = self.workflow_node_kind(binding.display).cloned();
                 if let Some(WorkflowNodeKind::StreamlineDisplay {
                     enabled,
-                    render_style,
-                    tube_radius_mm: _,
-                    tube_sides: _,
-                    slab_half_width_mm: _,
+                    slab_half_width_mm,
+                    ..
                 }) = self.workflow_node_kind_mut(binding.display)
                 {
                     ui.checkbox(enabled, "Visible");
-                    render_style_picker(ui, render_style, "simple_render_style", binding.display);
+                    ui
+                        .add(
+                            egui::Slider::new(slab_half_width_mm, 0.0..=50.0)
+                                .text("Slice slab half-width"),
+                        );
                 }
-
-                if let Some(WorkflowNodeKind::LimitStreamlines { limit, .. }) =
-                    self.workflow_node_kind_mut(binding.limit)
-                {
-                    ui.add(egui::Slider::new(limit, 1..=nb_streamlines.max(1)).text("Limit"));
-                }
-
-                if let Some(kind) = self.workflow_node_kind_mut(binding.color) {
-                    let mut mode = simple_color_mode(kind);
-                    egui::ComboBox::from_id_salt(("simple_color_mode", binding.color.0))
-                        .selected_text(mode.label())
-                        .show_ui(ui, |ui| {
-                            for choice in SimpleColorMode::ALL {
-                                ui.selectable_value(&mut mode, choice, choice.label());
-                            }
-                        });
-                    apply_simple_color_mode(kind, mode);
-                    if let WorkflowNodeKind::UniformColor { color } = kind {
-                        ui.color_edit_button_rgba_unmultiplied(color);
-                    }
-                }
-
-                if !available_groups.is_empty() {
-                    ui.separator();
-                    ui.label("Groups");
-                    if let Some(WorkflowNodeKind::GroupSelect { groups_csv }) =
-                        self.workflow_node_kind_mut(binding.group_select)
-                    {
-                        show_group_toggle_list(ui, groups_csv, &available_groups);
-                    }
+                if let Some(original_kind) = original_kind {
+                    self.finish_simple_render_only_edit(binding.display, original_kind);
                 }
             });
     }
@@ -308,7 +244,7 @@ impl super::super::TrxVizApp {
         ui: &mut egui::Ui,
         id: usize,
         binding: SimpleDisplayBinding,
-        read_only: bool,
+        read_only_reason: Option<&str>,
     ) {
         let Some(volume) = self.scene.nifti_files.iter().find(|asset| asset.id == id) else {
             return;
@@ -316,14 +252,16 @@ impl super::super::TrxVizApp {
         let name = truncate_simple_label(&volume.name, 36);
         let dims = volume.volume.dims;
         egui::CollapsingHeader::new(name)
+            .id_salt(("simple_volume_asset", id))
             .default_open(true)
             .show(ui, |ui| {
                 ui.small(format!("{} x {} x {}", dims[0], dims[1], dims[2]));
-                if read_only {
-                    ui.small("Switch to Advanced mode to edit this workflow.");
+                if let Some(reason) = read_only_reason {
+                    show_advanced_only_reason(ui, Some(reason));
                     return;
                 }
 
+                let original_kind = self.workflow_node_kind(binding.display).cloned();
                 if let Some(WorkflowNodeKind::VolumeDisplay {
                     colormap,
                     opacity,
@@ -343,6 +281,9 @@ impl super::super::TrxVizApp {
                     ui.add(egui::Slider::new(window_center, 0.0..=1.0).text("Window center"));
                     ui.add(egui::Slider::new(window_width, 0.01..=2.0).text("Window width"));
                 }
+                if let Some(original_kind) = original_kind {
+                    self.finish_simple_render_only_edit(binding.display, original_kind);
+                }
             });
     }
 
@@ -350,8 +291,8 @@ impl super::super::TrxVizApp {
         &mut self,
         ui: &mut egui::Ui,
         id: usize,
-        binding: SimpleDisplayBinding,
-        read_only: bool,
+        binding: SimpleSurfaceBinding,
+        read_only_reason: Option<&str>,
     ) {
         let Some(surface) = self
             .scene
@@ -366,23 +307,89 @@ impl super::super::TrxVizApp {
         let vertex_count = surface.data.vertices.len();
         let triangle_count = surface.data.indices.len() / 3;
         egui::CollapsingHeader::new(name)
+            .id_salt(("simple_surface_asset", id))
             .default_open(false)
             .show(ui, |ui| {
                 ui.small(path.clone());
                 ui.small(format!(
                     "{vertex_count} vertices, {triangle_count} triangles"
                 ));
-                if read_only {
-                    ui.small("Switch to Advanced mode to edit this workflow.");
+                if let Some(reason) = read_only_reason {
+                    show_advanced_only_reason(ui, Some(reason));
                     return;
                 }
 
-                if let Some(WorkflowNodeKind::SurfaceDisplay { color, opacity, .. }) =
+                let original_display = self.workflow_node_kind(binding.display).cloned();
+                let original_overlay =
+                    binding.overlay_stack.and_then(|uuid| self.workflow_node_kind(uuid).cloned());
+                if let Some(WorkflowNodeKind::SurfaceDisplay { opacity, .. }) =
                     self.workflow_node_kind_mut(binding.display)
                 {
+                    ui.label("Shared");
                     opacity_checkbox(ui, opacity, "Visible");
+                }
+                let mesh_style_uses_overlay = if let Some(overlay_uuid) = binding.overlay_stack {
+                    if let Some(WorkflowNodeKind::SurfaceOverlayStack { layers }) =
+                        self.workflow_node_kind_mut(overlay_uuid)
+                    {
+                        if let Some(base) = layers.first_mut() {
+                            ui.separator();
+                            ui.label("3D Mesh");
+                            let mut mesh_rgb = [
+                                base.solid_color[0],
+                                base.solid_color[1],
+                                base.solid_color[2],
+                            ];
+                            if ui.color_edit_button_rgb(&mut mesh_rgb).changed() {
+                                base.solid_color[0] = mesh_rgb[0];
+                                base.solid_color[1] = mesh_rgb[1];
+                                base.solid_color[2] = mesh_rgb[2];
+                            }
+                            ui.add(
+                                egui::Slider::new(&mut base.opacity, 0.0..=1.0)
+                                    .text("Mesh opacity"),
+                            );
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !mesh_style_uses_overlay
+                    && let Some(WorkflowNodeKind::SurfaceDisplay { color, opacity, .. }) =
+                        self.workflow_node_kind_mut(binding.display)
+                {
+                    ui.separator();
+                    ui.label("3D Mesh");
                     ui.color_edit_button_rgb(color);
-                    ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
+                    ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Mesh opacity"));
+                }
+                if let Some(WorkflowNodeKind::SurfaceDisplay {
+                    outline_color,
+                    outline_thickness,
+                    opacity,
+                    ..
+                }) = self.workflow_node_kind_mut(binding.display)
+                {
+                    ui.separator();
+                    ui.label("2D Slice Outline");
+                    ui.color_edit_button_rgb(outline_color);
+                    ui.add(
+                        egui::Slider::new(outline_thickness, 0.25..=8.0).text("Outline thickness"),
+                    );
+                    ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Outline opacity"));
+                }
+                if let Some(original_display) = original_display {
+                    self.finish_simple_render_only_edit(binding.display, original_display);
+                }
+                if let (Some(overlay_uuid), Some(original_overlay)) =
+                    (binding.overlay_stack, original_overlay)
+                {
+                    self.finish_simple_render_only_edit(overlay_uuid, original_overlay);
                 }
             });
     }
@@ -392,7 +399,7 @@ impl super::super::TrxVizApp {
         ui: &mut egui::Ui,
         id: usize,
         binding: SimpleDisplayBinding,
-        read_only: bool,
+        read_only_reason: Option<&str>,
     ) {
         let Some(parcel) = self
             .scene
@@ -413,56 +420,27 @@ impl super::super::TrxVizApp {
             .filter(|label| *label != 0)
             .count();
         egui::CollapsingHeader::new(name)
+            .id_salt(("simple_parcellation_asset", id))
             .default_open(false)
             .show(ui, |ui| {
                 ui.small(path.clone());
                 ui.small(format!("{label_count} labels"));
-                if read_only {
-                    ui.small("Switch to Advanced mode to edit this workflow.");
+                if let Some(reason) = read_only_reason {
+                    show_advanced_only_reason(ui, Some(reason));
                     return;
                 }
 
+                let original_kind = self.workflow_node_kind(binding.display).cloned();
                 if let Some(WorkflowNodeKind::ParcellationDisplay { opacity, .. }) =
                     self.workflow_node_kind_mut(binding.display)
                 {
                     opacity_checkbox(ui, opacity, "Visible");
                     ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
                 }
+                if let Some(original_kind) = original_kind {
+                    self.finish_simple_render_only_edit(binding.display, original_kind);
+                }
             });
-    }
-
-    fn show_simple_streamline_summary(&self, ui: &mut egui::Ui, id: usize) {
-        if let Some(trx) = self.scene.trx_files.iter().find(|asset| asset.id == id) {
-            ui.label(truncate_simple_label(&trx.name, 36));
-        }
-    }
-
-    fn show_simple_volume_summary(&self, ui: &mut egui::Ui, id: usize) {
-        if let Some(volume) = self.scene.nifti_files.iter().find(|asset| asset.id == id) {
-            ui.label(truncate_simple_label(&volume.name, 36));
-        }
-    }
-
-    fn show_simple_surface_summary(&self, ui: &mut egui::Ui, id: usize) {
-        if let Some(surface) = self
-            .scene
-            .gifti_surfaces
-            .iter()
-            .find(|asset| asset.id == id)
-        {
-            ui.label(truncate_simple_label(&surface.name, 36));
-        }
-    }
-
-    fn show_simple_parcellation_summary(&self, ui: &mut egui::Ui, id: usize) {
-        if let Some(parcel) = self
-            .scene
-            .parcellations
-            .iter()
-            .find(|asset| asset.asset.id == id)
-        {
-            ui.label(truncate_simple_label(&parcel.asset.name, 36));
-        }
     }
 
     fn workflow_node_kind_mut(&mut self, uuid: WorkflowNodeUuid) -> Option<&mut WorkflowNodeKind> {
@@ -473,12 +451,45 @@ impl super::super::TrxVizApp {
             .map(|node| &mut node.kind)
     }
 
+    fn workflow_node_kind(&self, uuid: WorkflowNodeUuid) -> Option<&WorkflowNodeKind> {
+        self.workflow.document.graph.get(uuid).map(|node| &node.kind)
+    }
+
+    fn sync_editor_node_from_document(&mut self, node_uuid: WorkflowNodeUuid) {
+        let Some(node_copy) = self.workflow.document.graph.get(node_uuid).cloned() else {
+            return;
+        };
+        if let Some(node_id) = self
+            .workflow
+            .editor_snarl
+            .nodes_ids_data()
+            .find_map(|(id, value)| (value.value.uuid == node_uuid).then_some(id))
+            && let Some(info) = self.workflow.editor_snarl.get_node_info_mut(node_id)
+        {
+            info.value = node_copy;
+        }
+    }
+
+    fn finish_simple_render_only_edit(
+        &mut self,
+        node_uuid: WorkflowNodeUuid,
+        original_kind: WorkflowNodeKind,
+    ) {
+        let Some(current_kind) = self.workflow_node_kind(node_uuid).cloned() else {
+            return;
+        };
+        if current_kind == original_kind {
+            return;
+        }
+        if !workflow::is_render_only_change(&original_kind, &current_kind) {
+            return;
+        }
+        self.sync_editor_node_from_document(node_uuid);
+        self.mark_render_only_edit();
+    }
+
     fn fallback_streamline_binding(&self, _id: usize) -> SimpleStreamlineBinding {
         SimpleStreamlineBinding {
-            source: WorkflowNodeUuid(0),
-            group_select: WorkflowNodeUuid(0),
-            limit: WorkflowNodeUuid(0),
-            color: WorkflowNodeUuid(0),
             display: WorkflowNodeUuid(0),
         }
     }
@@ -488,124 +499,26 @@ impl super::super::TrxVizApp {
             display: WorkflowNodeUuid(0),
         }
     }
-}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SimpleColorMode {
-    Direction,
-    Group,
-    Uniform,
-}
-
-impl SimpleColorMode {
-    const ALL: [Self; 3] = [Self::Direction, Self::Group, Self::Uniform];
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Direction => "Direction",
-            Self::Group => "Group",
-            Self::Uniform => "Uniform",
+    fn fallback_surface_binding(&self, _id: usize) -> SimpleSurfaceBinding {
+        SimpleSurfaceBinding {
+            display: WorkflowNodeUuid(0),
+            overlay_stack: None,
         }
     }
 }
 
-fn simple_color_mode(kind: &WorkflowNodeKind) -> SimpleColorMode {
-    match kind {
-        WorkflowNodeKind::ColorByGroup => SimpleColorMode::Group,
-        WorkflowNodeKind::UniformColor { .. } => SimpleColorMode::Uniform,
-        _ => SimpleColorMode::Direction,
-    }
+fn show_advanced_only_reason(ui: &mut egui::Ui, reason: Option<&str>) {
+    ui.small(reason.unwrap_or("Switch to Advanced mode to edit this workflow."));
 }
 
-fn apply_simple_color_mode(kind: &mut WorkflowNodeKind, mode: SimpleColorMode) {
-    let previous_uniform = match kind {
-        WorkflowNodeKind::UniformColor { color } => *color,
-        _ => [0.95, 0.75, 0.25, 1.0],
-    };
-    *kind = match mode {
-        SimpleColorMode::Direction => WorkflowNodeKind::ColorByDirection,
-        SimpleColorMode::Group => WorkflowNodeKind::ColorByGroup,
-        SimpleColorMode::Uniform => WorkflowNodeKind::UniformColor {
-            color: previous_uniform,
-        },
-    };
-}
-
-fn render_style_picker(
-    ui: &mut egui::Ui,
-    render_style: &mut RenderStyle,
-    id_salt: &'static str,
-    node_uuid: WorkflowNodeUuid,
-) {
-    egui::ComboBox::from_id_salt((id_salt, node_uuid.0))
-        .selected_text(render_style_label(*render_style))
-        .show_ui(ui, |ui| {
-            for choice in [
-                RenderStyle::Flat,
-                RenderStyle::Illuminated,
-                RenderStyle::DepthCue,
-                RenderStyle::Tubes,
-            ] {
-                ui.selectable_value(render_style, choice, render_style_label(choice));
-            }
-        });
-}
-
-fn render_style_label(style: RenderStyle) -> &'static str {
-    match style {
-        RenderStyle::Flat => "Flat",
-        RenderStyle::Illuminated => "Illuminated",
-        RenderStyle::Tubes => "Tubes",
-        RenderStyle::DepthCue => "Depth cue",
-    }
-}
-
-fn opacity_checkbox(ui: &mut egui::Ui, opacity: &mut f32, label: &str) {
+fn opacity_checkbox(ui: &mut egui::Ui, opacity: &mut f32, label: &str) -> bool {
     let mut visible = *opacity > 0.0;
     if ui.checkbox(&mut visible, label).changed() {
         *opacity = if visible { (*opacity).max(0.75) } else { 0.0 };
+        return true;
     }
-}
-
-fn show_group_toggle_list(ui: &mut egui::Ui, groups_csv: &mut String, available_groups: &[String]) {
-    let mut selected = parse_groups(groups_csv, available_groups);
-    let mut changed = false;
-
-    ui.horizontal(|ui| {
-        if ui.button("All").clicked() {
-            selected = available_groups.iter().cloned().collect();
-            changed = true;
-        }
-        if ui.button("Hide all").clicked() {
-            selected.clear();
-            changed = true;
-        }
-    });
-
-    for group in available_groups {
-        let mut enabled = selected.contains(group);
-        if ui
-            .checkbox(&mut enabled, truncate_simple_label(group, 32))
-            .changed()
-        {
-            changed = true;
-            if enabled {
-                selected.insert(group.clone());
-            } else {
-                selected.remove(group);
-            }
-        }
-    }
-
-    if changed {
-        if selected.len() == available_groups.len() {
-            groups_csv.clear();
-        } else if selected.is_empty() {
-            *groups_csv = "__none__".to_string();
-        } else {
-            *groups_csv = selected.into_iter().collect::<Vec<_>>().join(", ");
-        }
-    }
+    false
 }
 
 fn truncate_simple_label(value: &str, max_chars: usize) -> String {
@@ -621,21 +534,4 @@ fn truncate_simple_label(value: &str, max_chars: usize) -> String {
         .skip(char_count.saturating_sub(keep))
         .collect();
     format!("{prefix}...{suffix}")
-}
-
-fn parse_groups(groups_csv: &str, available_groups: &[String]) -> BTreeSet<String> {
-    if groups_csv.trim() == "__none__" {
-        return BTreeSet::new();
-    }
-    let selected = groups_csv
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .collect::<BTreeSet<_>>();
-    if selected.is_empty() {
-        available_groups.iter().cloned().collect()
-    } else {
-        selected
-    }
 }

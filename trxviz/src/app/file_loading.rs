@@ -780,6 +780,13 @@ impl super::TrxVizApp {
                 self.viewport.slice_world_offsets[0] = w.z;
             }
         }
+        if scene.glyph_source_kind()
+            == Some(trxviz_core::data::odx_data::OdxGlyphSourceKind::Odf)
+            && let Some(rows_per_chunk) = scene
+                .odf_rows_per_chunk(rs.device.limits().max_storage_buffer_binding_size as usize)
+        {
+            scene.prewarm_odf_slice_metadata(2, self.viewport.slice_indices[0] as u32, rows_per_chunk);
+        }
         // Upload ALL fixels — the 2D slice views slab-clip in the shader so only
         // the fixels on the current slice are visible, no CPU re-upload needed.
         let fixel_instances = scene.all_fixels();
@@ -820,14 +827,11 @@ impl super::TrxVizApp {
             );
         }
 
-        // Record display name and enable both renderers by default.
+        // Record display name for the asset we register below.
         let display_name = _path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "ODX".to_string());
-        self.odx_name = Some(display_name.clone());
-        self.odx_show_glyphs = true;
-        self.odx_show_fixels = true;
 
         // Register as a workflow asset so the graph seeds OdxSource with the
         // Fixel3D / Fixel2D / OdfGlyph / OdxVolumeSelect→VolumeDisplay chain.
@@ -841,7 +845,15 @@ impl super::TrxVizApp {
                 scene: scene.clone(),
                 visible: true,
             });
+        let show_fixel_3d_by_default = scene.glyph_source_kind().is_none();
         self.register_workflow_asset(WorkflowAssetDocument::Odx { id, path: _path }, true, None);
+        if workflow::set_default_odx_fixel_3d_visibility(
+            &mut self.workflow.document,
+            id,
+            show_fixel_3d_by_default,
+        ) {
+            self.rebuild_workflow_editor_from_document();
+        }
 
         self.error_msg = None;
         self.status_msg = None;

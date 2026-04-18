@@ -40,7 +40,8 @@ use crate::workflow::{
     WorkflowJobPayload, WorkflowNodeUuid, WorkflowSliceViewKind, WorkflowSliceViewUi,
     WorkflowView2DMode, add_default_nodes_for_asset, ensure_node_uuids, evaluate_scene_plan,
     load_workflow_project_from_path, mark_expensive_success, resolve_document_asset_paths,
-    run_workflow_job, save_streamline_plan, workflow_boundary_plan_fingerprint,
+    run_workflow_job, save_streamline_plan, set_default_odx_fixel_3d_visibility,
+    workflow_boundary_plan_fingerprint,
     workflow_bundle_display_fingerprint, workflow_bundle_plan_fingerprint,
     workflow_reactive_streamline_fingerprint, workflow_streamline_fingerprint,
     workflow_surface_projection_fingerprint, workflow_surface_query_fingerprint,
@@ -538,6 +539,7 @@ fn load_asset_args_state(
     for path in &args.odx_paths {
         let odx_scene =
             OdxScene::open(path).with_context(|| format!("loading ODX file {}", path.display()))?;
+        let show_fixel_3d_by_default = odx_scene.glyph_source_kind().is_none();
         let dims = odx_scene.dimensions();
         // Use the ODX affine to set volume center and extent for camera framing.
         let header = odx_rs::OdxDataset::open(path)
@@ -594,6 +596,11 @@ fn load_asset_args_state(
                 path: path.clone(),
             },
             None,
+        );
+        let _ = set_default_odx_fixel_3d_visibility(
+            &mut workflow.document,
+            id,
+            show_fixel_3d_by_default,
         );
     }
 

@@ -2581,6 +2581,7 @@ dependencies = [
 [[package]]
 name = "odx-rs"
 version = "0.1.0"
+source = "git+https://github.com/PennLINC/odx-rs#ad5bcf5853750932269c2aa71a1b41699af53342"
 dependencies = [
  "bytemuck",
  "clap",

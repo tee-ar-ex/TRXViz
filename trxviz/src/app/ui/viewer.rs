@@ -1196,9 +1196,23 @@ impl super::super::TrxVizApp {
             .iter()
             .find(|p| p.visible)
             .or_else(|| self.workflow.runtime.scene_plan.odf_glyph_draws.first());
-        let odx_glyphs_active = (odf_draw.is_some() || self.scene.odx_scene.is_some())
-            && self.odx_show_glyphs
-            && odf_draw.map(|p| p.visible).unwrap_or(true);
+        let odx_glyphs_active =
+            odf_draw.map(|p| p.visible).unwrap_or(self.scene.odx_scene.is_some());
+        let odx_fixels_active = self
+            .workflow
+            .runtime
+            .scene_plan
+            .fixel_3d_draws
+            .iter()
+            .any(|p| p.visible)
+            || self
+                .workflow
+                .runtime
+                .scene_plan
+                .fixel_2d_draws
+                .iter()
+                .any(|p| p.visible)
+            || self.scene.odx_scene.is_some();
         ViewerRenderData {
             any_visible_streamlines: streamline_draws.iter().any(|draw| draw.visible),
             surface_draws,
@@ -1216,10 +1230,7 @@ impl super::super::TrxVizApp {
                 .map(|draw| draw.slice_density_step as u32)
                 .unwrap_or(1),
             odx_show_glyphs: odx_glyphs_active,
-            odx_show_fixels: (!self.workflow.runtime.scene_plan.fixel_3d_draws.is_empty()
-                || !self.workflow.runtime.scene_plan.fixel_2d_draws.is_empty()
-                || self.scene.odx_scene.is_some())
-                && self.odx_show_fixels,
+            odx_show_fixels: odx_fixels_active,
             odx_glyph_opacity: odf_draw.map(|p| p.opacity).unwrap_or(0.95),
             odx_glyph_gloss: odf_draw.map(|p| p.gloss).unwrap_or(0.0),
             odx_fixel_line_width: self

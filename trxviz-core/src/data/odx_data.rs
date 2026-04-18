@@ -1,5 +1,6 @@
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use glam::{Mat4, Vec4};
 use odx_rs::formats::dsistudio_odf8;
@@ -27,6 +28,7 @@ pub struct OdxScene {
     pub sphere_indices: Vec<u32>,
     /// Number of sphere vertices (per voxel amplitude row width).
     pub nb_sphere_vertices: usize,
+    odf_slice_cache: Mutex<OdfSliceMetadataCache>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -55,6 +57,32 @@ pub struct SliceGlyphData {
     pub instances: Vec<GlyphInstance>,
     pub amplitudes: Vec<f32>,
     pub amp_norm: f32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct OdfChunkWorkItem {
+    pub local_row: u32,
+    pub output_row: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct OdfChunkWorklist {
+    pub chunk_index: usize,
+    pub work_items: Vec<OdfChunkWorkItem>,
+}
+
+#[derive(Clone)]
+pub struct OdfSliceMetadata {
+    pub instances: Vec<GlyphInstance>,
+    pub chunk_worklists: Vec<OdfChunkWorklist>,
+    pub amp_norm: f32,
+}
+
+#[derive(Default)]
+struct OdfSliceMetadataCache {
+    order: VecDeque<(usize, u32, usize)>,
+    entries: HashMap<(usize, u32, usize), Arc<OdfSliceMetadata>>,
 }
 
 impl Default for SliceGlyphData {
@@ -159,6 +187,7 @@ impl OdxScene {
             sphere_vertices: full_verts,
             sphere_indices,
             nb_sphere_vertices,
+            odf_slice_cache: Mutex::new(OdfSliceMetadataCache::default()),
         })
     }
 
@@ -288,6 +317,53 @@ impl OdxScene {
             }
         }
         Some(out)
+    }
+
+    pub fn odf_source_row_width(&self) -> Option<usize> {
+        match self.glyph_source.as_ref() {
+            Some(GlyphFieldSource::Odf { ncols, .. }) => Some(*ncols),
+            _ => None,
+        }
+    }
+
+    pub fn odf_rows_per_chunk(&self, max_storage_bytes: usize) -> Option<usize> {
+        let row_width = self.odf_source_row_width()?;
+        let row_bytes = row_width.saturating_mul(std::mem::size_of::<f32>());
+        if row_bytes == 0 {
+            return None;
+        }
+        Some((max_storage_bytes / row_bytes).max(1))
+    }
+
+    pub fn prewarm_odf_slice_metadata(&self, axis: usize, slice_idx: u32, rows_per_chunk: usize) {
+        let _ = self.odf_slice_metadata(axis, slice_idx, rows_per_chunk);
+    }
+
+    pub fn odf_slice_metadata(
+        &self,
+        axis: usize,
+        slice_idx: u32,
+        rows_per_chunk: usize,
+    ) -> Option<Arc<OdfSliceMetadata>> {
+        let key = (axis, slice_idx, rows_per_chunk.max(1));
+        {
+            let mut cache = self.odf_slice_cache.lock().ok()?;
+            if let Some(metadata) = cache.entries.get(&key).cloned() {
+                promote_odf_slice_cache_key(&mut cache, key);
+                return Some(metadata);
+            }
+        }
+
+        let metadata = Arc::new(self.build_odf_slice_metadata(axis, slice_idx, key.2)?);
+        let mut cache = self.odf_slice_cache.lock().ok()?;
+        cache.entries.insert(key, metadata.clone());
+        cache.order.push_back(key);
+        while cache.order.len() > 12 {
+            if let Some(oldest) = cache.order.pop_front() {
+                cache.entries.remove(&oldest);
+            }
+        }
+        Some(metadata)
     }
 
     pub fn sh_view_f32(&self) -> Option<TypedView2D<'_, f32>> {
@@ -492,6 +568,62 @@ impl OdxScene {
             instances,
             amplitudes,
         }
+    }
+
+    fn build_odf_slice_metadata(
+        &self,
+        axis: usize,
+        slice_idx: u32,
+        rows_per_chunk: usize,
+    ) -> Option<OdfSliceMetadata> {
+        let GlyphFieldSource::Odf { hemisphere, .. } = self.glyph_source.as_ref()? else {
+            return None;
+        };
+        let slice_indices = self.slice_compact_indices(axis, slice_idx);
+        let odf_view = self.odf_view_f32()?;
+        let scale = self.default_glyph_scale();
+        let mut instances = Vec::with_capacity(slice_indices.len());
+        let mut chunk_worklists: Vec<OdfChunkWorklist> = Vec::new();
+        let mut max_amp = 0.0f32;
+
+        for (output_row, &compact_idx) in slice_indices.iter().enumerate() {
+            let row = odf_view.row(compact_idx);
+            for &value in row {
+                if value.is_finite() {
+                    max_amp = max_amp.max(value);
+                }
+            }
+
+            let chunk_index = compact_idx / rows_per_chunk;
+            let work_item = OdfChunkWorkItem {
+                local_row: (compact_idx % rows_per_chunk) as u32,
+                output_row: output_row as u32,
+            };
+            match chunk_worklists.last_mut() {
+                Some(chunk) if chunk.chunk_index == chunk_index => chunk.work_items.push(work_item),
+                _ => chunk_worklists.push(OdfChunkWorklist {
+                    chunk_index,
+                    work_items: vec![work_item],
+                }),
+            }
+
+            let amp_offset = output_row.saturating_mul(self.nb_sphere_vertices) as u32;
+            let _ = hemisphere;
+            instances.push(GlyphInstance {
+                center: self.centers_ras[compact_idx],
+                scale,
+                amplitude_offset: amp_offset,
+                min_contacts: 0,
+                contact_count: 1,
+                _pad: 0,
+            });
+        }
+
+        Some(OdfSliceMetadata {
+            instances,
+            chunk_worklists,
+            amp_norm: if max_amp > 0.0 { max_amp } else { 1.0 },
+        })
     }
 
     /// All fixel instances for the entire volume (no slice filter).
@@ -833,6 +965,13 @@ fn append_mirrored_hemisphere_row(row: &[f32], out: &mut Vec<f32>) {
     out.extend_from_slice(row);
 }
 
+fn promote_odf_slice_cache_key(cache: &mut OdfSliceMetadataCache, key: (usize, u32, usize)) {
+    if let Some(position) = cache.order.iter().position(|entry| *entry == key) {
+        cache.order.remove(position);
+        cache.order.push_back(key);
+    }
+}
+
 fn slice_amp_norm(values: &[f32]) -> f32 {
     let max_amp = values
         .iter()
@@ -938,6 +1077,27 @@ mod tests {
     }
 
     #[test]
+    fn odf_slice_metadata_matches_materialized_rows() {
+        let scene = OdxScene::from_dataset(build_test_dataset_with_odf(false)).unwrap();
+        let metadata = scene.odf_slice_metadata(2, 0, 1).unwrap();
+        let expected = scene.odf_amplitudes_for_slice(2, 0).unwrap();
+        let actual = reconstruct_odf_slice(&scene, metadata.as_ref(), 1);
+        assert_eq!(actual, expected);
+        assert_eq!(metadata.amp_norm, slice_amp_norm(&expected));
+        assert_eq!(metadata.instances.len(), scene.glyph_instances_for_slice(2, 0).len());
+    }
+
+    #[test]
+    fn hemisphere_odf_slice_metadata_matches_materialized_rows() {
+        let scene = OdxScene::from_dataset(build_test_dataset_with_odf(true)).unwrap();
+        let metadata = scene.odf_slice_metadata(2, 0, 2).unwrap();
+        let expected = scene.odf_amplitudes_for_slice(2, 0).unwrap();
+        let actual = reconstruct_odf_slice(&scene, metadata.as_ref(), 2);
+        assert_eq!(actual, expected);
+        assert_eq!(metadata.amp_norm, slice_amp_norm(&expected));
+    }
+
+    #[test]
     fn lazy_sh_slice_matches_sampling_helper() {
         let scene = OdxScene::from_dataset(build_test_dataset_with_sh()).unwrap();
         let slice = scene.glyphs_for_slice(2, 0, 1);
@@ -989,5 +1149,32 @@ mod tests {
         let scene = OdxScene::from_dataset(builder.finalize().unwrap()).unwrap();
         assert!(!scene.has_glyph_field());
         assert_eq!(scene.glyph_source_kind(), None);
+    }
+
+    fn reconstruct_odf_slice(
+        scene: &OdxScene,
+        metadata: &OdfSliceMetadata,
+        rows_per_chunk: usize,
+    ) -> Vec<f32> {
+        let view = scene.odf_view_f32().unwrap();
+        let source_bins = scene.odf_source_row_width().unwrap();
+        let full_bins = scene.glyph_row_width();
+        let mut out = vec![0.0f32; metadata.instances.len() * full_bins];
+        for chunk in &metadata.chunk_worklists {
+            for work_item in &chunk.work_items {
+                let compact_idx =
+                    chunk.chunk_index * rows_per_chunk + work_item.local_row as usize;
+                let row = view.row(compact_idx);
+                let dst = &mut out[(work_item.output_row as usize * full_bins)
+                    ..((work_item.output_row as usize + 1) * full_bins)];
+                if scene.glyph_source_is_hemisphere() {
+                    dst[..source_bins].copy_from_slice(row);
+                    dst[source_bins..].copy_from_slice(row);
+                } else {
+                    dst.copy_from_slice(row);
+                }
+            }
+        }
+        out
     }
 }

@@ -28,12 +28,6 @@ pub struct TrxVizApp {
     pub(crate) pending_file_loads: Vec<PendingFileLoad>,
     pub(crate) import_dialog: ImportDialogState,
     pub(crate) merge_streamlines_dialog: MergeStreamlinesDialogState,
-    /// Whether to show ODF glyphs in the 3D view.
-    pub(crate) odx_show_glyphs: bool,
-    /// Whether to show fixel line segments in the 2D slice views.
-    pub(crate) odx_show_fixels: bool,
-    /// Display name of the loaded ODX dataset (filename without extension).
-    pub(crate) odx_name: Option<String>,
     /// Slice-local ODX glyph amplitude normalization used by the shader LUT path.
     pub(crate) odx_amp_norm: f32,
 }
@@ -318,9 +312,6 @@ impl TrxVizApp {
             pending_file_loads: Vec::new(),
             import_dialog: ImportDialogState::default(),
             merge_streamlines_dialog: MergeStreamlinesDialogState::default(),
-            odx_show_glyphs: false,
-            odx_show_fixels: false,
-            odx_name: None,
             odx_amp_norm: 1.0,
         };
 

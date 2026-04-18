@@ -1122,7 +1122,7 @@ impl super::super::TrxVizApp {
             {
                 info.value = node_copy.clone();
             }
-            if is_render_only_change(&original_node.kind, &node_copy.kind) {
+            if workflow::is_render_only_change(&original_node.kind, &node_copy.kind) {
                 self.mark_render_only_edit();
             } else {
                 self.mark_workflow_semantic_edit(ui.ctx().input(|input| input.time));
@@ -1132,111 +1132,6 @@ impl super::super::TrxVizApp {
 
     fn show_preview_pane(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.show_embedded_preview(ui);
-    }
-}
-
-/// Returns `true` when the only difference between `before` and `after` is in
-/// parameters that are render-only (GPU uniforms / visibility flags). These
-/// changes can be applied immediately via `mark_render_only_edit` without
-/// touching `document_revision` or triggering the expensive-job machinery.
-///
-/// Returns `false` for any change that may affect a fingerprinted computation
-/// (mesh geometry, colormap baking, scalar projection, etc.), which must go
-/// through `mark_workflow_semantic_edit`.
-fn is_render_only_change(
-    before: &workflow::WorkflowNodeKind,
-    after: &workflow::WorkflowNodeKind,
-) -> bool {
-    use workflow::WorkflowNodeKind as K;
-    match (before, after) {
-        // All VolumeDisplay params are consumed as GPU uniforms every frame.
-        (K::VolumeDisplay { .. }, K::VolumeDisplay { .. }) => true,
-
-        // All BoundaryGlyphDisplay params are consumed as GPU uniforms / draw
-        // settings every frame (no mesh rebuild).
-        (K::BoundaryGlyphDisplay { .. }, K::BoundaryGlyphDisplay { .. }) => true,
-
-        // All SurfaceDisplay params feed directly into SurfaceDrawPlan which is
-        // read from the scene plan every frame. No expensive job exists for this node.
-        (K::SurfaceDisplay { .. }, K::SurfaceDisplay { .. }) => true,
-
-        // StreamlineDisplay: enabled and slab_half_width_mm are render-only (visibility
-        // toggle and shader clipping uniform). render_style / tube geometry params are
-        // compute (may trigger TubeGeometry job).
-        (
-            K::StreamlineDisplay {
-                enabled: e1,
-                render_style: rs1,
-                tube_radius_mm: tr1,
-                tube_sides: ts1,
-                slab_half_width_mm: sw1,
-            },
-            K::StreamlineDisplay {
-                enabled: e2,
-                render_style: rs2,
-                tube_radius_mm: tr2,
-                tube_sides: ts2,
-                slab_half_width_mm: sw2,
-            },
-        ) => {
-            // Render-only iff the compute params (render_style, tube geometry) are
-            // unchanged. The only remaining mutable params are enabled and
-            // slab_half_width_mm, which are consumed as GPU uniforms each frame.
-            // (node_changed is already true at the call site, so we don't need to
-            // assert that something actually did differ.)
-            let _ = (e1, e2, sw1, sw2); // explicitly acknowledged as render-only
-            rs1 == rs2 && tr1 == tr2 && ts1 == ts2
-        }
-
-        // BundleSurfaceBuild: opacity is a render-only GPU uniform (excluded from the
-        // build fingerprint after the Task 1 fix). All other params affect mesh geometry.
-        (
-            K::BundleSurfaceBuild {
-                per_group: pg1,
-                build_mode: bm1,
-                voxel_size_mm: vs1,
-                threshold: t1,
-                smooth_sigma: ss1,
-                min_component_volume_mm3: mc1,
-                tube_radius_mm: tr1,
-                tube_sides: ts1,
-                opacity: _,
-            },
-            K::BundleSurfaceBuild {
-                per_group: pg2,
-                build_mode: bm2,
-                voxel_size_mm: vs2,
-                threshold: t2,
-                smooth_sigma: ss2,
-                min_component_volume_mm3: mc2,
-                tube_radius_mm: tr2,
-                tube_sides: ts2,
-                opacity: _,
-            },
-        ) => {
-            // Only render-only if every compute param is unchanged.
-            pg1 == pg2
-                && bm1 == bm2
-                && vs1 == vs2
-                && t1 == t2
-                && ss1 == ss2
-                && mc1 == mc2
-                && tr1 == tr2
-                && ts1 == ts2
-        }
-
-        // ParcellationDisplay: both params (labels and opacity) go straight to the
-        // scene plan, no expensive computation.
-        (K::ParcellationDisplay { .. }, K::ParcellationDisplay { .. }) => true,
-
-        // ODF glyph and fixel display nodes only affect scene-plan draw parameters
-        // and shader uniforms / visibility. They do not trigger geometry jobs.
-        (K::OdfGlyphRenderer { .. }, K::OdfGlyphRenderer { .. }) => true,
-        (K::Fixel3DDisplay { .. }, K::Fixel3DDisplay { .. }) => true,
-        (K::Fixel2DDisplay { .. }, K::Fixel2DDisplay { .. }) => true,
-
-        // All other variants either have no parameters or contain compute params.
-        _ => false,
     }
 }
 

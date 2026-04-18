@@ -114,7 +114,7 @@ fn active_odx_glyph_resource_key(
     let source_kind = scene.glyph_source_kind()?;
     let slice_state = active_odx_slice_state(app);
     let mode = match source_kind {
-        trxviz_core::data::odx_data::OdxGlyphSourceKind::Odf => OdxGpuGlyphMode::SliceLocalOdf,
+        trxviz_core::data::odx_data::OdxGlyphSourceKind::Odf => OdxGpuGlyphMode::OdfSliceGather,
         trxviz_core::data::odx_data::OdxGlyphSourceKind::Sh => OdxGpuGlyphMode::ShCompute,
     };
     let mut opacity_hasher = DefaultHasher::new();
@@ -141,18 +141,13 @@ fn active_odx_glyph_resource_key(
     })
 }
 
-fn amplitude_norm(values: &[f32]) -> f32 {
-    let max_amp = values
-        .iter()
-        .copied()
-        .filter(|value| value.is_finite())
-        .fold(0.0f32, f32::max);
-    if max_amp > 0.0 { max_amp } else { 1.0 }
-}
-
-fn normalize_amplitudes(values: &[f32], norm: f32) -> Vec<f32> {
-    let denom = if norm > 0.0 { norm } else { 1.0 };
-    values.iter().map(|value| *value / denom).collect()
+fn odf_rows_per_chunk(
+    scene: &trxviz_core::data::odx_data::OdxScene,
+    device: &wgpu::Device,
+) -> usize {
+    scene
+        .odf_rows_per_chunk(device.limits().max_storage_buffer_binding_size as usize)
+        .unwrap_or(1)
 }
 
 fn sample_odx_gate_buffers(
@@ -204,25 +199,39 @@ impl crate::app::TrxVizApp {
 
         match resource_key.mode {
             OdxGpuGlyphMode::PreSampledOdf => unreachable!("ODX glyphs now use slice-local upload"),
-            OdxGpuGlyphMode::SliceLocalOdf => {
-                let slice = scene.glyphs_for_slice(axis, slice_idx, 1);
-                if slice.instances.is_empty() {
+            OdxGpuGlyphMode::OdfSliceGather => {
+                let rows_per_chunk = odf_rows_per_chunk(&scene, device);
+                let metadata = scene
+                    .odf_slice_metadata(axis, slice_idx, rows_per_chunk)
+                    .expect("ODF slice metadata should exist for ODF glyph mode");
+                if metadata.instances.is_empty() {
                     glyph_resources.clear();
                     self.odx_amp_norm = 1.0;
                     self.workflow.uploaded_odx_glyph_resource_key = None;
                     return;
                 }
-                let geom_norm = slice.amp_norm.max(amplitude_norm(&slice.amplitudes));
-                let normalized_amplitudes = normalize_amplitudes(&slice.amplitudes, geom_norm);
+                let odf_view = scene
+                    .odf_view_f32()
+                    .expect("ODF amplitudes should exist for ODF glyph mode");
                 let (opacity_samples, size_samples) =
-                    sample_odx_gate_buffers(self, &slice.instances);
+                    sample_odx_gate_buffers(self, &metadata.instances);
                 self.odx_amp_norm = 1.0;
-                glyph_resources.set_odx_field(
+                glyph_resources.set_odx_slice_gather(
                     device,
+                    queue,
+                    resource_key.scene_ptr,
                     &scene.sphere_vertices,
                     &scene.sphere_indices,
-                    &slice.instances,
-                    &normalized_amplitudes,
+                    &metadata.instances,
+                    odf_view.as_flat_slice(),
+                    scene.compact_voxel_count(),
+                    scene
+                        .odf_source_row_width()
+                        .expect("ODF row width should exist for ODF glyph mode"),
+                    scene.glyph_row_width(),
+                    rows_per_chunk,
+                    &metadata.chunk_worklists,
+                    metadata.amp_norm,
                     opacity_samples.as_deref(),
                     size_samples.as_deref(),
                 );
