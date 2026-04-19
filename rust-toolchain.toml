@@ -1,0 +1,6 @@
+[toolchain]
+channel = "stable"
+# Minimum: 1.85 (required for edition = "2024")
+# Pin to a recent stable that is known to compile this workspace cleanly.
+# Update this line when you want to upgrade the toolchain.
+components = ["rustfmt", "clippy"]

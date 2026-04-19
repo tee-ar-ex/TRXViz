@@ -2,3 +2,12 @@
 members = ["trxviz", "trxviz-core", "trxviz-cli"]
 exclude = ["trx-rs"]
 resolver = "2"
+
+[workspace.lints.rust]
+unused_imports = "warn"
+dead_code = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+too_many_arguments = "allow"       # will be fixed by Stage 5 (WorkflowOp trait)
+module_name_repetitions = "allow"
