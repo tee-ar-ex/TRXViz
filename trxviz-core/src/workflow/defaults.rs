@@ -132,9 +132,9 @@ pub fn add_default_nodes_for_asset(
                 WorkflowNodeKind::StreamlineDisplay {
                     enabled: true,
                     render_style: RenderStyle::Flat,
-                    tube_radius_mm: 0.4,
+                    tube_radius_mm: crate::units::Millimeters(0.4),
                     tube_sides: 8,
-                    slab_half_width_mm: 5.0,
+                    slab_half_width_mm: crate::units::Millimeters(5.0),
                 },
                 pos,
             );

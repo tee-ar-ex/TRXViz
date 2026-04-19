@@ -14,5 +14,7 @@ pub mod lighting;
 pub mod renderer;
 /// Shared scene and asset state used by GUI and headless execution.
 pub mod scene;
+/// Semantic units and strongly-typed identifiers shared across core APIs.
+pub mod units;
 /// Workflow document types, evaluation, loading, and execution helpers.
 pub mod workflow;

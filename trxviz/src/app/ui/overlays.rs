@@ -509,7 +509,7 @@ impl crate::app::TrxVizApp {
                     .label_table
                     .keys()
                     .copied()
-                    .filter(|label| *label != 0)
+                    .filter(|label| label.0 != 0)
                     .collect()
             } else {
                 draw.labels.clone()

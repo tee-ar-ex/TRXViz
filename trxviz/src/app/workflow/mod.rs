@@ -89,6 +89,7 @@ mod tests {
     use super::is_render_only_change;
     use trxviz_core::data::loaded_files::VolumeColormap;
     use trxviz_core::data::trx_data::RenderStyle;
+    use trxviz_core::units::Millimeters;
     use trxviz_core::workflow::WorkflowNodeKind;
 
     #[test]
@@ -96,16 +97,16 @@ mod tests {
         let before = WorkflowNodeKind::StreamlineDisplay {
             enabled: true,
             render_style: RenderStyle::Flat,
-            tube_radius_mm: 0.4,
+            tube_radius_mm: Millimeters(0.4),
             tube_sides: 8,
-            slab_half_width_mm: 5.0,
+            slab_half_width_mm: Millimeters(5.0),
         };
         let after = WorkflowNodeKind::StreamlineDisplay {
             enabled: true,
             render_style: RenderStyle::Tubes,
-            tube_radius_mm: 0.4,
+            tube_radius_mm: Millimeters(0.4),
             tube_sides: 8,
-            slab_half_width_mm: 5.0,
+            slab_half_width_mm: Millimeters(5.0),
         };
         assert!(!is_render_only_change(&before, &after));
     }

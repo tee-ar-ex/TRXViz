@@ -373,7 +373,7 @@ impl super::super::TrxVizApp {
                     .labels
                     .iter()
                     .copied()
-                    .filter(|label| *label != 0)
+                    .filter(|label| label.0 != 0)
                     .collect::<std::collections::BTreeSet<_>>()
                     .len()
             ));
@@ -467,14 +467,14 @@ impl super::super::TrxVizApp {
                         ui.add(egui::DragValue::new(&mut center[1]).speed(0.5).prefix("Y "));
                         ui.add(egui::DragValue::new(&mut center[2]).speed(0.5).prefix("Z "));
                     });
-                    ui.add(egui::DragValue::new(radius_mm).speed(0.5).prefix("Radius "));
+                    ui.add(egui::DragValue::new(&mut radius_mm.0).speed(0.5).prefix("Radius "));
                 }
                 workflow::WorkflowNodeKind::SurfaceDepthQuery { depth_mm }
                 | workflow::WorkflowNodeKind::SurfaceProjectionDensity { depth_mm } => {
-                    ui.add(egui::DragValue::new(depth_mm).speed(0.25).prefix("Depth "));
+                    ui.add(egui::DragValue::new(&mut depth_mm.0).speed(0.25).prefix("Depth "));
                 }
                 workflow::WorkflowNodeKind::SurfaceProjectionMeanDps { depth_mm, field } => {
-                    ui.add(egui::DragValue::new(depth_mm).speed(0.25).prefix("Depth "));
+                    ui.add(egui::DragValue::new(&mut depth_mm.0).speed(0.25).prefix("Depth "));
                     ui.text_edit_singleline(field);
                 }
                 workflow::WorkflowNodeKind::ParcelSelect { labels_csv } => {
@@ -550,7 +550,7 @@ impl super::super::TrxVizApp {
                             ui.selectable_value(render_style, RenderStyle::Tubes, "Tubes");
                         });
                     ui.add(
-                        egui::DragValue::new(tube_radius_mm)
+                        egui::DragValue::new(&mut tube_radius_mm.0)
                             .speed(0.1)
                             .prefix("Tube radius "),
                     );
@@ -560,7 +560,7 @@ impl super::super::TrxVizApp {
                             .prefix("Tube sides "),
                     );
                     ui.add(
-                        egui::DragValue::new(slab_half_width_mm)
+                        egui::DragValue::new(&mut slab_half_width_mm.0)
                             .speed(0.5)
                             .prefix("Slice slab "),
                     );
@@ -743,7 +743,7 @@ impl super::super::TrxVizApp {
                         });
                     if matches!(*build_mode, workflow::BundleSurfaceBuildMode::MarchingCubes) {
                         ui.add(
-                            egui::DragValue::new(voxel_size_mm)
+                            egui::DragValue::new(&mut voxel_size_mm.0)
                                 .speed(0.1)
                                 .prefix("Voxel "),
                         );
@@ -758,14 +758,14 @@ impl super::super::TrxVizApp {
                                 .prefix("Smooth "),
                         );
                         ui.add(
-                            egui::DragValue::new(min_component_volume_mm3)
+                            egui::DragValue::new(&mut min_component_volume_mm3.0)
                                 .speed(1.0)
                                 .range(0.0..=1_000_000.0)
                                 .prefix("Min component mm^3 "),
                         );
                     } else {
                         ui.add(
-                            egui::DragValue::new(tube_radius_mm)
+                            egui::DragValue::new(&mut tube_radius_mm.0)
                                 .speed(0.05)
                                 .range(0.01..=20.0)
                                 .prefix("Tube radius "),
@@ -815,7 +815,7 @@ impl super::super::TrxVizApp {
                     normalization,
                 } => {
                     ui.add(
-                        egui::DragValue::new(voxel_size_mm)
+                        egui::DragValue::new(&mut voxel_size_mm.0)
                             .speed(0.1)
                             .range(0.5..=100.0)
                             .prefix("Voxel "),
@@ -1041,7 +1041,7 @@ impl super::super::TrxVizApp {
                     ui.add(egui::Slider::new(length_scale, 0.1..=5.0).text("Length scale"));
                     ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
                     ui.add(
-                        egui::Slider::new(slab_thickness_mm, 0.1..=20.0)
+                        egui::Slider::new(&mut slab_thickness_mm.0, 0.1..=20.0)
                             .text("Slab thickness (mm)"),
                     );
                 }

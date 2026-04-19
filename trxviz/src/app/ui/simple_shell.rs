@@ -232,7 +232,7 @@ impl super::super::TrxVizApp {
                 {
                     ui.checkbox(enabled, "Visible");
                     ui.add(
-                        egui::Slider::new(slab_half_width_mm, 0.0..=50.0)
+                        egui::Slider::new(&mut slab_half_width_mm.0, 0.0..=50.0)
                             .text("Slice slab half-width"),
                     );
                 }
@@ -421,7 +421,7 @@ impl super::super::TrxVizApp {
             .label_table
             .keys()
             .copied()
-            .filter(|label| *label != 0)
+            .filter(|label| label.0 != 0)
             .count();
         egui::CollapsingHeader::new(name)
             .id_salt(("simple_parcellation_asset", id))

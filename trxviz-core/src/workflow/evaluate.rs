@@ -20,6 +20,7 @@ use crate::data::parcellation_data::ParcellationVolume;
 use crate::data::trx_data::{ColorMode, RenderStyle, TrxGpuData};
 use crate::renderer::mesh_renderer::SurfaceColormap;
 use crate::scene::LoadedGiftiSurface;
+use crate::units::{Millimeters, ParcelId, StreamlineIndex};
 
 use super::jobs::{
     mark_expensive_success, prime_expensive_record, sync_node_state_from_run_record,
@@ -265,7 +266,9 @@ fn evaluate_node(
                     )
                 })?,
             });
-            let selected = (0..source.data.nb_streamlines as u32).collect();
+            let selected = (0..source.data.nb_streamlines as u32)
+                .map(StreamlineIndex)
+                .collect();
             Ok(vec![
                 WorkflowValue::Streamline(StreamlineFlow {
                     dataset,
@@ -388,7 +391,7 @@ fn evaluate_node(
                                 .to_string(),
                         ));
                     }
-                    let keep: HashSet<u32> = flow
+                    let keep: HashSet<StreamlineIndex> = flow
                         .dataset
                         .gpu_data
                         .groups
@@ -1256,7 +1259,7 @@ fn evaluate_node(
                 length_scale: *length_scale,
                 opacity: *opacity,
                 offset_from_slice: *offset_from_slice,
-                slab_thickness_mm: 0.0,
+                slab_thickness_mm: Millimeters(0.0),
                 visible: *visible,
                 colormap_code,
                 scalar_range,
@@ -1571,14 +1574,14 @@ fn parse_group_filter(csv: &str) -> GroupFilter {
     }
 }
 
-fn parse_label_ids(csv: &str) -> BTreeSet<u32> {
+fn parse_label_ids(csv: &str) -> BTreeSet<ParcelId> {
     csv.split(',')
         .map(str::trim)
-        .filter_map(|value| value.parse::<u32>().ok())
+        .filter_map(|value| value.parse::<u32>().ok().map(ParcelId))
         .collect()
 }
 
-fn resolve_selected_labels(csv: &str, parcellation: &ParcellationVolume) -> BTreeSet<u32> {
+fn resolve_selected_labels(csv: &str, parcellation: &ParcellationVolume) -> BTreeSet<ParcelId> {
     let labels = parse_label_ids(csv);
     if !labels.is_empty() {
         return labels;
@@ -1586,7 +1589,7 @@ fn resolve_selected_labels(csv: &str, parcellation: &ParcellationVolume) -> BTre
 
     let mut resolved = BTreeSet::new();
     for &label in &parcellation.labels {
-        if label != 0 {
+        if label.0 != 0 {
             resolved.insert(label);
         }
     }
@@ -1938,7 +1941,9 @@ mod tests {
         let mut document = default_document();
         let query = make_node(
             &mut document,
-            WorkflowNodeKind::SurfaceDepthQuery { depth_mm: 2.0 },
+            WorkflowNodeKind::SurfaceDepthQuery {
+                depth_mm: Millimeters(2.0),
+            },
             GraphPos::new(0.0, 0.0),
         );
 
@@ -2117,13 +2122,16 @@ pub(crate) fn add_groups_from_parcellation_from_label(
         .unwrap_or(parcellation_name)
         .trim()
         .to_string();
-    let mut label_groups = BTreeMap::<u32, Vec<u32>>::new();
+    let mut label_groups = BTreeMap::<ParcelId, Vec<u32>>::new();
 
     for (new_index, &streamline_index) in flow.selected_streamlines.iter().enumerate() {
         let mut labels_hit = BTreeSet::new();
-        for point in streamline_points(flow.dataset.gpu_data.as_ref(), streamline_index as usize) {
+        for point in streamline_points(
+            flow.dataset.gpu_data.as_ref(),
+            streamline_index.0 as usize,
+        ) {
             if let Some(label) = parcellation.sample_label_world(Vec3::from(*point)) {
-                if label != 0 {
+                if label.0 != 0 {
                     labels_hit.insert(label);
                 }
             }
@@ -2156,7 +2164,9 @@ pub(crate) fn add_groups_from_parcellation_from_label(
     }
 
     let gpu_data = Arc::new(TrxGpuData::from_tractogram(&grouped)?);
-    let selected = (0..gpu_data.nb_streamlines as u32).collect();
+    let selected = (0..gpu_data.nb_streamlines as u32)
+        .map(StreamlineIndex)
+        .collect();
     Ok(StreamlineFlow {
         dataset: Arc::new(StreamlineDataset {
             name: label.to_string(),
@@ -2174,12 +2184,15 @@ pub(crate) fn add_groups_from_parcellation_from_label(
 fn crop_flow_to_parcels(
     flow: &StreamlineFlow,
     parcellation: &ParcellationVolume,
-    labels: &BTreeSet<u32>,
+    labels: &BTreeSet<ParcelId>,
     keep_inside: bool,
 ) -> WorkflowResult<Tractogram> {
     let mut tractogram = Tractogram::new();
     for &streamline_index in flow.selected_streamlines.iter() {
-        let points = streamline_points(flow.dataset.gpu_data.as_ref(), streamline_index as usize);
+        let points = streamline_points(
+            flow.dataset.gpu_data.as_ref(),
+            streamline_index.0 as usize,
+        );
         let segments = if keep_inside {
             parcellation.crop_streamline_inside(points, labels)
         } else {
@@ -2238,8 +2251,10 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 .iter()
                 .copied()
                 .filter(|index| {
-                    let points =
-                        streamline_points(plan.left.dataset.gpu_data.as_ref(), *index as usize);
+                    let points = streamline_points(
+                        plan.left.dataset.gpu_data.as_ref(),
+                        index.0 as usize,
+                    );
                     parcellation.streamline_hits_labels(points, labels)
                 })
                 .collect();
@@ -2258,8 +2273,10 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 .iter()
                 .copied()
                 .filter(|index| {
-                    let points =
-                        streamline_points(plan.left.dataset.gpu_data.as_ref(), *index as usize);
+                    let points = streamline_points(
+                        plan.left.dataset.gpu_data.as_ref(),
+                        index.0 as usize,
+                    );
                     parcellation.streamline_avoids_labels(points, labels)
                 })
                 .collect();
@@ -2279,8 +2296,10 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 .iter()
                 .copied()
                 .filter(|index| {
-                    let points =
-                        streamline_points(plan.left.dataset.gpu_data.as_ref(), *index as usize);
+                    let points = streamline_points(
+                        plan.left.dataset.gpu_data.as_ref(),
+                        index.0 as usize,
+                    );
                     parcellation.streamline_end_hits_labels(points, labels, *endpoint_count)
                 })
                 .collect();
@@ -2316,7 +2335,9 @@ fn streamline_flow_from_tractogram(
 ) -> WorkflowResult<StreamlineFlow> {
     let gpu_data =
         Arc::new(TrxGpuData::from_tractogram(&tractogram)?);
-    let selected = (0..gpu_data.nb_streamlines as u32).collect();
+    let selected = (0..gpu_data.nb_streamlines as u32)
+        .map(StreamlineIndex)
+        .collect();
     Ok(StreamlineFlow {
         dataset: Arc::new(StreamlineDataset {
             name: label,
@@ -2341,7 +2362,7 @@ fn subset_tractogram_from_flow(flow: &StreamlineFlow) -> WorkflowResult<Tractogr
     let mut tractogram = Tractogram::with_header(header);
     let mut remap = HashMap::with_capacity(flow.selected_streamlines.len());
     for (new_index, &index) in flow.selected_streamlines.iter().enumerate() {
-        let points = streamline_points(flow.dataset.gpu_data.as_ref(), index as usize);
+        let points = streamline_points(flow.dataset.gpu_data.as_ref(), index.0 as usize);
         tractogram
             .push_streamline(points)
             .map_err(|e| WorkflowError::Other(e.into()))?;
@@ -2378,7 +2399,7 @@ fn flow_selects_entire_dataset(flow: &StreamlineFlow) -> bool {
             .selected_streamlines
             .iter()
             .enumerate()
-            .all(|(expected, &actual)| expected == actual as usize)
+            .all(|(expected, &actual)| expected == actual.0 as usize)
 }
 
 pub fn save_streamline_plan(plan: &SaveStreamlinePlan) -> WorkflowResult<()> {

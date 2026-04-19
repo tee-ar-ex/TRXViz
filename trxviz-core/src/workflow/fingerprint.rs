@@ -37,9 +37,9 @@ pub fn workflow_streamline_fingerprint(draw: &StreamlineDrawPlan) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     draw.label.hash(&mut hasher);
     (draw.render_style as u32).hash(&mut hasher);
-    draw.tube_radius_mm.to_bits().hash(&mut hasher);
+    draw.tube_radius_mm.0.to_bits().hash(&mut hasher);
     draw.tube_sides.hash(&mut hasher);
-    draw.slab_half_width_mm.to_bits().hash(&mut hasher);
+    draw.slab_half_width_mm.0.to_bits().hash(&mut hasher);
     hash_flow(&draw.flow, &mut hasher);
     hasher.finish()
 }
@@ -109,11 +109,11 @@ pub fn workflow_reactive_streamline_fingerprint(plan: &ReactiveStreamlinePlan) -
 pub fn workflow_surface_query_fingerprint(
     flow: &StreamlineFlow,
     surface_id: FileId,
-    depth_mm: f32,
+    depth_mm: crate::units::Millimeters,
 ) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     surface_id.hash(&mut hasher);
-    depth_mm.to_bits().hash(&mut hasher);
+    depth_mm.0.to_bits().hash(&mut hasher);
     hash_flow(flow, &mut hasher);
     hasher.finish()
 }
@@ -121,12 +121,12 @@ pub fn workflow_surface_query_fingerprint(
 pub fn workflow_surface_projection_fingerprint(
     flow: &StreamlineFlow,
     surface_id: FileId,
-    depth_mm: f32,
+    depth_mm: crate::units::Millimeters,
     field: Option<&str>,
 ) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     surface_id.hash(&mut hasher);
-    depth_mm.to_bits().hash(&mut hasher);
+    depth_mm.0.to_bits().hash(&mut hasher);
     field.hash(&mut hasher);
     hash_flow(flow, &mut hasher);
     hasher.finish()
@@ -137,11 +137,11 @@ pub fn workflow_bundle_build_fingerprint(draw: &BundleDrawPlan) -> u64 {
     draw.label.hash(&mut hasher);
     draw.per_group.hash(&mut hasher);
     draw.build_mode.hash(&mut hasher);
-    draw.voxel_size_mm.to_bits().hash(&mut hasher);
+    draw.voxel_size_mm.0.to_bits().hash(&mut hasher);
     draw.threshold.to_bits().hash(&mut hasher);
     draw.smooth_sigma.to_bits().hash(&mut hasher);
-    draw.min_component_volume_mm3.to_bits().hash(&mut hasher);
-    draw.tube_radius_mm.to_bits().hash(&mut hasher);
+    draw.min_component_volume_mm3.0.to_bits().hash(&mut hasher);
+    draw.tube_radius_mm.0.to_bits().hash(&mut hasher);
     draw.tube_sides.hash(&mut hasher);
     // opacity is excluded: it is a render-only parameter (GPU uniform) and does not
     // affect mesh geometry, so opacity changes must not trigger a mesh rebuild.
@@ -165,11 +165,11 @@ pub fn workflow_bundle_plan_fingerprint(plan: &BundleSurfacePlan) -> u64 {
     plan.label.hash(&mut hasher);
     plan.per_group.hash(&mut hasher);
     plan.build_mode.hash(&mut hasher);
-    plan.voxel_size_mm.to_bits().hash(&mut hasher);
+    plan.voxel_size_mm.0.to_bits().hash(&mut hasher);
     plan.threshold.to_bits().hash(&mut hasher);
     plan.smooth_sigma.to_bits().hash(&mut hasher);
-    plan.min_component_volume_mm3.to_bits().hash(&mut hasher);
-    plan.tube_radius_mm.to_bits().hash(&mut hasher);
+    plan.min_component_volume_mm3.0.to_bits().hash(&mut hasher);
+    plan.tube_radius_mm.0.to_bits().hash(&mut hasher);
     plan.tube_sides.hash(&mut hasher);
     // opacity is excluded: it is a render-only parameter (GPU uniform) and does not
     // affect mesh geometry, so opacity changes must not trigger a mesh rebuild.
@@ -180,7 +180,7 @@ pub fn workflow_bundle_plan_fingerprint(plan: &BundleSurfacePlan) -> u64 {
 pub fn workflow_boundary_plan_fingerprint(plan: &BoundaryFieldPlan) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     plan.label.hash(&mut hasher);
-    plan.voxel_size_mm.to_bits().hash(&mut hasher);
+    plan.voxel_size_mm.0.to_bits().hash(&mut hasher);
     plan.sphere_lod.hash(&mut hasher);
     plan.normalization.hash(&mut hasher);
     hash_flow(&plan.flow, &mut hasher);

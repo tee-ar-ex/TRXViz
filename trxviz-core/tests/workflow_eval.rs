@@ -9,6 +9,7 @@ use std::sync::Arc;
 use trx_rs::Tractogram;
 use trxviz_core::data::loaded_files::{LoadedTrx, StreamlineBacking};
 use trxviz_core::data::trx_data::{ColorMode, RenderStyle, TrxGpuData};
+use trxviz_core::units::{Millimeters, StreamlineIndex};
 use trxviz_core::workflow::{
     GraphPos, InPort, OutPort, WorkflowEvalMode, WorkflowExecutionCache, WorkflowNodeKind,
     default_document, evaluate_scene_plan_with_mode, make_node,
@@ -128,9 +129,9 @@ fn limit_streamlines_reduces_count() {
         WorkflowNodeKind::StreamlineDisplay {
             enabled: true,
             render_style: RenderStyle::Flat,
-            tube_radius_mm: 0.5,
+            tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
-            slab_half_width_mm: 5.0,
+            slab_half_width_mm: Millimeters(5.0),
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -159,9 +160,9 @@ fn limit_streamlines_zero_produces_empty_selection() {
         WorkflowNodeKind::StreamlineDisplay {
             enabled: true,
             render_style: RenderStyle::Flat,
-            tube_radius_mm: 0.5,
+            tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
-            slab_half_width_mm: 5.0,
+            slab_half_width_mm: Millimeters(5.0),
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -195,9 +196,9 @@ fn random_subset_is_deterministic_for_same_seed() {
             WorkflowNodeKind::StreamlineDisplay {
                 enabled: true,
                 render_style: RenderStyle::Flat,
-                tube_radius_mm: 0.5,
+                tube_radius_mm: Millimeters(0.5),
                 tube_sides: 8,
-                slab_half_width_mm: 5.0,
+                slab_half_width_mm: Millimeters(5.0),
             },
             GraphPos::new(400.0, 0.0),
         );
@@ -236,9 +237,9 @@ fn group_select_all_passes_through_unchanged() {
         WorkflowNodeKind::StreamlineDisplay {
             enabled: true,
             render_style: RenderStyle::Flat,
-            tube_radius_mm: 0.5,
+            tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
-            slab_half_width_mm: 5.0,
+            slab_half_width_mm: Millimeters(5.0),
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -264,9 +265,9 @@ fn group_select_none_produces_empty_flow() {
         WorkflowNodeKind::StreamlineDisplay {
             enabled: true,
             render_style: RenderStyle::Flat,
-            tube_radius_mm: 0.5,
+            tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
-            slab_half_width_mm: 5.0,
+            slab_half_width_mm: Millimeters(5.0),
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -297,9 +298,9 @@ fn group_select_by_label_filters_correctly() {
         WorkflowNodeKind::StreamlineDisplay {
             enabled: true,
             render_style: RenderStyle::Flat,
-            tube_radius_mm: 0.5,
+            tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
-            slab_half_width_mm: 5.0,
+            slab_half_width_mm: Millimeters(5.0),
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -308,8 +309,8 @@ fn group_select_by_label_filters_correctly() {
     let runtime = eval(&doc, &[trx]);
     let selected = &runtime.scene_plan.streamline_draws[0].flow.selected_streamlines;
     assert_eq!(selected.len(), 2);
-    assert!(selected.contains(&0));
-    assert!(selected.contains(&1));
+    assert!(selected.contains(&StreamlineIndex(0)));
+    assert!(selected.contains(&StreamlineIndex(1)));
 }
 
 // ---------------------------------------------------------------------------
@@ -328,9 +329,9 @@ fn color_by_direction_sets_direction_mode() {
         WorkflowNodeKind::StreamlineDisplay {
             enabled: true,
             render_style: RenderStyle::Flat,
-            tube_radius_mm: 0.5,
+            tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
-            slab_half_width_mm: 5.0,
+            slab_half_width_mm: Millimeters(5.0),
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -355,9 +356,9 @@ fn color_by_group_sets_group_mode() {
         WorkflowNodeKind::StreamlineDisplay {
             enabled: true,
             render_style: RenderStyle::Flat,
-            tube_radius_mm: 0.5,
+            tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
-            slab_half_width_mm: 5.0,
+            slab_half_width_mm: Millimeters(5.0),
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -383,9 +384,9 @@ fn uniform_color_sets_uniform_mode() {
         WorkflowNodeKind::StreamlineDisplay {
             enabled: true,
             render_style: RenderStyle::Flat,
-            tube_radius_mm: 0.5,
+            tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
-            slab_half_width_mm: 5.0,
+            slab_half_width_mm: Millimeters(5.0),
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -412,9 +413,9 @@ fn streamline_display_adds_entry_to_scene_plan() {
         WorkflowNodeKind::StreamlineDisplay {
             enabled: true,
             render_style: RenderStyle::Flat,
-            tube_radius_mm: 0.5,
+            tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
-            slab_half_width_mm: 5.0,
+            slab_half_width_mm: Millimeters(5.0),
         },
         GraphPos::new(200.0, 0.0),
     );
@@ -435,9 +436,9 @@ fn hidden_streamline_display_still_adds_entry_but_visible_false() {
         WorkflowNodeKind::StreamlineDisplay {
             enabled: false,
             render_style: RenderStyle::Flat,
-            tube_radius_mm: 0.5,
+            tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
-            slab_half_width_mm: 5.0,
+            slab_half_width_mm: Millimeters(5.0),
         },
         GraphPos::new(200.0, 0.0),
     );
@@ -510,9 +511,9 @@ fn bench_recolor_100k_streamlines() {
             WorkflowNodeKind::StreamlineDisplay {
                 enabled: true,
                 render_style: RenderStyle::Flat,
-                tube_radius_mm: 0.5,
+                tube_radius_mm: Millimeters(0.5),
                 tube_sides: 8,
-                slab_half_width_mm: 5.0,
+                slab_half_width_mm: Millimeters(5.0),
             },
             GraphPos::new(400.0, 0.0),
         );

@@ -8,6 +8,7 @@ use crate::data::bundle_mesh::{
 use crate::data::cifti::{ScalarKind, ScalarMetadata, SurfaceScalars};
 use crate::data::orientation_field::{BoundaryContactField, StreamlineSet};
 use crate::data::trx_data::{TrxGpuData, build_tube_vertices_from_data, group_name_color};
+use crate::units::StreamlineIndex;
 
 use super::evaluate::{materialize_reactive_streamline_flow, robust_range};
 use super::*;
@@ -66,7 +67,9 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
             };
             let (density, projected) = subset.project_selected_to_surface(
                 &plan.surface,
-                &(0..subset.nb_streamlines as u32).collect::<Vec<_>>(),
+                &(0..subset.nb_streamlines as u32)
+                    .map(StreamlineIndex)
+                    .collect::<Vec<_>>(),
                 plan.depth_mm,
                 dps_values,
             );
@@ -96,13 +99,15 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
         }
         WorkflowJobPayload::TubeGeometry(draw) => {
             let subset = materialize_flow_gpu(draw.flow);
-            let selected = (0..subset.nb_streamlines as u32).collect::<Vec<_>>();
+            let selected = (0..subset.nb_streamlines as u32)
+                .map(StreamlineIndex)
+                .collect::<Vec<_>>();
             let (positions, colors, offsets) = subset.selected_tube_data(&selected);
             let (vertices, indices) = build_tube_vertices_from_data(
                 &positions,
                 &colors,
                 &offsets,
-                draw.tube_radius_mm,
+                draw.tube_radius_mm.0,
                 draw.tube_sides,
             );
             Ok(WorkflowJobOutput::TubeGeometry { vertices, indices })
@@ -120,7 +125,9 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
         }),
         WorkflowJobPayload::BoundaryField { plan } => {
             let subset = materialize_flow_gpu(plan.flow);
-            let selected = (0..subset.nb_streamlines as u32).collect::<Vec<_>>();
+            let selected = (0..subset.nb_streamlines as u32)
+                .map(StreamlineIndex)
+                .collect::<Vec<_>>();
             let (positions, _colors, offsets) = subset.selected_tube_data(&selected);
             if offsets.len() <= 1 {
                 return Ok(WorkflowJobOutput::BoundaryField { field: None });
@@ -192,10 +199,10 @@ pub fn bundle_surface_component_flows(plan: &BundleSurfacePlan) -> Vec<(String, 
         return vec![(plan.label.clone(), plan.flow.clone())];
     }
 
-    let selected: HashSet<u32> = plan.flow.selected_streamlines.iter().copied().collect();
+    let selected: HashSet<StreamlineIndex> = plan.flow.selected_streamlines.iter().copied().collect();
     let mut components = Vec::new();
     for (group_name, members) in &plan.flow.dataset.gpu_data.groups {
-        let group_selected: Vec<u32> = members
+        let group_selected: Vec<StreamlineIndex> = members
             .iter()
             .copied()
             .filter(|member| selected.contains(member))
@@ -235,7 +242,9 @@ fn build_bundle_surface_meshes_with_color_mode(
             if subset.nb_streamlines == 0 {
                 return None;
             }
-            let selected = (0..subset.nb_streamlines as u32).collect::<Vec<_>>();
+            let selected = (0..subset.nb_streamlines as u32)
+                .map(StreamlineIndex)
+                .collect::<Vec<_>>();
             match plan.build_mode {
                 BundleSurfaceBuildMode::MarchingCubes => {
                     let (positions, colors) = subset.selected_vertex_data(&selected);
@@ -260,7 +269,7 @@ fn build_bundle_surface_meshes_with_color_mode(
                     build_bundle_mesh(
                         &positions,
                         &colors,
-                        plan.voxel_size_mm,
+                        plan.voxel_size_mm.0,
                         plan.threshold,
                         plan.smooth_sigma,
                         plan.min_component_volume_mm3,

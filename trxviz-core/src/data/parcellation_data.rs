@@ -5,20 +5,22 @@ use anyhow::{Context, bail};
 use glam::{Mat4, Vec3, Vec4};
 use nifti::{IntoNdArray, NiftiObject, ReaderOptions};
 
+use crate::units::ParcelId;
+
 #[derive(Clone, Debug)]
 pub struct ParcelLabel {
-    pub id: u32,
+    pub id: ParcelId,
     pub name: String,
     pub color: [f32; 4],
 }
 
 #[derive(Clone)]
 pub struct ParcellationVolume {
-    pub labels: Vec<u32>,
+    pub labels: Vec<ParcelId>,
     pub dims: [usize; 3],
     pub voxel_to_ras: Mat4,
     pub world_to_voxel: Mat4,
-    pub label_table: BTreeMap<u32, ParcelLabel>,
+    pub label_table: BTreeMap<ParcelId, ParcelLabel>,
 }
 
 impl ParcellationVolume {
@@ -39,7 +41,10 @@ impl ParcellationVolume {
         let raw = array
             .as_slice_memory_order()
             .context("Parcellation array is not contiguous")?;
-        let labels: Vec<u32> = raw.iter().map(|&value| value.max(0) as u32).collect();
+        let labels: Vec<ParcelId> = raw
+            .iter()
+            .map(|&value| ParcelId(value.max(0) as u32))
+            .collect();
 
         let mut label_table = if let Some(path) = label_table_path {
             parse_label_table(path)?
@@ -47,10 +52,10 @@ impl ParcellationVolume {
             BTreeMap::new()
         };
 
-        for label in labels.iter().copied().filter(|label| *label != 0) {
+        for label in labels.iter().copied().filter(|label| label.0 != 0) {
             label_table.entry(label).or_insert_with(|| ParcelLabel {
                 id: label,
-                name: format!("Label {label}"),
+                name: format!("Label {}", label.0),
                 color: generated_label_color(label),
             });
         }
@@ -64,14 +69,14 @@ impl ParcellationVolume {
         })
     }
 
-    pub fn label_name(&self, label: u32) -> String {
+    pub fn label_name(&self, label: ParcelId) -> String {
         self.label_table
             .get(&label)
             .map(|entry| entry.name.clone())
-            .unwrap_or_else(|| format!("Label {label}"))
+            .unwrap_or_else(|| format!("Label {}", label.0))
     }
 
-    pub fn label_color(&self, label: u32) -> [f32; 4] {
+    pub fn label_color(&self, label: ParcelId) -> [f32; 4] {
         self.label_table
             .get(&label)
             .map(|entry| entry.color)
@@ -83,7 +88,7 @@ impl ParcellationVolume {
         Vec3::new(world.x, world.y, world.z)
     }
 
-    pub fn sample_label_world(&self, world: Vec3) -> Option<u32> {
+    pub fn sample_label_world(&self, world: Vec3) -> Option<ParcelId> {
         let voxel = self.world_to_voxel * world.extend(1.0);
         let i = voxel.x.round() as isize;
         let j = voxel.y.round() as isize;
@@ -91,7 +96,11 @@ impl ParcellationVolume {
         self.label_at(i, j, k)
     }
 
-    pub fn streamline_hits_labels(&self, points: &[[f32; 3]], labels: &BTreeSet<u32>) -> bool {
+    pub fn streamline_hits_labels(
+        &self,
+        points: &[[f32; 3]],
+        labels: &BTreeSet<ParcelId>,
+    ) -> bool {
         if labels.is_empty() {
             return false;
         }
@@ -101,14 +110,18 @@ impl ParcellationVolume {
         })
     }
 
-    pub fn streamline_avoids_labels(&self, points: &[[f32; 3]], labels: &BTreeSet<u32>) -> bool {
+    pub fn streamline_avoids_labels(
+        &self,
+        points: &[[f32; 3]],
+        labels: &BTreeSet<ParcelId>,
+    ) -> bool {
         !self.streamline_hits_labels(points, labels)
     }
 
     pub fn streamline_end_hits_labels(
         &self,
         points: &[[f32; 3]],
-        labels: &BTreeSet<u32>,
+        labels: &BTreeSet<ParcelId>,
         endpoint_count: usize,
     ) -> bool {
         if labels.is_empty() || points.is_empty() {
@@ -130,7 +143,7 @@ impl ParcellationVolume {
     pub fn crop_streamline_inside(
         &self,
         points: &[[f32; 3]],
-        labels: &BTreeSet<u32>,
+        labels: &BTreeSet<ParcelId>,
     ) -> Vec<Vec<[f32; 3]>> {
         self.crop_streamline(points, labels, true)
     }
@@ -138,7 +151,7 @@ impl ParcellationVolume {
     pub fn crop_streamline_outside(
         &self,
         points: &[[f32; 3]],
-        labels: &BTreeSet<u32>,
+        labels: &BTreeSet<ParcelId>,
     ) -> Vec<Vec<[f32; 3]>> {
         self.crop_streamline(points, labels, false)
     }
@@ -173,7 +186,7 @@ impl ParcellationVolume {
         &self,
         axis_index: usize,
         slice_index: usize,
-        labels: &BTreeSet<u32>,
+        labels: &BTreeSet<ParcelId>,
     ) -> Vec<([Vec3; 2], [f32; 4])> {
         if labels.is_empty() {
             return Vec::new();
@@ -238,7 +251,7 @@ impl ParcellationVolume {
     fn crop_streamline(
         &self,
         points: &[[f32; 3]],
-        labels: &BTreeSet<u32>,
+        labels: &BTreeSet<ParcelId>,
         keep_inside: bool,
     ) -> Vec<Vec<[f32; 3]>> {
         if points.len() < 2 || labels.is_empty() {
@@ -300,7 +313,7 @@ impl ParcellationVolume {
         k: usize,
         i: usize,
         j: usize,
-        labels: &BTreeSet<u32>,
+        labels: &BTreeSet<ParcelId>,
         color: [f32; 4],
         out: &mut Vec<([Vec3; 2], [f32; 4])>,
     ) {
@@ -335,7 +348,7 @@ impl ParcellationVolume {
         j: usize,
         i: usize,
         k: usize,
-        labels: &BTreeSet<u32>,
+        labels: &BTreeSet<ParcelId>,
         color: [f32; 4],
         out: &mut Vec<([Vec3; 2], [f32; 4])>,
     ) {
@@ -370,7 +383,7 @@ impl ParcellationVolume {
         i: usize,
         j: usize,
         k: usize,
-        labels: &BTreeSet<u32>,
+        labels: &BTreeSet<ParcelId>,
         color: [f32; 4],
         out: &mut Vec<([Vec3; 2], [f32; 4])>,
     ) {
@@ -400,7 +413,7 @@ impl ParcellationVolume {
         }
     }
 
-    fn label_at(&self, i: isize, j: isize, k: isize) -> Option<u32> {
+    fn label_at(&self, i: isize, j: isize, k: isize) -> Option<ParcelId> {
         if i < 0 || j < 0 || k < 0 {
             return None;
         }
@@ -415,7 +428,7 @@ impl ParcellationVolume {
     }
 }
 
-pub fn parse_label_table(path: &Path) -> anyhow::Result<BTreeMap<u32, ParcelLabel>> {
+pub fn parse_label_table(path: &Path) -> anyhow::Result<BTreeMap<ParcelId, ParcelLabel>> {
     let contents = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read label table {}", path.display()))?;
     let mut labels = BTreeMap::new();
@@ -445,7 +458,7 @@ fn parse_csv_label_line(line: &str) -> Option<ParcelLabel> {
     if parts.len() < 2 {
         return None;
     }
-    let id = parts[0].parse::<u32>().ok()?;
+    let id = ParcelId(parts[0].parse::<u32>().ok()?);
     let name = parts[1].trim_matches('"').to_string();
     let color = if parts.len() >= 6 {
         [
@@ -465,7 +478,7 @@ fn parse_whitespace_label_line(line: &str) -> Option<ParcelLabel> {
     if parts.len() < 2 {
         return None;
     }
-    let id = parts[0].parse::<u32>().ok()?;
+    let id = ParcelId(parts[0].parse::<u32>().ok()?);
     let (name, color) = if parts.len() >= 5
         && parts[parts.len() - 3].parse::<u8>().is_ok()
         && parts[parts.len() - 2].parse::<u8>().is_ok()
@@ -517,8 +530,8 @@ pub fn guess_label_table_path(volume_path: &Path) -> Option<PathBuf> {
         .find(|path| path.exists())
 }
 
-fn generated_label_color(label: u32) -> [f32; 4] {
-    let x = label.wrapping_mul(0x9e3779b9);
+fn generated_label_color(label: ParcelId) -> [f32; 4] {
+    let x = label.0.wrapping_mul(0x9e3779b9);
     let r = ((x & 0xff) as f32 / 255.0).clamp(0.2, 0.95);
     let g = (((x >> 8) & 0xff) as f32 / 255.0).clamp(0.2, 0.95);
     let b = (((x >> 16) & 0xff) as f32 / 255.0).clamp(0.2, 0.95);
@@ -613,7 +626,7 @@ mod tests {
     fn parses_whitespace_label_table_lines() {
         let line = "42 SuperiorTemporal 120 180 220";
         let label = parse_whitespace_label_line(line).unwrap();
-        assert_eq!(label.id, 42);
+        assert_eq!(label.id, ParcelId(42));
         assert_eq!(label.name, "SuperiorTemporal");
         assert!(label.color[0] > 0.0);
     }
@@ -622,7 +635,7 @@ mod tests {
     fn parses_csv_label_table_lines() {
         let line = "17,\"Left-Hippocampus\",20,120,200,255";
         let label = parse_csv_label_line(line).unwrap();
-        assert_eq!(label.id, 17);
+        assert_eq!(label.id, ParcelId(17));
         assert_eq!(label.name, "Left-Hippocampus");
         assert_eq!(label.color[3], 1.0);
     }

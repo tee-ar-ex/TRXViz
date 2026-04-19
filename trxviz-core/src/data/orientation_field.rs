@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use glam::Vec3;
 
+use crate::units::Millimeters;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BoundaryGlyphNormalization {
     RawCount,
@@ -46,7 +48,7 @@ impl BoundaryGlyphColorMode {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct BoundaryGlyphParams {
-    pub voxel_size_mm: f32,
+    pub voxel_size_mm: Millimeters,
     pub sphere_lod: u32,
     pub scale: f32,
     pub normalization: BoundaryGlyphNormalization,
@@ -59,7 +61,7 @@ pub struct BoundaryGlyphParams {
 impl Default for BoundaryGlyphParams {
     fn default() -> Self {
         Self {
-            voxel_size_mm: 3.0,
+            voxel_size_mm: Millimeters(3.0),
             sphere_lod: 12,
             scale: 2.0,
             normalization: BoundaryGlyphNormalization::GlobalPeak,
@@ -75,17 +77,17 @@ impl Default for BoundaryGlyphParams {
 pub struct OrientationGridSpec {
     pub origin_ras: Vec3,
     pub dims: [u32; 3],
-    pub voxel_size_mm: f32,
+    pub voxel_size_mm: Millimeters,
 }
 
 impl OrientationGridSpec {
     pub fn voxel_center(&self, ix: u32, iy: u32, iz: u32) -> Vec3 {
         self.origin_ras
-            + Vec3::new(ix as f32 + 0.5, iy as f32 + 0.5, iz as f32 + 0.5) * self.voxel_size_mm
+            + Vec3::new(ix as f32 + 0.5, iy as f32 + 0.5, iz as f32 + 0.5) * self.voxel_size_mm.0
     }
 
     pub fn voxel_box_min(&self, ix: u32, iy: u32, iz: u32) -> Vec3 {
-        self.origin_ras + Vec3::new(ix as f32, iy as f32, iz as f32) * self.voxel_size_mm
+        self.origin_ras + Vec3::new(ix as f32, iy as f32, iz as f32) * self.voxel_size_mm.0
     }
 
     pub fn flat_index(&self, ix: u32, iy: u32, iz: u32) -> u32 {
@@ -103,7 +105,7 @@ impl OrientationGridSpec {
     }
 
     pub fn point_to_voxel(&self, point: Vec3) -> Option<[u32; 3]> {
-        let rel = (point - self.origin_ras) / self.voxel_size_mm;
+        let rel = (point - self.origin_ras) / self.voxel_size_mm.0;
         let ix = rel.x.floor() as i32;
         let iy = rel.y.floor() as i32;
         let iz = rel.z.floor() as i32;
@@ -251,7 +253,7 @@ impl BoundaryContactField {
         streamlines: &[StreamlineSet],
         params: &BoundaryGlyphParams,
     ) -> Option<Self> {
-        let voxel_size = params.voxel_size_mm.max(0.5);
+        let voxel_size = params.voxel_size_mm.max(Millimeters(0.5));
         let mut bbox_min = Vec3::splat(f32::INFINITY);
         let mut bbox_max = Vec3::splat(f32::NEG_INFINITY);
         let mut any_points = false;
@@ -267,14 +269,14 @@ impl BoundaryContactField {
             return None;
         }
 
-        let pad = Vec3::splat(voxel_size);
+        let pad = Vec3::splat(voxel_size.0);
         bbox_min -= pad;
         bbox_max += pad;
-        let extent = (bbox_max - bbox_min).max(Vec3::splat(voxel_size));
+        let extent = (bbox_max - bbox_min).max(Vec3::splat(voxel_size.0));
         let dims = [
-            ((extent.x / voxel_size).ceil() as u32).max(1),
-            ((extent.y / voxel_size).ceil() as u32).max(1),
-            ((extent.z / voxel_size).ceil() as u32).max(1),
+            ((extent.x / voxel_size.0).ceil() as u32).max(1),
+            ((extent.y / voxel_size.0).ceil() as u32).max(1),
+            ((extent.z / voxel_size.0).ceil() as u32).max(1),
         ];
         let grid = OrientationGridSpec {
             origin_ras: bbox_min,
@@ -602,7 +604,7 @@ fn segment_exit_from_voxel_box(
         return None;
     }
     let bmin = grid.voxel_box_min(voxel[0], voxel[1], voxel[2]);
-    let bmax = bmin + Vec3::splat(grid.voxel_size_mm);
+    let bmax = bmin + Vec3::splat(grid.voxel_size_mm.0);
     let mut best_t = f32::INFINITY;
 
     for axis in 0..3 {
@@ -661,7 +663,7 @@ mod tests {
         let grid = OrientationGridSpec {
             origin_ras: Vec3::new(-5.0, -5.0, -5.0),
             dims: [4, 5, 6],
-            voxel_size_mm: 2.0,
+            voxel_size_mm: Millimeters(2.0),
         };
         let flat = grid.flat_index(2, 3, 4);
         assert_eq!(grid.unflatten(flat), [2, 3, 4]);
@@ -672,7 +674,7 @@ mod tests {
         let grid = OrientationGridSpec {
             origin_ras: Vec3::ZERO,
             dims: [4, 4, 4],
-            voxel_size_mm: 2.0,
+            voxel_size_mm: Millimeters(2.0),
         };
         let p0 = Vec3::new(0.5, 0.5, 0.5);
         let p1 = Vec3::new(2.5, 0.5, 0.5);

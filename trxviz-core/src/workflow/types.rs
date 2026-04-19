@@ -16,6 +16,7 @@ use crate::data::parcellation_data::ParcellationVolume;
 use crate::data::trx_data::{ColorMode, RenderStyle, TrxGpuData};
 use crate::lighting::WorkflowRender3D;
 use crate::renderer::mesh_renderer::SurfaceColormap;
+use crate::units::{Millimeters, ParcelId, StreamlineIndex};
 use trx_rs::DuplicateRemovalParams;
 
 #[derive(
@@ -65,10 +66,10 @@ pub enum WorkflowNodeKind {
     },
     SphereQuery {
         center: [f32; 3],
-        radius_mm: f32,
+        radius_mm: Millimeters,
     },
     SurfaceDepthQuery {
-        depth_mm: f32,
+        depth_mm: Millimeters,
     },
     RemoveDuplicates {
         params: DuplicateRemovalParams,
@@ -98,10 +99,10 @@ pub enum WorkflowNodeKind {
         color: [f32; 4],
     },
     SurfaceProjectionDensity {
-        depth_mm: f32,
+        depth_mm: Millimeters,
     },
     SurfaceProjectionMeanDps {
-        depth_mm: f32,
+        depth_mm: Millimeters,
         field: String,
     },
     SurfaceOverlayStack {
@@ -112,18 +113,18 @@ pub enum WorkflowNodeKind {
         #[serde(default)]
         per_group: bool,
         build_mode: BundleSurfaceBuildMode,
-        voxel_size_mm: f32,
+        voxel_size_mm: Millimeters,
         threshold: f32,
         smooth_sigma: f32,
         #[serde(default = "default_bundle_surface_min_component_volume_mm3")]
-        min_component_volume_mm3: f32,
-        tube_radius_mm: f32,
+        min_component_volume_mm3: Millimeters,
+        tube_radius_mm: Millimeters,
         tube_sides: u32,
         opacity: f32,
     },
     BoundaryFieldBuild {
         #[serde(default = "default_boundary_field_voxel_size_mm")]
-        voxel_size_mm: f32,
+        voxel_size_mm: Millimeters,
         #[serde(default = "default_boundary_field_sphere_lod")]
         sphere_lod: u32,
         #[serde(default = "default_boundary_field_normalization")]
@@ -133,9 +134,9 @@ pub enum WorkflowNodeKind {
         #[serde(default = "default_enabled")]
         enabled: bool,
         render_style: RenderStyle,
-        tube_radius_mm: f32,
+        tube_radius_mm: Millimeters,
         tube_sides: u32,
-        slab_half_width_mm: f32,
+        slab_half_width_mm: Millimeters,
     },
     VolumeDisplay {
         colormap: VolumeColormap,
@@ -225,7 +226,7 @@ pub enum WorkflowNodeKind {
         #[serde(default = "default_full_opacity")]
         opacity: f32,
         #[serde(default = "default_fixel_slab_thickness_mm")]
-        slab_thickness_mm: f32,
+        slab_thickness_mm: Millimeters,
         #[serde(default = "default_fixel_length_scale")]
         length_scale: f32,
         #[serde(default = "default_enabled")]
@@ -319,8 +320,8 @@ pub fn default_full_opacity() -> f32 {
     1.0
 }
 
-pub fn default_fixel_slab_thickness_mm() -> f32 {
-    1.0
+pub fn default_fixel_slab_thickness_mm() -> Millimeters {
+    Millimeters(1.0)
 }
 
 pub fn default_odf_glyph_scale() -> f32 {
@@ -339,8 +340,8 @@ pub fn default_enabled() -> bool {
     true
 }
 
-pub fn default_boundary_field_voxel_size_mm() -> f32 {
-    3.0
+pub fn default_boundary_field_voxel_size_mm() -> Millimeters {
+    Millimeters(3.0)
 }
 
 pub fn default_boundary_field_sphere_lod() -> u32 {
@@ -375,8 +376,8 @@ pub fn default_bundle_surface_outline_thickness() -> f32 {
     1.15
 }
 
-pub fn default_bundle_surface_min_component_volume_mm3() -> f32 {
-    0.0
+pub fn default_bundle_surface_min_component_volume_mm3() -> Millimeters {
+    Millimeters(0.0)
 }
 
 #[derive(
@@ -769,7 +770,7 @@ pub struct FixelDrawPlan {
     pub length_scale: f32,
     pub opacity: f32,
     pub offset_from_slice: f32,
-    pub slab_thickness_mm: f32,
+    pub slab_thickness_mm: Millimeters,
     pub visible: bool,
     pub colormap_code: u32,
     pub scalar_range: (f32, f32),
@@ -819,7 +820,7 @@ impl Default for SceneFramePlan {
 #[derive(Clone)]
 pub struct StreamlineFlow {
     pub dataset: Arc<StreamlineDataset>,
-    pub selected_streamlines: Arc<Vec<u32>>,
+    pub selected_streamlines: Arc<Vec<StreamlineIndex>>,
     pub color_mode: ColorMode,
     pub scalar_auto_range: bool,
     pub scalar_range_min: f32,
@@ -857,9 +858,9 @@ pub struct StreamlineDrawPlan {
     pub visible: bool,
     pub flow: StreamlineFlow,
     pub render_style: RenderStyle,
-    pub tube_radius_mm: f32,
+    pub tube_radius_mm: Millimeters,
     pub tube_sides: u32,
-    pub slab_half_width_mm: f32,
+    pub slab_half_width_mm: Millimeters,
 }
 
 #[derive(Clone)]
@@ -873,11 +874,11 @@ pub struct BundleDrawPlan {
     pub per_group: bool,
     pub color_mode: BundleSurfaceColorMode,
     pub build_mode: BundleSurfaceBuildMode,
-    pub voxel_size_mm: f32,
+    pub voxel_size_mm: Millimeters,
     pub threshold: f32,
     pub smooth_sigma: f32,
-    pub min_component_volume_mm3: f32,
-    pub tube_radius_mm: f32,
+    pub min_component_volume_mm3: Millimeters,
+    pub tube_radius_mm: Millimeters,
     pub tube_sides: u32,
     pub opacity: f32,
     pub outline_thickness: f32,
@@ -935,7 +936,7 @@ pub const DEFAULT_SURFACE_BASE_RGBA: [f32; 4] = [0.72, 0.72, 0.72, 1.0];
 #[derive(Clone)]
 pub struct ParcellationDrawPlan {
     pub source_id: FileId,
-    pub labels: BTreeSet<u32>,
+    pub labels: BTreeSet<ParcelId>,
     pub opacity: f32,
 }
 
@@ -945,7 +946,7 @@ pub struct SurfaceQueryPlan {
     pub flow: StreamlineFlow,
     pub surface_id: FileId,
     pub surface: Arc<GiftiSurfaceData>,
-    pub depth_mm: f32,
+    pub depth_mm: Millimeters,
 }
 
 #[derive(Clone)]
@@ -954,7 +955,7 @@ pub struct SurfaceMapPlan {
     pub flow: StreamlineFlow,
     pub surface_id: FileId,
     pub surface: Arc<GiftiSurfaceData>,
-    pub depth_mm: f32,
+    pub depth_mm: Millimeters,
     pub dps_field: Option<String>,
 }
 
@@ -966,20 +967,20 @@ pub enum ReactiveStreamlineOp {
     },
     ParcelROI {
         parcellation: Arc<ParcellationVolume>,
-        labels: BTreeSet<u32>,
+        labels: BTreeSet<ParcelId>,
     },
     ParcelROA {
         parcellation: Arc<ParcellationVolume>,
-        labels: BTreeSet<u32>,
+        labels: BTreeSet<ParcelId>,
     },
     ParcelEnd {
         parcellation: Arc<ParcellationVolume>,
-        labels: BTreeSet<u32>,
+        labels: BTreeSet<ParcelId>,
         endpoint_count: usize,
     },
     ParcelCrop {
         parcellation: Arc<ParcellationVolume>,
-        labels: BTreeSet<u32>,
+        labels: BTreeSet<ParcelId>,
         keep_inside: bool,
     },
     AddGroupsFromParcellation {
@@ -1004,11 +1005,11 @@ pub struct BundleSurfacePlan {
     pub flow: StreamlineFlow,
     pub per_group: bool,
     pub build_mode: BundleSurfaceBuildMode,
-    pub voxel_size_mm: f32,
+    pub voxel_size_mm: Millimeters,
     pub threshold: f32,
     pub smooth_sigma: f32,
-    pub min_component_volume_mm3: f32,
-    pub tube_radius_mm: f32,
+    pub min_component_volume_mm3: Millimeters,
+    pub tube_radius_mm: Millimeters,
     pub tube_sides: u32,
     pub opacity: f32,
 }
@@ -1018,7 +1019,7 @@ pub struct BoundaryFieldPlan {
     pub build_node_uuid: WorkflowNodeUuid,
     pub label: String,
     pub flow: StreamlineFlow,
-    pub voxel_size_mm: f32,
+    pub voxel_size_mm: Millimeters,
     pub sphere_lod: u32,
     pub normalization: BoundaryGlyphNormalization,
 }
@@ -1053,7 +1054,7 @@ pub struct SaveStreamlinePlan {
 #[derive(Clone)]
 pub(super) struct ParcelSelection {
     pub source_id: FileId,
-    pub labels: BTreeSet<u32>,
+    pub labels: BTreeSet<ParcelId>,
 }
 
 #[derive(Clone)]

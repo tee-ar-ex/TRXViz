@@ -929,7 +929,7 @@ impl super::TrxVizApp {
             field.grid.dims[0] as f32,
             field.grid.dims[1] as f32,
             field.grid.dims[2] as f32,
-        ) * field.grid.voxel_size_mm;
+        ) * field.grid.voxel_size_mm.0;
         let center = field.grid.origin_ras + 0.5 * size;
         let axial_extent = size.x.max(size.y);
         let coronal_extent = size.x.max(size.z);

@@ -1,5 +1,6 @@
 use crate::data::orientation_field::BoundaryContactField;
 use crate::data::trx_data::{TubeMeshVertex, build_tube_vertices_from_data};
+use crate::units::Millimeters;
 use glam::Vec3;
 use lin_alg::f32::Vec3 as LinVec3;
 use mcubes::{MarchingCubes, MeshSide};
@@ -562,7 +563,7 @@ pub fn build_bundle_mesh(
     voxel_size: f32,
     threshold: f32,
     smooth_sigma: f32,
-    min_component_volume_mm3: f32,
+    min_component_volume: Millimeters,
     color_strategy: BundleMeshColorStrategy,
     boundary_field: Option<&BoundaryContactField>,
 ) -> Option<BundleMesh> {
@@ -705,7 +706,7 @@ pub fn build_bundle_mesh(
     let raw_indices: Vec<u32> = mesh.indices.iter().map(|&i| i as u32).collect();
 
     // ── 7. Filter connected components by enclosed volume ───────────────────
-    let min_component_volume_mm3 = min_component_volume_mm3.max(0.0);
+    let min_component_volume_mm3 = min_component_volume.0.max(0.0);
     let indices = connected_components(&vertices, &raw_indices)
         .into_iter()
         .filter(|component| component.volume_mm3 >= min_component_volume_mm3)
@@ -725,18 +726,18 @@ pub fn build_streamtube_bundle_mesh(
     positions: &[[f32; 3]],
     colors: &[[f32; 4]],
     offsets: &[u32],
-    tube_radius_mm: f32,
+    tube_radius: Millimeters,
     tube_sides: u32,
 ) -> Option<BundleMesh> {
     let (tube_vertices, tube_indices) =
-        build_tube_vertices_from_data(positions, colors, offsets, tube_radius_mm, tube_sides);
+        build_tube_vertices_from_data(positions, colors, offsets, tube_radius.0, tube_sides);
     if tube_indices.is_empty() {
         return None;
     }
 
-    let union = TubeUnion::build(positions, offsets, tube_radius_mm.max(0.001));
+    let union = TubeUnion::build(positions, offsets, tube_radius.max(Millimeters(0.001)));
     let visible_triangles =
-        cull_buried_streamtube_triangles(&tube_vertices, &tube_indices, &union, tube_radius_mm);
+        cull_buried_streamtube_triangles(&tube_vertices, &tube_indices, &union, tube_radius);
     if visible_triangles.is_empty() {
         return None;
     }
@@ -768,14 +769,14 @@ pub fn build_streamtube_bundle_mesh(
 #[derive(Default)]
 struct TubeUnion {
     cell_size: f32,
-    radius_mm: f32,
+    radius: Millimeters,
     segments: Vec<([f32; 3], [f32; 3])>,
     cells: HashMap<(i32, i32, i32), Vec<usize>>,
 }
 
 impl TubeUnion {
-    fn build(positions: &[[f32; 3]], offsets: &[u32], radius_mm: f32) -> Self {
-        let cell_size = (radius_mm * 2.0).max(1e-3);
+    fn build(positions: &[[f32; 3]], offsets: &[u32], radius: Millimeters) -> Self {
+        let cell_size = (radius.0 * 2.0).max(1e-3);
         let mut segments = Vec::<([f32; 3], [f32; 3])>::new();
         let mut cells = HashMap::<(i32, i32, i32), Vec<usize>>::new();
 
@@ -796,14 +797,14 @@ impl TubeUnion {
                 segments.push((p0, p1));
 
                 let min = [
-                    p0[0].min(p1[0]) - radius_mm,
-                    p0[1].min(p1[1]) - radius_mm,
-                    p0[2].min(p1[2]) - radius_mm,
+                    p0[0].min(p1[0]) - radius.0,
+                    p0[1].min(p1[1]) - radius.0,
+                    p0[2].min(p1[2]) - radius.0,
                 ];
                 let max = [
-                    p0[0].max(p1[0]) + radius_mm,
-                    p0[1].max(p1[1]) + radius_mm,
-                    p0[2].max(p1[2]) + radius_mm,
+                    p0[0].max(p1[0]) + radius.0,
+                    p0[1].max(p1[1]) + radius.0,
+                    p0[2].max(p1[2]) + radius.0,
                 ];
                 let min_key = quantize_grid_point(min, cell_size);
                 let max_key = quantize_grid_point(max, cell_size);
@@ -819,7 +820,7 @@ impl TubeUnion {
 
         Self {
             cell_size,
-            radius_mm,
+            radius,
             segments,
             cells,
         }
@@ -827,7 +828,7 @@ impl TubeUnion {
 
     fn contains(&self, point: [f32; 3]) -> bool {
         let key = quantize_grid_point(point, self.cell_size);
-        let radius2 = self.radius_mm * self.radius_mm;
+        let radius2 = self.radius.0 * self.radius.0;
         self.cells.get(&key).is_some_and(|segments| {
             segments.iter().copied().any(|segment_index| {
                 let (start, end) = self.segments[segment_index];
@@ -841,9 +842,9 @@ fn cull_buried_streamtube_triangles(
     vertices: &[TubeMeshVertex],
     indices: &[u32],
     union: &TubeUnion,
-    tube_radius_mm: f32,
+    tube_radius: Millimeters,
 ) -> Vec<u32> {
-    let probe_epsilon = (tube_radius_mm * 0.1).max(0.02);
+    let probe_epsilon = (tube_radius.0 * 0.1).max(0.02);
     let mut kept = Vec::<u32>::new();
 
     for tri in indices.chunks_exact(3) {
@@ -914,6 +915,7 @@ mod tests {
         build_streamtube_bundle_mesh, component_volume_mm3, connected_components, group_neighbors,
         welded_vertex_groups,
     };
+    use crate::units::Millimeters;
     use glam::Vec3;
 
     fn vertex(position: [f32; 3]) -> BundleMeshVertex {
@@ -1013,7 +1015,14 @@ mod tests {
         ];
         let offsets = vec![0, 3, 6];
 
-        let mesh = build_streamtube_bundle_mesh(&positions, &colors, &offsets, 0.2, 6).unwrap();
+        let mesh = build_streamtube_bundle_mesh(
+            &positions,
+            &colors,
+            &offsets,
+            Millimeters(0.2),
+            6,
+        )
+        .unwrap();
 
         assert!(!mesh.indices.is_empty());
         assert!(

@@ -34,6 +34,7 @@ use crate::scene::{
     HeadlessScene, HeadlessWorkflowState, LoadedGiftiSurface, LoadedParcellationSource,
     LoadedStreamlineSource, direct_streamline_import_warnings,
 };
+use crate::units::Millimeters;
 use crate::workflow::{
     BundleSurfacePlan, CachedBoundaryField, CachedBundleSurfaceMeshes, CachedDerivedStreamline,
     CachedSurfaceQuery, CachedSurfaceStreamlineMap, CachedTubeGeometry, LoadedParcellation,
@@ -150,7 +151,7 @@ struct HeadlessRenderData {
     fixel_3d_colormap_code: u32,
     fixel_3d_scalar_range: [f32; 2],
     fixel_2d_line_width: f32,
-    fixel_2d_slab_half_width_mm: f32,
+    fixel_2d_slab_half_width_mm: Millimeters,
     fixel_2d_opacity: f32,
     fixel_2d_colormap_code: u32,
     fixel_2d_scalar_range: [f32; 2],
@@ -1361,7 +1362,7 @@ fn build_gpu_resources(
                 cache.field.grid.dims[0] as f32,
                 cache.field.grid.dims[1] as f32,
                 cache.field.grid.dims[2] as f32,
-            ) * cache.field.grid.voxel_size_mm;
+            ) * cache.field.grid.voxel_size_mm.0;
             expand(origin);
             expand(origin + size);
         }
@@ -1711,7 +1712,7 @@ fn build_render_data(
                 file_id: draw.draw_id,
                 visible: draw.visible,
                 render_style: draw.render_style,
-                tube_radius: draw.tube_radius_mm,
+                tube_radius: draw.tube_radius_mm.0,
             })
             .collect::<Vec<_>>()
     };
@@ -1795,8 +1796,8 @@ fn build_render_data(
             .unwrap_or([0.0, 1.0]),
         fixel_2d_line_width: fixel_2d_draw.map(|p| p.line_width).unwrap_or(0.006),
         fixel_2d_slab_half_width_mm: fixel_2d_draw
-            .map(|p| (p.slab_thickness_mm * 0.5).max(0.0))
-            .unwrap_or(1.0),
+            .map(|p| (p.slab_thickness_mm * 0.5).max(Millimeters(0.0)))
+            .unwrap_or(Millimeters(1.0)),
         fixel_2d_opacity: fixel_2d_draw.map(|p| p.opacity).unwrap_or(1.0),
         fixel_2d_colormap_code: fixel_2d_draw.map(|p| p.colormap_code).unwrap_or(0),
         fixel_2d_scalar_range: fixel_2d_draw
@@ -2455,7 +2456,7 @@ fn render_scene2d_to_png(
                 glam::Vec3::ZERO,
                 slab_normal,
                 slab_center,
-                render_data.fixel_2d_slab_half_width_mm,
+                render_data.fixel_2d_slab_half_width_mm.0,
                 1,
                 render_data.fixel_2d_line_width,
                 render_data.fixel_2d_opacity,
@@ -4063,7 +4064,7 @@ mod tests {
         node_uuid: WorkflowNodeUuid,
         line_width: f32,
         opacity: f32,
-        slab_thickness_mm: f32,
+        slab_thickness_mm: Millimeters,
         visible: bool,
         colormap_code: u32,
         scalar_range: (f32, f32),
@@ -4107,7 +4108,7 @@ mod tests {
                 WorkflowNodeUuid(101),
                 0.125,
                 0.4,
-                8.0,
+                Millimeters(8.0),
                 true,
                 3,
                 (10.0, 20.0),
@@ -4121,7 +4122,7 @@ mod tests {
                 WorkflowNodeUuid(202),
                 0.5,
                 0.9,
-                14.0,
+                Millimeters(14.0),
                 true,
                 4,
                 (30.0, 40.0),
@@ -4138,6 +4139,6 @@ mod tests {
         assert_eq!(render_data.fixel_2d_opacity, 0.9);
         assert_eq!(render_data.fixel_2d_colormap_code, 4);
         assert_eq!(render_data.fixel_2d_scalar_range, [30.0, 40.0]);
-        assert_eq!(render_data.fixel_2d_slab_half_width_mm, 7.0);
+        assert_eq!(render_data.fixel_2d_slab_half_width_mm, Millimeters(7.0));
     }
 }

@@ -438,7 +438,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 pos,
                 WorkflowNodeKind::SphereQuery {
                     center: [0.0, 0.0, 0.0],
-                    radius_mm: 10.0,
+                    radius_mm: trxviz_core::units::Millimeters(10.0),
                 },
                 measured_node_sizes,
             );
@@ -446,7 +446,9 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::SurfaceDepthQuery { depth_mm: 2.0 },
+                WorkflowNodeKind::SurfaceDepthQuery {
+                    depth_mm: trxviz_core::units::Millimeters(2.0),
+                },
                 measured_node_sizes,
             );
             add_node_button(
@@ -578,7 +580,9 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::SurfaceProjectionDensity { depth_mm: 2.0 },
+                WorkflowNodeKind::SurfaceProjectionDensity {
+                    depth_mm: trxviz_core::units::Millimeters(2.0),
+                },
                 measured_node_sizes,
             );
             add_node_button(
@@ -586,7 +590,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 snarl,
                 pos,
                 WorkflowNodeKind::SurfaceProjectionMeanDps {
-                    depth_mm: 2.0,
+                    depth_mm: trxviz_core::units::Millimeters(2.0),
                     field: String::new(),
                 },
                 measured_node_sizes,
@@ -601,9 +605,9 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 WorkflowNodeKind::StreamlineDisplay {
                     enabled: true,
                     render_style: RenderStyle::Flat,
-                    tube_radius_mm: 0.4,
+                    tube_radius_mm: trxviz_core::units::Millimeters(0.4),
                     tube_sides: 8,
-                    slab_half_width_mm: 5.0,
+                    slab_half_width_mm: trxviz_core::units::Millimeters(5.0),
                 },
                 measured_node_sizes,
             );
@@ -646,11 +650,11 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 WorkflowNodeKind::BundleSurfaceBuild {
                     per_group: false,
                     build_mode: BundleSurfaceBuildMode::MarchingCubes,
-                    voxel_size_mm: 2.0,
+                    voxel_size_mm: trxviz_core::units::Millimeters(2.0),
                     threshold: 3.0,
                     smooth_sigma: 0.5,
-                    min_component_volume_mm3: 0.0,
-                    tube_radius_mm: 0.4,
+                    min_component_volume_mm3: trxviz_core::units::Millimeters(0.0),
+                    tube_radius_mm: trxviz_core::units::Millimeters(0.4),
                     tube_sides: 8,
                     opacity: 0.5,
                 },
@@ -1135,9 +1139,9 @@ mod tests {
             kind: WorkflowNodeKind::StreamlineDisplay {
                 enabled: true,
                 render_style: RenderStyle::Flat,
-                tube_radius_mm: 0.4,
+                tube_radius_mm: trxviz_core::units::Millimeters(0.4),
                 tube_sides: 8,
-                slab_half_width_mm: 5.0,
+                slab_half_width_mm: trxviz_core::units::Millimeters(5.0),
             },
         };
 

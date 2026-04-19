@@ -1,4 +1,5 @@
 use crate::data::gifti_data::GiftiSurfaceData;
+use crate::units::{Millimeters, StreamlineIndex};
 use glam::Vec3;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -52,7 +53,7 @@ pub struct TrxGpuData {
     /// Available DPS field names.
     pub dps_names: Vec<String>,
     /// Available group names and their streamline indices.
-    pub groups: Vec<(String, Vec<u32>)>,
+    pub groups: Vec<(String, Vec<StreamlineIndex>)>,
     /// Optional per-group colors from DPG metadata, aligned with `groups`.
     pub group_colors: Vec<Option<[f32; 4]>>,
     /// Cached DPV data: each entry is a flat `Vec<f32>` with one value per vertex.
@@ -168,10 +169,15 @@ impl TrxGpuData {
         let nb_vertices = positions.len();
         let nb_streamlines = tractogram.nb_streamlines();
         let offsets = tractogram.offsets().to_vec();
-        let groups: Vec<(String, Vec<u32>)> = tractogram
+        let groups: Vec<(String, Vec<StreamlineIndex>)> = tractogram
             .groups()
             .iter()
-            .map(|(name, members)| (name.clone(), members.clone()))
+            .map(|(name, members)| {
+                (
+                    name.clone(),
+                    members.iter().copied().map(StreamlineIndex).collect(),
+                )
+            })
             .collect();
         let group_colors = groups
             .iter()
@@ -269,10 +275,10 @@ impl TrxGpuData {
 
     /// Query streamlines intersecting a sphere. Returns matching streamline indices.
     /// Uses AABB broad phase then per-vertex distance check.
-    pub fn query_sphere(&self, center: Vec3, radius: f32) -> HashSet<u32> {
-        let r2 = radius * radius;
-        let sphere_min = center - Vec3::splat(radius);
-        let sphere_max = center + Vec3::splat(radius);
+    pub fn query_sphere(&self, center: Vec3, radius: Millimeters) -> HashSet<StreamlineIndex> {
+        let r2 = radius.0 * radius.0;
+        let sphere_min = center - Vec3::splat(radius.0);
+        let sphere_max = center + Vec3::splat(radius.0);
         let mut result = HashSet::new();
 
         for si in 0..self.nb_streamlines {
@@ -287,7 +293,7 @@ impl TrxGpuData {
             for vi in start..end {
                 let p = Vec3::from(self.positions[vi]);
                 if (p - center).length_squared() <= r2 {
-                    result.insert(si as u32);
+                    result.insert(StreamlineIndex(si as u32));
                     break;
                 }
             }
@@ -297,15 +303,19 @@ impl TrxGpuData {
 
     /// Query streamlines that pass within `depth_mm` of the surface.
     /// Uses streamline AABB and surface AABB broad phase, then nearest surface-vertex distance.
-    pub fn query_near_surface(&self, surface: &GiftiSurfaceData, depth_mm: f32) -> HashSet<u32> {
+    pub fn query_near_surface(
+        &self,
+        surface: &GiftiSurfaceData,
+        depth_mm: Millimeters,
+    ) -> HashSet<StreamlineIndex> {
         let mut result = HashSet::new();
-        if depth_mm <= 0.0 || surface.vertices.is_empty() {
+        if depth_mm.0 <= 0.0 || surface.vertices.is_empty() {
             return result;
         }
-        let depth2 = depth_mm * depth_mm;
-        let smin = surface.bbox_min - Vec3::splat(depth_mm);
-        let smax = surface.bbox_max + Vec3::splat(depth_mm);
-        let grid = SurfaceSpatialGrid::build(&surface.vertices, depth_mm.max(0.5));
+        let depth2 = depth_mm.0 * depth_mm.0;
+        let smin = surface.bbox_min - Vec3::splat(depth_mm.0);
+        let smax = surface.bbox_max + Vec3::splat(depth_mm.0);
+        let grid = SurfaceSpatialGrid::build(&surface.vertices, depth_mm.0.max(0.5));
 
         for si in 0..self.nb_streamlines {
             let aabb = &self.aabbs[si];
@@ -328,7 +338,7 @@ impl TrxGpuData {
                 if let Some((_, d2)) = grid.nearest_vertex(&surface.vertices, p)
                     && d2 <= depth2
                 {
-                    result.insert(si as u32);
+                    result.insert(StreamlineIndex(si as u32));
                     break;
                 }
             }
@@ -341,25 +351,25 @@ impl TrxGpuData {
     pub fn project_selected_to_surface(
         &self,
         surface: &GiftiSurfaceData,
-        selected_streamlines: &[u32],
-        depth_mm: f32,
+        selected_streamlines: &[StreamlineIndex],
+        depth_mm: Millimeters,
         dps_values: Option<&[f32]>,
     ) -> (Vec<f32>, Vec<f32>) {
         let n = surface.vertices.len();
         let mut density = vec![0.0f32; n];
         let mut dps_sum = vec![0.0f32; n];
         let mut dps_count = vec![0u32; n];
-        if depth_mm <= 0.0 || n == 0 {
+        if depth_mm.0 <= 0.0 || n == 0 {
             return (density, vec![f32::NAN; n]);
         }
 
-        let depth2 = depth_mm * depth_mm;
-        let smin = surface.bbox_min - Vec3::splat(depth_mm);
-        let smax = surface.bbox_max + Vec3::splat(depth_mm);
-        let grid = SurfaceSpatialGrid::build(&surface.vertices, depth_mm.max(0.5));
+        let depth2 = depth_mm.0 * depth_mm.0;
+        let smin = surface.bbox_min - Vec3::splat(depth_mm.0);
+        let smax = surface.bbox_max + Vec3::splat(depth_mm.0);
+        let grid = SurfaceSpatialGrid::build(&surface.vertices, depth_mm.0.max(0.5));
 
         for &si_u32 in selected_streamlines {
-            let si = si_u32 as usize;
+            let si = si_u32.0 as usize;
             if si + 1 >= self.offsets.len() {
                 continue;
             }
@@ -422,7 +432,7 @@ impl TrxGpuData {
                 .or_else(|| group_name_color(name))
                 .unwrap_or(palette[gi % palette.len()]);
             for &streamline_idx in members {
-                let si = streamline_idx as usize;
+                let si = streamline_idx.0 as usize;
                 if si + 1 < self.offsets.len() {
                     let start = self.offsets[si] as usize;
                     let end = self.offsets[si + 1] as usize;
@@ -443,17 +453,17 @@ impl TrxGpuData {
     /// selected streamlines (by streamline index).  Used to feed the bundle mesh.
     pub fn selected_vertex_data(
         &self,
-        selected_streamlines: &[u32],
+        selected_streamlines: &[StreamlineIndex],
     ) -> (Vec<[f32; 3]>, Vec<[f32; 4]>) {
         let total: usize = selected_streamlines
             .iter()
-            .map(|&si| (self.offsets[si as usize + 1] - self.offsets[si as usize]) as usize)
+            .map(|&si| (self.offsets[si.0 as usize + 1] - self.offsets[si.0 as usize]) as usize)
             .sum();
         let mut positions = Vec::with_capacity(total);
         let mut colors = Vec::with_capacity(total);
         for &si in selected_streamlines {
-            let start = self.offsets[si as usize] as usize;
-            let end = self.offsets[si as usize + 1] as usize;
+            let start = self.offsets[si.0 as usize] as usize;
+            let end = self.offsets[si.0 as usize + 1] as usize;
             positions.extend_from_slice(&self.positions[start..end]);
             colors.extend_from_slice(&self.colors[start..end]);
         }
@@ -463,11 +473,11 @@ impl TrxGpuData {
     /// Gather selected streamline positions/colors into contiguous arrays and offsets.
     pub fn selected_tube_data(
         &self,
-        selected_streamlines: &[u32],
+        selected_streamlines: &[StreamlineIndex],
     ) -> (Vec<[f32; 3]>, Vec<[f32; 4]>, Vec<u32>) {
         let total: usize = selected_streamlines
             .iter()
-            .map(|&si| (self.offsets[si as usize + 1] - self.offsets[si as usize]) as usize)
+            .map(|&si| (self.offsets[si.0 as usize + 1] - self.offsets[si.0 as usize]) as usize)
             .sum();
         let mut positions = Vec::with_capacity(total);
         let mut colors = Vec::with_capacity(total);
@@ -475,8 +485,8 @@ impl TrxGpuData {
         offsets.push(0);
 
         for &si in selected_streamlines {
-            let start = self.offsets[si as usize] as usize;
-            let end = self.offsets[si as usize + 1] as usize;
+            let start = self.offsets[si.0 as usize] as usize;
+            let end = self.offsets[si.0 as usize + 1] as usize;
             positions.extend_from_slice(&self.positions[start..end]);
             colors.extend_from_slice(&self.colors[start..end]);
             offsets.push(positions.len() as u32);
@@ -485,10 +495,10 @@ impl TrxGpuData {
         (positions, colors, offsets)
     }
 
-    pub fn subset_streamlines(&self, selected_streamlines: &[u32]) -> Self {
+    pub fn subset_streamlines(&self, selected_streamlines: &[StreamlineIndex]) -> Self {
         let total_vertices: usize = selected_streamlines
             .iter()
-            .map(|&si| (self.offsets[si as usize + 1] - self.offsets[si as usize]) as usize)
+            .map(|&si| (self.offsets[si.0 as usize + 1] - self.offsets[si.0 as usize]) as usize)
             .sum();
 
         let mut positions = Vec::with_capacity(total_vertices);
@@ -499,17 +509,17 @@ impl TrxGpuData {
         offsets.push(0);
 
         for (new_index, &old_index_u32) in selected_streamlines.iter().enumerate() {
-            let old_index = old_index_u32 as usize;
+            let old_index = old_index_u32.0 as usize;
             let start = self.offsets[old_index] as usize;
             let end = self.offsets[old_index + 1] as usize;
             positions.extend_from_slice(&self.positions[start..end]);
             tangents.extend_from_slice(&self.tangents[start..end]);
             colors.extend_from_slice(&self.colors[start..end]);
             offsets.push(positions.len() as u32);
-            old_to_new.insert(old_index_u32, new_index as u32);
+            old_to_new.insert(old_index_u32, StreamlineIndex(new_index as u32));
         }
 
-        let groups: Vec<(String, Vec<u32>)> = self
+        let groups: Vec<(String, Vec<StreamlineIndex>)> = self
             .groups
             .iter()
             .map(|(name, members)| {
@@ -527,7 +537,7 @@ impl TrxGpuData {
             .map(|(name, data)| {
                 let subset = selected_streamlines
                     .iter()
-                    .filter_map(|index| data.get(*index as usize).copied())
+                    .filter_map(|index| data.get(index.0 as usize).copied())
                     .collect();
                 (name.clone(), subset)
             })
@@ -539,8 +549,8 @@ impl TrxGpuData {
             .map(|(name, data)| {
                 let mut subset = Vec::with_capacity(total_vertices);
                 for &streamline_index in selected_streamlines {
-                    let start = self.offsets[streamline_index as usize] as usize;
-                    let end = self.offsets[streamline_index as usize + 1] as usize;
+                    let start = self.offsets[streamline_index.0 as usize] as usize;
+                    let end = self.offsets[streamline_index.0 as usize + 1] as usize;
                     subset.extend_from_slice(&data[start..end]);
                 }
                 (name.clone(), subset)
@@ -584,7 +594,7 @@ impl TrxGpuData {
 struct ExtractedMetadata {
     dpv_data: Vec<(String, Vec<f32>)>,
     dps_data: Vec<(String, Vec<f32>)>,
-    groups: Vec<(String, Vec<u32>)>,
+    groups: Vec<(String, Vec<StreamlineIndex>)>,
     group_colors: Vec<Option<[f32; 4]>>,
 }
 
@@ -617,7 +627,16 @@ fn extract_metadata(
         })
         .collect();
 
-    let groups = trx.groups_owned();
+    let groups: Vec<(String, Vec<StreamlineIndex>)> = trx
+        .groups_owned()
+        .into_iter()
+        .map(|(name, members)| {
+            (
+                name,
+                members.into_iter().map(StreamlineIndex).collect::<Vec<_>>(),
+            )
+        })
+        .collect();
     let group_colors = groups
         .iter()
         .map(|(name, _)| extract_group_color_from_any(trx, name))

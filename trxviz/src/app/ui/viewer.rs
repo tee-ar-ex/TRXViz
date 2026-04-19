@@ -1043,7 +1043,7 @@ impl super::super::TrxVizApp {
             .viewport
             .boundary_field
             .as_ref()
-            .map(|field| 0.5 * field.grid.voxel_size_mm)
+            .map(|field| 0.5 * field.grid.voxel_size_mm.0)
             .or_else(|| {
                 self.workflow
                     .runtime
@@ -1175,8 +1175,8 @@ impl super::super::TrxVizApp {
                 file_id: draw.draw_id,
                 visible: draw.visible,
                 render_style: draw.render_style,
-                tube_radius: draw.tube_radius_mm,
-                slab_half_width: draw.slab_half_width_mm,
+                tube_radius: draw.tube_radius_mm.0,
+                slab_half_width: draw.slab_half_width_mm.0,
             })
             .collect::<Vec<_>>();
 
@@ -1250,8 +1250,9 @@ impl super::super::TrxVizApp {
             odx_fixel_line_width: fixel_3d_draw.map(|p| p.line_width).unwrap_or(0.006),
             odx_fixel_opacity: fixel_3d_draw.map(|p| p.opacity).unwrap_or(1.0),
             odx_fixel_slab_half_width_mm: fixel_2d_draw
-                .map(|p| (p.slab_thickness_mm * 0.5).max(0.0))
-                .unwrap_or(1.5),
+                .map(|p| (p.slab_thickness_mm * 0.5).max(trxviz_core::units::Millimeters(0.0)))
+                .unwrap_or(trxviz_core::units::Millimeters(1.5))
+                .0,
             odx_glyph_scale: odf_draw.map(|p| p.scale).unwrap_or(1.0),
             odx_fixel_length_scale: fixel_3d_draw.map(|p| p.length_scale).unwrap_or(1.0),
             odx_fixel_2d_line_width: fixel_2d_draw.map(|p| p.line_width).unwrap_or(0.006),
