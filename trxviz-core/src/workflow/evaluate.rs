@@ -69,7 +69,7 @@ pub fn evaluate_scene_plan_with_mode(
     let mut runtime = WorkflowRuntime::default();
     let compiled = compile_graph(document);
     let Ok((order, connections)) = compiled else {
-        runtime.graph_error = compiled.err();
+        runtime.graph_error = compiled.err().map(|e| e.to_string());
         return runtime;
     };
 
@@ -170,7 +170,7 @@ pub fn evaluate_scene_plan_with_mode(
             }
             Err(error) => {
                 node_state.summary = node.kind.title().to_string();
-                node_state.error = Some(error);
+                node_state.error = Some(error.to_string());
             }
         }
 
@@ -197,13 +197,10 @@ pub fn evaluate_scene_plan_with_mode(
 
 fn compile_graph(
     document: &WorkflowDocument,
-) -> Result<
-    (
-        Vec<WorkflowNodeUuid>,
-        HashMap<(WorkflowNodeUuid, usize), OutPort>,
-    ),
-    String,
-> {
+) -> WorkflowResult<(
+    Vec<WorkflowNodeUuid>,
+    HashMap<(WorkflowNodeUuid, usize), OutPort>,
+)> {
     let mut graph = StableGraph::<WorkflowNodeUuid, (), Directed>::default();
     let mut uuid_to_graph = HashMap::new();
 
@@ -225,7 +222,7 @@ fn compile_graph(
     }
 
     let ordered =
-        toposort(&graph, None).map_err(|_| "Workflow graph contains a cycle".to_string())?;
+        toposort(&graph, None).map_err(|_| WorkflowError::Evaluation("Workflow graph contains a cycle".to_string()))?;
     let order = ordered
         .into_iter()
         .filter_map(|idx| graph.node_weight(idx).copied())
@@ -252,12 +249,12 @@ fn evaluate_node(
     execution_cache: &mut WorkflowExecutionCache,
     _mode: WorkflowEvalMode,
     node_state: &mut NodeEvalState,
-) -> Result<Vec<EvaluatedValue>, String> {
+) -> WorkflowResult<Vec<EvaluatedValue>> {
     match &node.kind {
         WorkflowNodeKind::StreamlineSource { source_id } => {
             let source = streamline_assets
                 .get(source_id)
-                .ok_or_else(|| format!("Missing streamline source {source_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing streamline source {source_id}")))?;
             let dataset = Arc::new(StreamlineDataset {
                 name: source.name.clone(),
                 gpu_data: source.data.clone(),
@@ -284,19 +281,19 @@ fn evaluate_node(
         WorkflowNodeKind::VolumeSource { source_id } => {
             volume_assets
                 .get(source_id)
-                .ok_or_else(|| format!("Missing volume source {source_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing volume source {source_id}")))?;
             Ok(vec![WorkflowValue::Volume(*source_id).into()])
         }
         WorkflowNodeKind::CiftiSource { source_id } => {
             cifti_assets
                 .get(source_id)
-                .ok_or_else(|| format!("Missing CIFTI source {source_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing CIFTI source {source_id}")))?;
             Ok(vec![WorkflowValue::Cifti(*source_id).into()])
         }
         WorkflowNodeKind::SurfaceSource { source_id } => {
             surface_assets
                 .get(source_id)
-                .ok_or_else(|| format!("Missing surface source {source_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing surface source {source_id}")))?;
             Ok(vec![WorkflowValue::Surface(*source_id).into()])
         }
         WorkflowNodeKind::CiftiStructure {
@@ -306,7 +303,7 @@ fn evaluate_node(
             let cifti_id = expect_cifti_input(inputs, "CIFTI Structure")?;
             let cifti = cifti_assets
                 .get(&cifti_id)
-                .ok_or_else(|| format!("Missing CIFTI asset {cifti_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing CIFTI asset {cifti_id}")))?;
             match structure {
                 CiftiStructure::CortexLeft => cifti
                     .data
@@ -316,7 +313,7 @@ fn evaluate_node(
                     .flatten()
                     .map(|value| WorkflowValue::SurfaceScalars(value).into())
                     .ok_or_else(|| {
-                        format!("CIFTI left cortex map {} is unavailable", map_index + 1)
+                        WorkflowError::Evaluation(format!("CIFTI left cortex map {} is unavailable", map_index + 1))
                     })
                     .map(|v: EvaluatedValue| vec![v]),
                 CiftiStructure::CortexRight => cifti
@@ -327,7 +324,7 @@ fn evaluate_node(
                     .flatten()
                     .map(|value| WorkflowValue::SurfaceScalars(value).into())
                     .ok_or_else(|| {
-                        format!("CIFTI right cortex map {} is unavailable", map_index + 1)
+                        WorkflowError::Evaluation(format!("CIFTI right cortex map {} is unavailable", map_index + 1))
                     })
                     .map(|v: EvaluatedValue| vec![v]),
                 CiftiStructure::Subcortical => cifti
@@ -338,7 +335,7 @@ fn evaluate_node(
                     .flatten()
                     .map(|value| WorkflowValue::VolumeScalars(value).into())
                     .ok_or_else(|| {
-                        format!("CIFTI subcortical map {} is unavailable", map_index + 1)
+                        WorkflowError::Evaluation(format!("CIFTI subcortical map {} is unavailable", map_index + 1))
                     })
                     .map(|v: EvaluatedValue| vec![v]),
             }
@@ -346,7 +343,7 @@ fn evaluate_node(
         WorkflowNodeKind::ParcellationSource { source_id } => {
             parcellation_assets
                 .get(source_id)
-                .ok_or_else(|| format!("Missing parcellation source {source_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing parcellation source {source_id}")))?;
             Ok(vec![WorkflowValue::Parcellation(*source_id).into()])
         }
         WorkflowNodeKind::LimitStreamlines {
@@ -386,10 +383,10 @@ fn evaluate_node(
                 ]),
                 GroupFilter::Selected(labels) => {
                     if flow.dataset.gpu_data.groups.is_empty() {
-                        return Err(
+                        return Err(WorkflowError::Evaluation(
                             "Group Select needs streamline input with group memberships, but the input has no groups."
                                 .to_string(),
-                        );
+                        ));
                     }
                     let keep: HashSet<u32> = flow
                         .dataset
@@ -460,7 +457,7 @@ fn evaluate_node(
             let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
             let surface = surface_assets
                 .get(&surface_id)
-                .ok_or_else(|| format!("Missing surface {surface_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing surface {surface_id}")))?;
             let record = execution_cache.node_runs.entry(node.uuid).or_default();
             prime_expensive_record(record, fingerprint);
             scene_plan.surface_query_plans.push(SurfaceQueryPlan {
@@ -509,17 +506,17 @@ fn evaluate_node(
                 Some(value) => match value.value {
                     WorkflowValue::Streamline(flow) => flow,
                     _ => {
-                        return Err(format!(
+                        return Err(WorkflowError::Evaluation(format!(
                             "{} needs a right streamline input",
                             node.kind.title()
-                        ));
+                        )));
                     }
                 },
                 None => {
-                    return Err(format!(
+                    return Err(WorkflowError::Evaluation(format!(
                         "{} needs a right streamline input",
                         node.kind.title()
-                    ));
+                    )));
                 }
             };
             let plan = ReactiveStreamlinePlan {
@@ -541,7 +538,7 @@ fn evaluate_node(
             let source_id = expect_parcellation_input(inputs, "Parcel Select")?;
             let parcellation = parcellation_assets
                 .get(&source_id)
-                .ok_or_else(|| format!("Missing parcellation {source_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing parcellation {source_id}")))?;
             let labels = resolve_selected_labels(labels_csv, &parcellation.asset.data);
             Ok(vec![
                 WorkflowValue::ParcelSelection(ParcelSelection { source_id, labels }).into(),
@@ -552,7 +549,7 @@ fn evaluate_node(
             let parcel_selection = expect_parcel_selection_input(inputs, "Parcel ROI")?;
             let parcellation = parcellation_assets
                 .get(&parcel_selection.source_id)
-                .ok_or_else(|| "Parcel ROI is missing its parcellation".to_string())?;
+                .ok_or_else(|| WorkflowError::Evaluation("Parcel ROI is missing its parcellation".to_string()))?;
             let plan = ReactiveStreamlinePlan {
                 node_uuid: node.uuid,
                 label: node.label.clone(),
@@ -571,7 +568,7 @@ fn evaluate_node(
             let parcel_selection = expect_parcel_selection_input(inputs, "Parcel ROA")?;
             let parcellation = parcellation_assets
                 .get(&parcel_selection.source_id)
-                .ok_or_else(|| "Parcel ROA is missing its parcellation".to_string())?;
+                .ok_or_else(|| WorkflowError::Evaluation("Parcel ROA is missing its parcellation".to_string()))?;
             let plan = ReactiveStreamlinePlan {
                 node_uuid: node.uuid,
                 label: node.label.clone(),
@@ -590,7 +587,7 @@ fn evaluate_node(
             let parcel_selection = expect_parcel_selection_input(inputs, "Parcel End")?;
             let parcellation = parcellation_assets
                 .get(&parcel_selection.source_id)
-                .ok_or_else(|| "Parcel End is missing its parcellation".to_string())?;
+                .ok_or_else(|| WorkflowError::Evaluation("Parcel End is missing its parcellation".to_string()))?;
             let plan = ReactiveStreamlinePlan {
                 node_uuid: node.uuid,
                 label: node.label.clone(),
@@ -610,7 +607,7 @@ fn evaluate_node(
             let parcel_selection = expect_parcel_selection_input(inputs, node.kind.title())?;
             let parcellation = parcellation_assets
                 .get(&parcel_selection.source_id)
-                .ok_or_else(|| format!("{} is missing its parcellation", node.kind.title()))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("{} is missing its parcellation", node.kind.title())))?;
             let keep_inside = matches!(node.kind, WorkflowNodeKind::ParcelLimiting);
             let plan = ReactiveStreamlinePlan {
                 node_uuid: node.uuid,
@@ -632,20 +629,20 @@ fn evaluate_node(
                 Some(value) => match value.value {
                     WorkflowValue::Parcellation(source_id) => source_id,
                     _ => {
-                        return Err(
+                        return Err(WorkflowError::Evaluation(
                             "Add Groups From Parcellation needs a parcellation input".to_string()
-                        );
+                        ));
                     }
                 },
                 _ => {
-                    return Err(
+                    return Err(WorkflowError::Evaluation(
                         "Add Groups From Parcellation needs a parcellation input".to_string()
-                    );
+                    ));
                 }
             };
             let parcellation = parcellation_assets
                 .get(&source_id)
-                .ok_or_else(|| format!("Missing parcellation {source_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing parcellation {source_id}")))?;
             let plan = ReactiveStreamlinePlan {
                 node_uuid: node.uuid,
                 label: node.label.clone(),
@@ -717,7 +714,7 @@ fn evaluate_node(
             let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
             let surface = surface_assets
                 .get(&surface_id)
-                .ok_or_else(|| format!("Missing surface {surface_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing surface {surface_id}")))?;
             let record = execution_cache.node_runs.entry(node.uuid).or_default();
             prime_expensive_record(record, fingerprint);
             scene_plan.surface_map_plans.push(SurfaceMapPlan {
@@ -758,7 +755,7 @@ fn evaluate_node(
             let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
             let surface = surface_assets
                 .get(&surface_id)
-                .ok_or_else(|| format!("Missing surface {surface_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing surface {surface_id}")))?;
             let record = execution_cache.node_runs.entry(node.uuid).or_default();
             prime_expensive_record(record, fingerprint);
             scene_plan.surface_map_plans.push(SurfaceMapPlan {
@@ -883,7 +880,7 @@ fn evaluate_node(
         } => {
             let source_id = expect_volume_input(inputs, "Volume Display")?;
             if volume_assets.get(&source_id).is_none() && odx_assets.get(&source_id).is_none() {
-                return Err(format!("Missing volume {source_id}"));
+                return Err(WorkflowError::Evaluation(format!("Missing volume {source_id}")));
             }
             scene_plan.volume_draws.push(VolumeDrawPlan {
                 source_id,
@@ -908,7 +905,7 @@ fn evaluate_node(
             let surface_id = expect_surface_input(inputs, "Surface Overlay Stack")?;
             let surface = surface_assets
                 .get(&surface_id)
-                .ok_or_else(|| format!("Missing surface {surface_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing surface {surface_id}")))?;
             let upstream_stale = inputs.iter().flatten().any(|v| v.stale);
             let fingerprint =
                 workflow_surface_overlay_fingerprint(surface_id, layers, upstream_stale);
@@ -944,7 +941,7 @@ fn evaluate_node(
             let source_id = appearance.source_id;
             let _surface = surface_assets
                 .get(&source_id)
-                .ok_or_else(|| format!("Missing surface {source_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing surface {source_id}")))?;
             let projection = None::<SurfaceScalars>;
             let projection_enabled = *show_projection_map || projection.is_some();
             let final_range = projection
@@ -993,7 +990,7 @@ fn evaluate_node(
             let source_id = expect_parcellation_input(inputs, "Parcellation Display")?;
             let parcellation = parcellation_assets
                 .get(&source_id)
-                .ok_or_else(|| format!("Missing parcellation {source_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing parcellation {source_id}")))?;
             let labels = resolve_selected_labels(labels_csv, &parcellation.asset.data);
             scene_plan.parcellation_draws.push(ParcellationDrawPlan {
                 source_id,
@@ -1030,7 +1027,7 @@ fn evaluate_node(
         WorkflowNodeKind::SaveStreamlines { output_path } => {
             let flow = expect_streamline_input(inputs, "Save Streamlines")?;
             if output_path.trim().is_empty() {
-                return Err("Save Streamlines needs an output path".to_string());
+                return Err(WorkflowError::Evaluation("Save Streamlines needs an output path".to_string()));
             }
             save_targets.insert(
                 node.uuid,
@@ -1158,7 +1155,7 @@ fn evaluate_node(
         WorkflowNodeKind::OdxSource { source_id } => {
             let asset = odx_assets
                 .get(source_id)
-                .ok_or_else(|| format!("Missing ODX asset {source_id}"))?;
+                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing ODX asset {source_id}")))?;
             let scene = asset.scene.clone();
             let dirs = scene.directions().to_vec();
             let default_scalars = FixelScalars::from_directions(*source_id, &dirs);
@@ -1184,11 +1181,11 @@ fn evaluate_node(
         WorkflowNodeKind::OdxVolumeSelect { dpv_name } => {
             let catalog = expect_odx_catalog_input(inputs, "ODX Volume Select")?;
             if dpv_name.is_empty() {
-                return Err("ODX Volume Select needs a DPV name".to_string());
+                return Err(WorkflowError::Evaluation("ODX Volume Select needs a DPV name".to_string()));
             }
             let volume = catalog
                 .materialize_dpv(dpv_name)
-                .map_err(|e| format!("Failed to materialize DPV '{dpv_name}': {e}"))?;
+                .map_err(|e| WorkflowError::Evaluation(format!("Failed to materialize DPV '{dpv_name}': {e}")))?;
             let volume_scalars =
                 volume_scalars_from_nifti_volume(&volume, dpv_name.clone(), catalog.source_id);
             // Stash the materialized volume in the execution cache so headless can pick it up.
@@ -1208,12 +1205,12 @@ fn evaluate_node(
         WorkflowNodeKind::OdxFixelScalarSelect { dpf_name } => {
             let catalog = expect_odx_catalog_input(inputs, "ODX Fixel Scalar Select")?;
             if dpf_name.is_empty() {
-                return Err("ODX Fixel Scalar Select needs a DPF name".to_string());
+                return Err(WorkflowError::Evaluation("ODX Fixel Scalar Select needs a DPF name".to_string()));
             }
             let values = catalog
                 .scene
                 .scalar_dpf_f32(dpf_name)
-                .map_err(|e| format!("Failed to load DPF '{dpf_name}': {e}"))?;
+                .map_err(|e| WorkflowError::Evaluation(format!("Failed to load DPF '{dpf_name}': {e}")))?;
             let scalars = FixelScalars::from_scalar(catalog.source_id, dpf_name.clone(), values);
             Ok(vec![WorkflowValue::FixelScalars(scalars).into()])
         }
@@ -1225,10 +1222,10 @@ fn evaluate_node(
             let mut field = expect_fixels_input(inputs, "Color By Fixel Scalars")?;
             let scalars = expect_fixel_scalars_input(inputs, "Color By Fixel Scalars")?;
             if scalars.fixel_count != field.scalars.fixel_count {
-                return Err(format!(
+                return Err(WorkflowError::Evaluation(format!(
                     "Fixel count mismatch: scalars have {} fixels, field has {}",
                     scalars.fixel_count, field.scalars.fixel_count
-                ));
+                )));
             }
             field.colormap_code = match colormap {
                 SurfaceColormap::BlueWhiteRed => 5,
@@ -1329,49 +1326,49 @@ fn evaluate_node(
 fn expect_fixels_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
-) -> Result<FixelField, String> {
+) -> WorkflowResult<FixelField> {
     for input in inputs.iter().flatten() {
         if let WorkflowValue::Fixels(field) = &input.value {
             return Ok(field.clone());
         }
     }
-    Err(format!("{label} needs a Fixels input"))
+    Err(WorkflowError::Evaluation(format!("{label} needs a Fixels input")))
 }
 
 fn expect_fixel_scalars_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
-) -> Result<FixelScalars, String> {
+) -> WorkflowResult<FixelScalars> {
     for input in inputs.iter().flatten() {
         if let WorkflowValue::FixelScalars(s) = &input.value {
             return Ok(s.clone());
         }
     }
-    Err(format!("{label} needs a FixelScalars input"))
+    Err(WorkflowError::Evaluation(format!("{label} needs a FixelScalars input")))
 }
 
 fn expect_odf_field_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
-) -> Result<OdfField, String> {
+) -> WorkflowResult<OdfField> {
     for input in inputs.iter().flatten() {
         if let WorkflowValue::OdfField(f) = &input.value {
             return Ok(f.clone());
         }
     }
-    Err(format!("{label} needs an OdfField input"))
+    Err(WorkflowError::Evaluation(format!("{label} needs an OdfField input")))
 }
 
 fn expect_odx_catalog_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
-) -> Result<OdxCatalog, String> {
+) -> WorkflowResult<OdxCatalog> {
     for input in inputs.iter().flatten() {
         if let WorkflowValue::OdxCatalog(c) = &input.value {
             return Ok(c.clone());
         }
     }
-    Err(format!("{label} needs an OdxCatalog input"))
+    Err(WorkflowError::Evaluation(format!("{label} needs an OdxCatalog input")))
 }
 
 fn optional_volume_scalars_input(
@@ -1423,17 +1420,17 @@ fn volume_scalars_from_nifti_volume(
 fn expect_streamline_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
-) -> Result<StreamlineFlow, String> {
+) -> WorkflowResult<StreamlineFlow> {
     match inputs.first().cloned().flatten() {
         Some(EvaluatedValue {
             value: WorkflowValue::Streamline(flow),
             ..
         }) => Ok(flow),
-        _ => Err(format!("{label} needs a streamline input")),
+        _ => Err(WorkflowError::Evaluation(format!("{label} needs a streamline input"))),
     }
 }
 
-fn expect_surface_input(inputs: &[Option<EvaluatedValue>], label: &str) -> Result<FileId, String> {
+fn expect_surface_input(inputs: &[Option<EvaluatedValue>], label: &str) -> WorkflowResult<FileId> {
     inputs
         .iter()
         .flatten()
@@ -1444,106 +1441,106 @@ fn expect_surface_input(inputs: &[Option<EvaluatedValue>], label: &str) -> Resul
                 None
             }
         })
-        .ok_or_else(|| format!("{label} needs a surface input"))
+        .ok_or_else(|| WorkflowError::Evaluation(format!("{label} needs a surface input")))
 }
 
-fn expect_cifti_input(inputs: &[Option<EvaluatedValue>], label: &str) -> Result<FileId, String> {
+fn expect_cifti_input(inputs: &[Option<EvaluatedValue>], label: &str) -> WorkflowResult<FileId> {
     match inputs.first().cloned().flatten() {
         Some(EvaluatedValue {
             value: WorkflowValue::Cifti(source_id),
             ..
         }) => Ok(source_id),
-        _ => Err(format!("{label} needs a CIFTI input")),
+        _ => Err(WorkflowError::Evaluation(format!("{label} needs a CIFTI input"))),
     }
 }
 
 fn expect_bundle_surface_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
-) -> Result<(BundleSurfacePlan, bool), String> {
+) -> WorkflowResult<(BundleSurfacePlan, bool)> {
     match inputs.first().cloned().flatten() {
         Some(EvaluatedValue {
             value: WorkflowValue::BundleSurface(bundle),
             stale,
         }) => Ok((bundle, stale)),
-        Some(_) => Err(format!("{label} needs a bundle surface input")),
-        None => Err(format!("{label} is missing an input")),
+        Some(_) => Err(WorkflowError::Evaluation(format!("{label} needs a bundle surface input"))),
+        None => Err(WorkflowError::Evaluation(format!("{label} is missing an input"))),
     }
 }
 
 fn expect_volume_scalars_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
-) -> Result<VolumeScalars, String> {
+) -> WorkflowResult<VolumeScalars> {
     match inputs.first().cloned().flatten() {
         Some(EvaluatedValue {
             value: WorkflowValue::VolumeScalars(value),
             ..
         }) => Ok(value),
-        _ => Err(format!("{label} needs volume scalars")),
+        _ => Err(WorkflowError::Evaluation(format!("{label} needs volume scalars"))),
     }
 }
 
 fn expect_surface_appearance_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
-) -> Result<SurfaceAppearance, String> {
+) -> WorkflowResult<SurfaceAppearance> {
     match inputs.first().cloned().flatten() {
         Some(EvaluatedValue {
             value: WorkflowValue::SurfaceAppearance(value),
             ..
         }) => Ok(value),
-        _ => Err(format!("{label} needs a surface appearance input")),
+        _ => Err(WorkflowError::Evaluation(format!("{label} needs a surface appearance input"))),
     }
 }
 
 fn expect_boundary_field_input(
     input: Option<&EvaluatedValue>,
     label: &str,
-) -> Result<(BoundaryFieldPlan, bool), String> {
+) -> WorkflowResult<(BoundaryFieldPlan, bool)> {
     match input {
         Some(EvaluatedValue {
             value: WorkflowValue::BoundaryField(plan),
             stale,
         }) => Ok((plan.clone(), *stale)),
-        Some(_) => Err(format!("{label} needs a boundary field input")),
-        None => Err(format!("{label} is missing an input")),
+        Some(_) => Err(WorkflowError::Evaluation(format!("{label} needs a boundary field input"))),
+        None => Err(WorkflowError::Evaluation(format!("{label} is missing an input"))),
     }
 }
 
-fn expect_volume_input(inputs: &[Option<EvaluatedValue>], label: &str) -> Result<FileId, String> {
+fn expect_volume_input(inputs: &[Option<EvaluatedValue>], label: &str) -> WorkflowResult<FileId> {
     match inputs.first().cloned().flatten() {
         Some(EvaluatedValue {
             value: WorkflowValue::Volume(source_id),
             ..
         }) => Ok(source_id),
-        _ => Err(format!("{label} needs a volume input")),
+        _ => Err(WorkflowError::Evaluation(format!("{label} needs a volume input"))),
     }
 }
 
 fn expect_parcellation_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
-) -> Result<FileId, String> {
+) -> WorkflowResult<FileId> {
     match inputs.first().cloned().flatten() {
         Some(EvaluatedValue {
             value: WorkflowValue::Parcellation(source_id),
             ..
         }) => Ok(source_id),
-        _ => Err(format!("{label} needs a parcellation input")),
+        _ => Err(WorkflowError::Evaluation(format!("{label} needs a parcellation input"))),
     }
 }
 
 fn expect_parcel_selection_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
-) -> Result<ParcelSelection, String> {
+) -> WorkflowResult<ParcelSelection> {
     match inputs.get(1).cloned().flatten() {
         Some(EvaluatedValue {
             value: WorkflowValue::ParcelSelection(selection),
             ..
         }) => Ok(selection),
-        _ => Err(format!("{label} needs a parcel selection input")),
+        _ => Err(WorkflowError::Evaluation(format!("{label} needs a parcel selection input"))),
     }
 }
 
@@ -1602,7 +1599,7 @@ fn evaluate_derived_streamline_plan(
     inputs: &[Option<EvaluatedValue>],
     execution_cache: &mut WorkflowExecutionCache,
     node_state: &mut NodeEvalState,
-) -> Result<Vec<EvaluatedValue>, String> {
+) -> WorkflowResult<Vec<EvaluatedValue>> {
     let fingerprint = workflow_reactive_streamline_fingerprint(&plan);
     let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
     let record = execution_cache.node_runs.entry(node.uuid).or_default();
@@ -1629,7 +1626,7 @@ fn compose_surface_appearance(
     surface: &LoadedGiftiSurface,
     layers: &[SurfaceOverlayLayerConfig],
     scalar_inputs: &[Option<EvaluatedValue>],
-) -> Result<SurfaceAppearance, String> {
+) -> WorkflowResult<SurfaceAppearance> {
     let mut vertex_rgba = vec![DEFAULT_SURFACE_BASE_RGBA; surface.data.vertices.len()];
     let mut appearance_structure = None;
     if let Some(base) = layers.first() {
@@ -1703,22 +1700,22 @@ fn validate_surface_scalars(
     surface_id: FileId,
     surface: &LoadedGiftiSurface,
     scalars: &SurfaceScalars,
-) -> Result<(), String> {
+) -> WorkflowResult<()> {
     if scalars.vertex_count != surface.data.vertices.len() {
-        return Err(format!(
+        return Err(WorkflowError::Evaluation(format!(
             "Surface scalars have {} vertices but surface {} has {}",
             scalars.vertex_count,
             surface_id,
             surface.data.vertices.len()
-        ));
+        )));
     }
     if let Some(bound_surface_id) = scalars.source_surface_id
         && bound_surface_id != surface_id
     {
-        return Err(format!(
+        return Err(WorkflowError::Evaluation(format!(
             "Surface scalars are bound to surface {} and cannot be applied to surface {}",
             bound_surface_id, surface_id
-        ));
+        )));
     }
     Ok(())
 }
@@ -2112,7 +2109,7 @@ pub(crate) fn add_groups_from_parcellation_from_label(
     flow: &StreamlineFlow,
     parcellation: &ParcellationVolume,
     parcellation_name: &str,
-) -> Result<StreamlineFlow, String> {
+) -> WorkflowResult<StreamlineFlow> {
     let mut grouped = subset_tractogram_from_flow(flow)?;
     let prefix = parcellation_name
         .split('.')
@@ -2158,7 +2155,7 @@ pub(crate) fn add_groups_from_parcellation_from_label(
         );
     }
 
-    let gpu_data = Arc::new(TrxGpuData::from_tractogram(&grouped).map_err(|err| err.to_string())?);
+    let gpu_data = Arc::new(TrxGpuData::from_tractogram(&grouped)?);
     let selected = (0..gpu_data.nb_streamlines as u32).collect();
     Ok(StreamlineFlow {
         dataset: Arc::new(StreamlineDataset {
@@ -2179,7 +2176,7 @@ fn crop_flow_to_parcels(
     parcellation: &ParcellationVolume,
     labels: &BTreeSet<u32>,
     keep_inside: bool,
-) -> Result<Tractogram, String> {
+) -> WorkflowResult<Tractogram> {
     let mut tractogram = Tractogram::new();
     for &streamline_index in flow.selected_streamlines.iter() {
         let points = streamline_points(flow.dataset.gpu_data.as_ref(), streamline_index as usize);
@@ -2191,7 +2188,7 @@ fn crop_flow_to_parcels(
         for segment in segments {
             tractogram
                 .push_streamline(&segment)
-                .map_err(|err| err.to_string())?;
+                .map_err(|e| WorkflowError::Other(e.into()))?;
         }
     }
     Ok(tractogram)
@@ -2200,18 +2197,18 @@ fn crop_flow_to_parcels(
 pub(crate) fn materialize_merged_streamlines(
     left: &StreamlineFlow,
     right: &StreamlineFlow,
-) -> Result<Tractogram, String> {
+) -> WorkflowResult<Tractogram> {
     let left = subset_tractogram_from_flow(left)?;
     let right = subset_tractogram_from_flow(right)?;
     let mut out = Tractogram::with_header(left.header().clone());
 
     for streamline in left.streamlines() {
         out.push_streamline(streamline)
-            .map_err(|err| err.to_string())?;
+            .map_err(|e| WorkflowError::Other(e.into()))?;
     }
     for streamline in right.streamlines() {
         out.push_streamline(streamline)
-            .map_err(|err| err.to_string())?;
+            .map_err(|e| WorkflowError::Other(e.into()))?;
     }
 
     Ok(out)
@@ -2219,7 +2216,7 @@ pub(crate) fn materialize_merged_streamlines(
 
 pub(crate) fn materialize_reactive_streamline_flow(
     plan: &ReactiveStreamlinePlan,
-) -> Result<StreamlineFlow, String> {
+) -> WorkflowResult<StreamlineFlow> {
     match &plan.op {
         ReactiveStreamlineOp::Merge => {
             let tractogram = materialize_merged_streamlines(&plan.left, &plan.right)?;
@@ -2228,7 +2225,7 @@ pub(crate) fn materialize_reactive_streamline_flow(
         ReactiveStreamlineOp::RemoveDuplicates { params } => {
             let tractogram = subset_tractogram_from_flow(&plan.left)?;
             let deduped =
-                remove_duplicates_tractogram(&tractogram, params).map_err(|err| err.to_string())?;
+                remove_duplicates_tractogram(&tractogram, params).map_err(|e| WorkflowError::Other(e.into()))?;
             streamline_flow_from_tractogram(plan.label.clone(), &plan.left, deduped)
         }
         ReactiveStreamlineOp::ParcelROI {
@@ -2316,9 +2313,9 @@ fn streamline_flow_from_tractogram(
     label: String,
     source_flow: &StreamlineFlow,
     tractogram: Tractogram,
-) -> Result<StreamlineFlow, String> {
+) -> WorkflowResult<StreamlineFlow> {
     let gpu_data =
-        Arc::new(TrxGpuData::from_tractogram(&tractogram).map_err(|err| err.to_string())?);
+        Arc::new(TrxGpuData::from_tractogram(&tractogram)?);
     let selected = (0..gpu_data.nb_streamlines as u32).collect();
     Ok(StreamlineFlow {
         dataset: Arc::new(StreamlineDataset {
@@ -2334,7 +2331,7 @@ fn streamline_flow_from_tractogram(
     })
 }
 
-fn subset_tractogram_from_flow(flow: &StreamlineFlow) -> Result<Tractogram, String> {
+fn subset_tractogram_from_flow(flow: &StreamlineFlow) -> WorkflowResult<Tractogram> {
     let header = match &flow.dataset.backing {
         StreamlineBacking::Native(any) => any.header().clone(),
         StreamlineBacking::Imported(tractogram) | StreamlineBacking::Derived(tractogram) => {
@@ -2347,7 +2344,7 @@ fn subset_tractogram_from_flow(flow: &StreamlineFlow) -> Result<Tractogram, Stri
         let points = streamline_points(flow.dataset.gpu_data.as_ref(), index as usize);
         tractogram
             .push_streamline(points)
-            .map_err(|err| err.to_string())?;
+            .map_err(|e| WorkflowError::Other(e.into()))?;
         remap.insert(index, new_index as u32);
     }
     for (group_idx, (name, members)) in flow.dataset.gpu_data.groups.iter().enumerate() {
@@ -2384,9 +2381,9 @@ fn flow_selects_entire_dataset(flow: &StreamlineFlow) -> bool {
             .all(|(expected, &actual)| expected == actual as usize)
 }
 
-pub fn save_streamline_plan(plan: &SaveStreamlinePlan) -> Result<(), String> {
+pub fn save_streamline_plan(plan: &SaveStreamlinePlan) -> WorkflowResult<()> {
     if plan.output_path.as_os_str().is_empty() {
-        return Err("Save path is empty".to_string());
+        return Err(WorkflowError::Evaluation("Save path is empty".to_string()));
     }
 
     if flow_selects_entire_dataset(&plan.flow)
@@ -2398,7 +2395,7 @@ pub fn save_streamline_plan(plan: &SaveStreamlinePlan) -> Result<(), String> {
             .is_some_and(|ext| ext.eq_ignore_ascii_case("trx"))
     {
         if let StreamlineBacking::Native(any) = &plan.flow.dataset.backing {
-            return any.save(&plan.output_path).map_err(|err| err.to_string());
+            return any.save(&plan.output_path).map_err(|e| WorkflowError::Other(e.into()));
         }
     }
 
@@ -2422,5 +2419,6 @@ pub fn save_streamline_plan(plan: &SaveStreamlinePlan) -> Result<(), String> {
             ..Default::default()
         },
     )
-    .map_err(|err| err.to_string())
+    .map_err(|e| WorkflowError::Other(e.into()))?;
+    Ok(())
 }

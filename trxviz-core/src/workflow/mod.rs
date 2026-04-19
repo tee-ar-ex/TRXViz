@@ -1,5 +1,7 @@
 //! Workflow document types, evaluation, persistence, and execution helpers.
 
+pub use crate::error::{WorkflowError, WorkflowResult};
+
 mod defaults;
 mod evaluate;
 mod fingerprint;

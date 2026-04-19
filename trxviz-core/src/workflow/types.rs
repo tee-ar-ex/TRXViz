@@ -2,6 +2,8 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::error::WorkflowResult;
+
 use super::graph::{GraphRect, WorkflowGraph};
 use crate::data::bundle_mesh::BundleMesh;
 use crate::data::cifti::{CiftiIntent, CiftiStructure, SurfaceScalars, VolumeScalars};
@@ -1156,7 +1158,6 @@ pub enum WorkflowJobOutput {
     },
 }
 
-#[derive(Clone)]
 pub enum WorkflowJobMessage {
     Started {
         node_uuid: WorkflowNodeUuid,
@@ -1165,7 +1166,7 @@ pub enum WorkflowJobMessage {
     Finished {
         node_uuid: WorkflowNodeUuid,
         fingerprint: u64,
-        result: Result<WorkflowJobOutput, String>,
+        result: WorkflowResult<WorkflowJobOutput>,
     },
 }
 

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::data::loaded_files::FileId;
+use crate::error::{WorkflowError, WorkflowResult};
 
 use super::{WorkflowAssetDocument, WorkflowDocument, WorkflowNodeKind, WorkflowNodeUuid};
 
@@ -83,7 +84,7 @@ pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEdi
                 editability.bindings.volume.insert(*id, binding);
             }),
             WorkflowAssetDocument::Cifti { .. } => {
-                Err("CIFTI workflow branches are only editable in Advanced mode.".to_string())
+                Err(WorkflowError::Evaluation("CIFTI workflow branches are only editable in Advanced mode.".to_string()))
             }
             WorkflowAssetDocument::Surface { id, .. } => {
                 match_surface_asset(*id, &kinds, &outgoing).map(|binding| {
@@ -101,14 +102,14 @@ pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEdi
                 editability.bindings.parcellation.insert(*id, binding);
             }),
             WorkflowAssetDocument::Odx { .. } => {
-                Err("ODX workflow branches are only editable in Advanced mode.".to_string())
+                Err(WorkflowError::Evaluation("ODX workflow branches are only editable in Advanced mode.".to_string()))
             }
         };
 
         if let Err(reason) = result {
             editability
                 .read_only_reasons
-                .insert(workflow_asset_id(asset), reason);
+                .insert(workflow_asset_id(asset), reason.to_string());
         }
     }
 
@@ -119,14 +120,14 @@ fn match_streamline_asset(
     asset_id: FileId,
     kinds: &HashMap<WorkflowNodeUuid, &WorkflowNodeKind>,
     outgoing: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
-) -> Result<SimpleStreamlineBinding, String> {
+) -> WorkflowResult<SimpleStreamlineBinding> {
     let source = find_single_node(kinds, |kind| {
         matches!(
             kind,
             WorkflowNodeKind::StreamlineSource { source_id } if *source_id == asset_id
         )
     })
-    .ok_or_else(|| format!("Streamline asset {asset_id} is missing its source node."))?;
+    .ok_or_else(|| WorkflowError::Evaluation(format!("Streamline asset {asset_id} is missing its source node.")))?;
     let display = find_unique_reachable_display(source, kinds, outgoing, |kind| {
         matches!(kind, WorkflowNodeKind::StreamlineDisplay { .. })
     })?;
@@ -140,9 +141,9 @@ fn match_simple_display_asset(
     outgoing: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
     is_source: impl Fn(&WorkflowNodeKind, FileId) -> bool,
     is_display: impl Fn(&WorkflowNodeKind) -> bool,
-) -> Result<SimpleDisplayBinding, String> {
+) -> WorkflowResult<SimpleDisplayBinding> {
     let source = find_single_node(kinds, |kind| is_source(kind, asset_id))
-        .ok_or_else(|| format!("Asset {asset_id} is missing its source node."))?;
+        .ok_or_else(|| WorkflowError::Evaluation(format!("Asset {asset_id} is missing its source node.")))?;
     let display = find_unique_reachable_display(source, kinds, outgoing, is_display)?;
 
     Ok(SimpleDisplayBinding { display })
@@ -152,9 +153,9 @@ fn match_surface_asset(
     asset_id: FileId,
     kinds: &HashMap<WorkflowNodeUuid, &WorkflowNodeKind>,
     outgoing: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
-) -> Result<SimpleSurfaceBinding, String> {
+) -> WorkflowResult<SimpleSurfaceBinding> {
     let source = find_single_node(kinds, |kind| is_surface_source(kind, asset_id))
-        .ok_or_else(|| format!("Asset {asset_id} is missing its source node."))?;
+        .ok_or_else(|| WorkflowError::Evaluation(format!("Asset {asset_id} is missing its source node.")))?;
     let display = find_unique_reachable_display(source, kinds, outgoing, is_surface_display)?;
     let overlay_stack = find_unique_reachable_optional_node(source, kinds, outgoing, |kind| {
         matches!(kind, WorkflowNodeKind::SurfaceOverlayStack { .. })
@@ -187,7 +188,7 @@ fn find_unique_reachable_display(
     kinds: &HashMap<WorkflowNodeUuid, &WorkflowNodeKind>,
     outgoing: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
     predicate: impl Fn(&WorkflowNodeKind) -> bool,
-) -> Result<WorkflowNodeUuid, String> {
+) -> WorkflowResult<WorkflowNodeUuid> {
     let mut stack = vec![source];
     let mut visited = HashSet::from([source]);
     let mut matches = Vec::new();
@@ -206,10 +207,10 @@ fn find_unique_reachable_display(
                         .get(&child)
                         .is_some_and(|children| !children.is_empty())
                     {
-                        return Err(
+                        return Err(WorkflowError::Evaluation(
                             "This project routes a display node into additional workflow nodes, which requires Advanced mode."
                                 .to_string(),
-                        );
+                        ));
                     }
                     matches.push(child);
                 }
@@ -220,14 +221,14 @@ fn find_unique_reachable_display(
 
     match matches.len() {
         1 => Ok(matches[0]),
-        0 => Err(
+        0 => Err(WorkflowError::Evaluation(
             "This project does not expose a unique terminal display node for this asset in Simple mode."
                 .to_string(),
-        ),
-        _ => Err(
+        )),
+        _ => Err(WorkflowError::Evaluation(
             "This asset feeds multiple display branches; edit it in Advanced mode."
                 .to_string(),
-        ),
+        )),
     }
 }
 
@@ -236,7 +237,7 @@ fn find_unique_reachable_optional_node(
     kinds: &HashMap<WorkflowNodeUuid, &WorkflowNodeKind>,
     outgoing: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
     predicate: impl Fn(&WorkflowNodeKind) -> bool,
-) -> Result<Option<WorkflowNodeUuid>, String> {
+) -> WorkflowResult<Option<WorkflowNodeUuid>> {
     let mut stack = vec![source];
     let mut visited = HashSet::from([source]);
     let mut matches = Vec::new();
@@ -261,10 +262,10 @@ fn find_unique_reachable_optional_node(
     match matches.len() {
         0 => Ok(None),
         1 => Ok(Some(matches[0])),
-        _ => Err(
+        _ => Err(WorkflowError::Evaluation(
             "This asset feeds multiple surface appearance branches; edit it in Advanced mode."
                 .to_string(),
-        ),
+        )),
     }
 }
 

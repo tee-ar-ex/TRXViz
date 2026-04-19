@@ -23,7 +23,7 @@ pub fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
     }
 }
 
-pub fn run_workflow_job(payload: WorkflowJobPayload) -> Result<WorkflowJobOutput, String> {
+pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJobOutput> {
     match payload {
         WorkflowJobPayload::ReactiveStreamline(plan) => Ok(WorkflowJobOutput::ReactiveStreamline(
             materialize_reactive_streamline_flow(&plan)?,
@@ -59,7 +59,7 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> Result<WorkflowJobOutput
                     .iter()
                     .find(|(name, _)| name == field)
                     .map(|(_, values)| values.clone())
-                    .ok_or_else(|| format!("DPS field `{field}` is not available"))?;
+                    .ok_or_else(|| WorkflowError::Evaluation(format!("DPS field `{field}` is not available")))?;
                 Some(dps_storage.as_slice())
             } else {
                 None

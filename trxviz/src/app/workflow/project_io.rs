@@ -138,7 +138,7 @@ pub fn gui_load_project(
     }
 
     // Fall back to core loader (handles bare WorkflowDocument too).
-    let mut project = load_workflow_project_from_path(path)?;
+    let mut project = load_workflow_project_from_path(path).map_err(|e| e.to_string())?;
     resolve_document_asset_paths(&mut project.document, path);
     Ok((project, default_workspace_tree(), None))
 }

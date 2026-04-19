@@ -622,7 +622,7 @@ impl crate::app::TrxVizApp {
                             }
                         },
                         Err(error) => {
-                            mark_expensive_failure(record, fingerprint, &error);
+                            mark_expensive_failure(record, fingerprint, &error.to_string());
                             changed = true;
                         }
                     }

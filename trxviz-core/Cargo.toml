@@ -16,6 +16,7 @@ png-export = ["dep:image"]
 
 [dependencies]
 anyhow = "1"
+thiserror = "2"
 base64 = "0.22"
 bytemuck = { version = "1", features = ["derive"] }
 flate2 = "1"

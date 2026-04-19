@@ -5,24 +5,24 @@ use super::*;
 pub fn save_workflow_project_to_path(
     document: &WorkflowDocument,
     path: &Path,
-) -> Result<(), String> {
+) -> WorkflowResult<()> {
     let project = WorkflowProject {
         version: 1,
         document: document.clone(),
         slice_view_ui: None,
     };
-    let json = serde_json::to_string_pretty(&project).map_err(|err| err.to_string())?;
-    std::fs::write(path, json).map_err(|err| err.to_string())
+    let json = serde_json::to_string_pretty(&project)?;
+    std::fs::write(path, json)?;
+    Ok(())
 }
 
-pub fn load_workflow_project_from_path(path: &Path) -> Result<WorkflowProject, String> {
-    let contents = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
-    let value =
-        serde_json::from_str::<serde_json::Value>(&contents).map_err(|err| err.to_string())?;
+pub fn load_workflow_project_from_path(path: &Path) -> WorkflowResult<WorkflowProject> {
+    let contents = std::fs::read_to_string(path)?;
+    let value = serde_json::from_str::<serde_json::Value>(&contents)?;
     load_workflow_project_from_value(value)
 }
 
-fn load_workflow_project_from_value(value: serde_json::Value) -> Result<WorkflowProject, String> {
+fn load_workflow_project_from_value(value: serde_json::Value) -> WorkflowResult<WorkflowProject> {
     if let Ok(mut project) = serde_json::from_value::<WorkflowProject>(value.clone()) {
         ensure_node_uuids(&mut project.document);
         return Ok(project);
@@ -35,16 +35,13 @@ fn load_workflow_project_from_value(value: serde_json::Value) -> Result<Workflow
         return Ok(project);
     }
 
-    serde_json::from_value::<WorkflowDocument>(value)
-        .map(|mut document| {
-            ensure_node_uuids(&mut document);
-            WorkflowProject {
-                version: 1,
-                document,
-                slice_view_ui: None,
-            }
-        })
-        .map_err(|err| err.to_string())
+    let mut document = serde_json::from_value::<WorkflowDocument>(value)?;
+    ensure_node_uuids(&mut document);
+    Ok(WorkflowProject {
+        version: 1,
+        document,
+        slice_view_ui: None,
+    })
 }
 
 fn asset_path_mut(asset: &mut WorkflowAssetDocument) -> &mut PathBuf {
