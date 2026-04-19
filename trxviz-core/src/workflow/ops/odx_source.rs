@@ -1,7 +1,7 @@
 use crate::data::loaded_files::FileId;
 use crate::data::odx_data::{FixelField, FixelScalars, OdfField, OdxCatalog};
 
-use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue};
+use super::super::{EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue};
 
 #[derive(Debug, Clone, Copy)]
 pub struct OdxSourceOp {
@@ -58,5 +58,13 @@ impl WorkflowOp for OdxSourceOp {
             WorkflowValue::OdxCatalog(catalog).into(),
             WorkflowValue::FixelScalars(default_scalars).into(),
         ])
+    }
+}
+
+impl From<OdxSourceOp> for WorkflowNodeKind {
+    fn from(op: OdxSourceOp) -> Self {
+        Self::OdxSource {
+            source_id: op.source_id,
+        }
     }
 }

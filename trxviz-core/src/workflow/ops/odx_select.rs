@@ -1,5 +1,5 @@
 use super::super::{
-    EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_odx_catalog_input,
+    EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_odx_catalog_input,
     volume_scalars_from_nifti_volume,
 };
 
@@ -11,6 +11,22 @@ pub struct OdxVolumeSelectOp {
 #[derive(Debug, Clone)]
 pub struct OdxFixelScalarSelectOp {
     pub dpf_name: String,
+}
+
+impl Default for OdxVolumeSelectOp {
+    fn default() -> Self {
+        Self {
+            dpv_name: String::new(),
+        }
+    }
+}
+
+impl Default for OdxFixelScalarSelectOp {
+    fn default() -> Self {
+        Self {
+            dpf_name: String::new(),
+        }
+    }
 }
 
 impl WorkflowOp for OdxVolumeSelectOp {
@@ -102,5 +118,21 @@ impl WorkflowOp for OdxFixelScalarSelectOp {
             values,
         );
         Ok(vec![WorkflowValue::FixelScalars(scalars).into()])
+    }
+}
+
+impl From<OdxVolumeSelectOp> for WorkflowNodeKind {
+    fn from(op: OdxVolumeSelectOp) -> Self {
+        Self::OdxVolumeSelect {
+            dpv_name: op.dpv_name,
+        }
+    }
+}
+
+impl From<OdxFixelScalarSelectOp> for WorkflowNodeKind {
+    fn from(op: OdxFixelScalarSelectOp) -> Self {
+        Self::OdxFixelScalarSelect {
+            dpf_name: op.dpf_name,
+        }
     }
 }

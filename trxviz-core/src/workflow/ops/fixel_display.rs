@@ -1,6 +1,10 @@
 use crate::units::Millimeters;
 
-use super::super::{EvalCtx, FixelDrawPlan, PortKind, WorkflowOp, expect_fixels_input};
+use super::super::{
+    EvalCtx, FixelDrawPlan, PortKind, WorkflowNodeKind, WorkflowOp, default_fixel_length_scale,
+    default_fixel_line_width, default_fixel_slab_thickness_mm, default_full_opacity,
+    expect_fixels_input,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Fixel3DDisplayOp {
@@ -18,6 +22,30 @@ pub struct Fixel2DDisplayOp {
     pub slab_thickness_mm: Millimeters,
     pub length_scale: f32,
     pub visible: bool,
+}
+
+impl Default for Fixel3DDisplayOp {
+    fn default() -> Self {
+        Self {
+            line_width: default_fixel_line_width(),
+            length_scale: default_fixel_length_scale(),
+            opacity: default_full_opacity(),
+            offset_from_slice: 0.0,
+            visible: true,
+        }
+    }
+}
+
+impl Default for Fixel2DDisplayOp {
+    fn default() -> Self {
+        Self {
+            line_width: default_fixel_line_width(),
+            opacity: default_full_opacity(),
+            slab_thickness_mm: default_fixel_slab_thickness_mm(),
+            length_scale: default_fixel_length_scale(),
+            visible: true,
+        }
+    }
 }
 
 impl WorkflowOp for Fixel3DDisplayOp {
@@ -97,5 +125,29 @@ impl WorkflowOp for Fixel2DDisplayOp {
             scalar_range,
         });
         Ok(Vec::new())
+    }
+}
+
+impl From<Fixel3DDisplayOp> for WorkflowNodeKind {
+    fn from(op: Fixel3DDisplayOp) -> Self {
+        Self::Fixel3DDisplay {
+            line_width: op.line_width,
+            length_scale: op.length_scale,
+            opacity: op.opacity,
+            offset_from_slice: op.offset_from_slice,
+            visible: op.visible,
+        }
+    }
+}
+
+impl From<Fixel2DDisplayOp> for WorkflowNodeKind {
+    fn from(op: Fixel2DDisplayOp) -> Self {
+        Self::Fixel2DDisplay {
+            line_width: op.line_width,
+            opacity: op.opacity,
+            slab_thickness_mm: op.slab_thickness_mm,
+            length_scale: op.length_scale,
+            visible: op.visible,
+        }
     }
 }

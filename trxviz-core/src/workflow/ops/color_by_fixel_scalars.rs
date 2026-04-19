@@ -1,7 +1,8 @@
 use crate::renderer::mesh_renderer::SurfaceColormap;
 
 use super::super::{
-    EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_fixel_scalars_input, expect_fixels_input,
+    EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, default_fixel_colormap,
+    expect_fixel_scalars_input, expect_fixels_input,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -9,6 +10,16 @@ pub struct ColorByFixelScalarsOp {
     pub colormap: SurfaceColormap,
     pub range: Option<(f32, f32)>,
     pub length_scale_by_scalar: bool,
+}
+
+impl Default for ColorByFixelScalarsOp {
+    fn default() -> Self {
+        Self {
+            colormap: default_fixel_colormap(),
+            range: None,
+            length_scale_by_scalar: false,
+        }
+    }
 }
 
 impl WorkflowOp for ColorByFixelScalarsOp {
@@ -53,5 +64,15 @@ impl WorkflowOp for ColorByFixelScalarsOp {
             WorkflowValue::Fixels(field).into(),
             WorkflowValue::FixelScalars(output_scalars).into(),
         ])
+    }
+}
+
+impl From<ColorByFixelScalarsOp> for WorkflowNodeKind {
+    fn from(op: ColorByFixelScalarsOp) -> Self {
+        Self::ColorByFixelScalars {
+            colormap: op.colormap,
+            range: op.range,
+            length_scale_by_scalar: op.length_scale_by_scalar,
+        }
     }
 }

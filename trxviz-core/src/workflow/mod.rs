@@ -53,4 +53,8 @@ pub(crate) use evaluate::{
     volume_scalars_from_nifti_volume,
 };
 pub(crate) use op::{EvalCtx, WorkflowOp};
+pub use ops::{
+    ColorByFixelScalarsOp, Fixel2DDisplayOp, Fixel3DDisplayOp, OdfGlyphRendererOp,
+    OdxFixelScalarSelectOp, OdxSourceOp, OdxVolumeSelectOp,
+};
 pub(crate) use types::{EvaluatedValue, WorkflowValue};

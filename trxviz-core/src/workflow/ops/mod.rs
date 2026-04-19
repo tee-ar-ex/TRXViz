@@ -32,6 +32,12 @@ mod uniform_color;
 mod volume_display;
 mod volume_source;
 
+pub use color_by_fixel_scalars::ColorByFixelScalarsOp;
+pub use fixel_display::{Fixel2DDisplayOp, Fixel3DDisplayOp};
+pub use odf_glyph_renderer::OdfGlyphRendererOp;
+pub use odx_select::{OdxFixelScalarSelectOp, OdxVolumeSelectOp};
+pub use odx_source::OdxSourceOp;
+
 use super::{EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowResult};
 use crate::error::WorkflowError;
 

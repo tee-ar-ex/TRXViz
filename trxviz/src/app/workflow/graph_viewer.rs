@@ -717,73 +717,42 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::OdxFixelScalarSelect {
-                    dpf_name: String::new(),
-                },
+                OdxFixelScalarSelectOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::ColorByFixelScalars {
-                    colormap: SurfaceColormap::Inferno,
-                    range: None,
-                    length_scale_by_scalar: false,
-                },
+                ColorByFixelScalarsOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::OdxVolumeSelect {
-                    dpv_name: String::new(),
-                },
+                OdxVolumeSelectOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::Fixel3DDisplay {
-                    line_width: default_fixel_line_width(),
-                    length_scale: default_fixel_length_scale(),
-                    opacity: default_full_opacity(),
-                    offset_from_slice: 0.0,
-                    visible: true,
-                },
+                Fixel3DDisplayOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::Fixel2DDisplay {
-                    line_width: default_fixel_line_width(),
-                    opacity: default_full_opacity(),
-                    slab_thickness_mm: default_fixel_slab_thickness_mm(),
-                    length_scale: default_fixel_length_scale(),
-                    visible: true,
-                },
+                Fixel2DDisplayOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::OdfGlyphRenderer {
-                    scale: default_odf_glyph_scale(),
-                    opacity: default_full_opacity(),
-                    offset_from_slice: 0.0,
-                    gloss: 0.0,
-                    vertex_colormap: trxviz_core::workflow::GlyphColormap::default(),
-                    slice_axis: WorkflowSliceViewKind::Axial,
-                    opacity_gate: OpacityGate::default(),
-                    size_gate: SizeGate::default(),
-                    detail: default_odf_glyph_detail(),
-                    visible: true,
-                },
+                OdfGlyphRendererOp::default().into(),
                 measured_node_sizes,
             );
         });
@@ -1179,18 +1148,7 @@ mod tests {
 
     #[test]
     fn odf_glyph_renderer_volume_inputs_have_specific_labels() {
-        let node = WorkflowNodeKind::OdfGlyphRenderer {
-            scale: default_odf_glyph_scale(),
-            opacity: default_full_opacity(),
-            offset_from_slice: 0.0,
-            gloss: 0.0,
-            vertex_colormap: trxviz_core::workflow::GlyphColormap::default(),
-            slice_axis: WorkflowSliceViewKind::Axial,
-            opacity_gate: OpacityGate::default(),
-            size_gate: SizeGate::default(),
-            detail: default_odf_glyph_detail(),
-            visible: true,
-        };
+        let node: WorkflowNodeKind = OdfGlyphRendererOp::default().into();
         assert_eq!(
             input_port_label(&node, 1, PortKind::VolumeScalars),
             "Opacity Scalars"
@@ -1203,9 +1161,7 @@ mod tests {
 
     #[test]
     fn odx_volume_select_outputs_have_specific_labels() {
-        let node = WorkflowNodeKind::OdxVolumeSelect {
-            dpv_name: String::new(),
-        };
+        let node: WorkflowNodeKind = OdxVolumeSelectOp::default().into();
         assert_eq!(output_port_label(&node, 0, PortKind::Volume), "Volume");
         assert_eq!(
             output_port_label(&node, 1, PortKind::VolumeScalars),

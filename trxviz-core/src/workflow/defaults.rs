@@ -308,56 +308,11 @@ pub fn add_default_nodes_for_asset(
             )
         }
         WorkflowAssetDocument::Odx { id, .. } => {
-            let source = make_node(
-                document,
-                WorkflowNodeKind::OdxSource { source_id: *id },
-                pos,
-            );
-            let fixel_3d = make_node(
-                document,
-                WorkflowNodeKind::Fixel3DDisplay {
-                    line_width: default_fixel_line_width(),
-                    length_scale: default_fixel_length_scale(),
-                    opacity: default_full_opacity(),
-                    offset_from_slice: 0.0,
-                    visible: true,
-                },
-                pos,
-            );
-            let fixel_2d = make_node(
-                document,
-                WorkflowNodeKind::Fixel2DDisplay {
-                    line_width: default_fixel_line_width(),
-                    opacity: default_full_opacity(),
-                    slab_thickness_mm: default_fixel_slab_thickness_mm(),
-                    length_scale: default_fixel_length_scale(),
-                    visible: true,
-                },
-                pos,
-            );
-            let glyph = make_node(
-                document,
-                WorkflowNodeKind::OdfGlyphRenderer {
-                    scale: default_odf_glyph_scale(),
-                    opacity: default_full_opacity(),
-                    offset_from_slice: 0.0,
-                    gloss: 0.0,
-                    vertex_colormap: GlyphColormap::default(),
-                    slice_axis: WorkflowSliceViewKind::Axial,
-                    opacity_gate: OpacityGate::default(),
-                    size_gate: SizeGate::default(),
-                    detail: default_odf_glyph_detail(),
-                    visible: true,
-                },
-                pos,
-            );
-            let dpv_select = make_node(
-                document,
-                WorkflowNodeKind::OdxVolumeSelect {
-                    dpv_name: String::new(),
-                },
-                pos,
-            );
+            let source = make_node(document, OdxSourceOp { source_id: *id }.into(), pos);
+            let fixel_3d = make_node(document, Fixel3DDisplayOp::default().into(), pos);
+            let fixel_2d = make_node(document, Fixel2DDisplayOp::default().into(), pos);
+            let glyph = make_node(document, OdfGlyphRendererOp::default().into(), pos);
+            let dpv_select = make_node(document, OdxVolumeSelectOp::default().into(), pos);
             let volume_display = make_node(
                 document,
                 WorkflowNodeKind::VolumeDisplay {
@@ -572,18 +527,15 @@ fn ensure_default_odx_fixel_scalar_branch(
 
     let selector_uuid = make_node(
         document,
-        WorkflowNodeKind::OdxFixelScalarSelect {
+        OdxFixelScalarSelectOp {
             dpf_name: dpf_name.clone(),
-        },
+        }
+        .into(),
         document.graph.pos(display_uuid).unwrap_or(GraphPos::ZERO),
     );
     let color_uuid = make_node(
         document,
-        WorkflowNodeKind::ColorByFixelScalars {
-            colormap: default_fixel_colormap(),
-            range: None,
-            length_scale_by_scalar: false,
-        },
+        ColorByFixelScalarsOp::default().into(),
         document.graph.pos(display_uuid).unwrap_or(GraphPos::ZERO),
     );
     document.graph.connect(
