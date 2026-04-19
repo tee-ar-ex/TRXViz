@@ -11,7 +11,7 @@ use trx_rs::{
     ConversionOptions, DType, DataArray, Tractogram, remove_duplicates_tractogram, write_tractogram,
 };
 
-use crate::data::cifti::{CiftiStructure, ScalarKind, SurfaceScalars, VolumeScalars};
+use crate::data::cifti::{CiftiStructure, ScalarKind, ScalarMetadata, SurfaceScalars, VolumeScalars};
 use crate::data::loaded_files::{
     FileId, LoadedCifti, LoadedNifti, LoadedOdx, LoadedTrx, StreamlineBacking,
 };
@@ -1189,6 +1189,8 @@ fn evaluate_node(
             let volume = catalog
                 .materialize_dpv(dpv_name)
                 .map_err(|e| format!("Failed to materialize DPV '{dpv_name}': {e}"))?;
+            let volume_scalars =
+                volume_scalars_from_nifti_volume(&volume, dpv_name.clone(), catalog.source_id);
             // Stash the materialized volume in the execution cache so headless can pick it up.
             execution_cache.odx_dpv_materializations.insert(
                 node.uuid,
@@ -1198,7 +1200,10 @@ fn evaluate_node(
                     volume: Arc::new(volume),
                 },
             );
-            Ok(vec![WorkflowValue::Volume(catalog.source_id).into()])
+            Ok(vec![
+                WorkflowValue::Volume(catalog.source_id).into(),
+                WorkflowValue::VolumeScalars(volume_scalars).into(),
+            ])
         }
         WorkflowNodeKind::OdxFixelScalarSelect { dpf_name } => {
             let catalog = expect_odx_catalog_input(inputs, "ODX Fixel Scalar Select")?;
@@ -1294,6 +1299,7 @@ fn evaluate_node(
             slice_axis,
             opacity_gate,
             size_gate,
+            detail,
             visible,
         } => {
             let field = expect_odf_field_input(inputs, "ODF Glyph Renderer")?;
@@ -1310,6 +1316,7 @@ fn evaluate_node(
                 slice_axis: *slice_axis,
                 opacity_gate: *opacity_gate,
                 size_gate: *size_gate,
+                detail: *detail,
                 opacity_scalars,
                 size_scalars,
                 visible: *visible,
@@ -1377,6 +1384,39 @@ fn optional_volume_scalars_input(
             ..
         }) => Some(v),
         _ => None,
+    }
+}
+
+fn volume_scalars_from_nifti_volume(
+    volume: &crate::data::nifti_data::NiftiVolume,
+    map_name: String,
+    _source_id: FileId,
+) -> VolumeScalars {
+    let mut lo = f32::INFINITY;
+    let mut hi = f32::NEG_INFINITY;
+    for &value in &volume.data {
+        if value.is_finite() {
+            lo = lo.min(value);
+            hi = hi.max(value);
+        }
+    }
+    let suggested_range = if lo.is_finite() && hi.is_finite() {
+        Some((lo, hi))
+    } else {
+        None
+    };
+    VolumeScalars {
+        dims: volume.dims,
+        voxel_to_ras: volume.voxel_to_ras,
+        values: volume.data.clone(),
+        kind: ScalarKind::Continuous,
+        metadata: ScalarMetadata {
+            map_name,
+            suggested_range,
+            series_index: None,
+            series_value: None,
+            label_table: Vec::new(),
+        },
     }
 }
 

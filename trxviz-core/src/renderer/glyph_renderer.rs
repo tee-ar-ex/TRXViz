@@ -21,6 +21,7 @@ pub struct OdxGlyphResourceKey {
     pub sphere_vertex_count: usize,
     pub sphere_index_count: usize,
     pub sh_order: Option<usize>,
+    pub sh_detail: Option<u32>,
     pub slice_axis: Option<u8>,
     pub slice_index: Option<u32>,
     pub opacity_gate_fingerprint: u64,
@@ -907,7 +908,7 @@ impl GlyphResources {
     pub fn dispatch_odx_sh_slice(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        _queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         slice_compact_indices: &[u32],
     ) {
@@ -925,6 +926,13 @@ impl GlyphResources {
         }
 
         let rows_per_dispatch = max_rows_per_dispatch(full_bins);
+        let (Some(coeffs), Some(transform), Some(amplitudes)) = (
+            self.odx_sh_coeff_buffer.as_ref(),
+            self.odx_sh_transform_buffer.as_ref(),
+            self.amplitude_buffer.as_ref(),
+        ) else {
+            return;
+        };
         for slice_chunk in slice_compact_indices.chunks(rows_per_dispatch) {
             let next = OdxShComputeParams {
                 full_bins: stored.full_bins,
@@ -932,33 +940,57 @@ impl GlyphResources {
                 ncoeffs: stored.ncoeffs,
                 slice_count: slice_chunk.len() as u32,
             };
-            let Some(params_buffer) = self.odx_sh_params_buffer.as_ref() else {
-                return;
-            };
-            queue.write_buffer(params_buffer, 0, bytemuck::bytes_of(&next));
-
-            self.odx_sh_slice_buffer = Some(device.create_buffer_init(
+            let params_buffer = device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("odx_sh_compute_params_chunk"),
+                    contents: bytemuck::bytes_of(&next),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                },
+            );
+            let slice_buffer = device.create_buffer_init(
                 &wgpu::util::BufferInitDescriptor {
                     label: Some("odx_sh_slice_indices"),
                     contents: bytemuck::cast_slice(slice_chunk),
                     usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 },
-            ));
-            self.rebuild_odx_sh_bind_group(device);
+            );
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("odx_sh_compute_bg_chunk"),
+                layout: &self.odx_sh_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: coeffs.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: transform.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: slice_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: amplitudes.as_entire_binding(),
+                    },
+                ],
+            });
 
             let total = (slice_chunk.len() * full_bins) as u32;
             if total == 0 {
                 continue;
             }
-            let Some(bind_group) = self.odx_sh_bind_group.as_ref() else {
-                return;
-            };
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("odx_sh_compute_pass"),
                 timestamp_writes: None,
             });
             pass.set_pipeline(&self.odx_sh_pipeline);
-            pass.set_bind_group(0, bind_group, &[]);
+            pass.set_bind_group(0, &bind_group, &[]);
             pass.dispatch_workgroups(total.div_ceil(COMPUTE_WORKGROUP_SIZE_X), 1, 1);
         }
     }

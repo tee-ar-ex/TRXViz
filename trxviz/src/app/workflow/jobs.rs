@@ -146,34 +146,64 @@ fn active_odx_slice_state(app: &crate::app::TrxVizApp) -> Option<(usize, u32)> {
         .map(|_| (2usize, app.viewport.slice_indices[0] as u32))
 }
 
+fn clamped_active_odx_sh_detail(
+    app: &crate::app::TrxVizApp,
+    scene: &trxviz_core::data::odx_data::OdxScene,
+    slice_state: Option<(usize, u32)>,
+) -> u32 {
+    let requested = active_odx_glyph_plan(app)
+        .map(|draw| draw.detail)
+        .unwrap_or(trxviz_core::workflow::default_odf_glyph_detail());
+    let Some((axis, slice_idx)) = slice_state else {
+        return requested;
+    };
+    let Some(limit) = app.max_storage_buffer_binding_size else {
+        return requested;
+    };
+    scene.clamp_sh_detail_for_slice(axis, slice_idx, requested, limit)
+}
+
 fn active_odx_glyph_resource_key(
     app: &crate::app::TrxVizApp,
     _device: &wgpu::Device,
 ) -> Option<OdxGlyphResourceKey> {
     let scene = active_odx_glyph_scene(app)?;
+    let plan = active_odx_glyph_plan(app);
     let source_kind = scene.glyph_source_kind()?;
     let slice_state = active_odx_slice_state(app);
     let mode = match source_kind {
         trxviz_core::data::odx_data::OdxGlyphSourceKind::Odf => OdxGpuGlyphMode::OdfSliceGather,
         trxviz_core::data::odx_data::OdxGlyphSourceKind::Sh => OdxGpuGlyphMode::ShCompute,
     };
+    let (sphere_vertex_count, sphere_index_count, sh_detail) = match source_kind {
+        trxviz_core::data::odx_data::OdxGlyphSourceKind::Odf => {
+            let (vertices, indices) = scene.odf_render_geometry()?;
+            (vertices.len(), indices.len(), None)
+        }
+        trxviz_core::data::odx_data::OdxGlyphSourceKind::Sh => {
+            let detail = clamped_active_odx_sh_detail(app, scene, slice_state);
+            let mesh = scene.sh_render_mesh(detail)?;
+            (mesh.vertices().len(), mesh.indices().len(), Some(detail))
+        }
+    };
     let mut opacity_hasher = DefaultHasher::new();
     hash_volume_scalars(
         &mut opacity_hasher,
-        active_odx_glyph_plan(app).and_then(|plan| plan.opacity_scalars.as_ref()),
+        plan.and_then(|draw| draw.opacity_scalars.as_ref()),
     );
     let mut size_hasher = DefaultHasher::new();
     hash_volume_scalars(
         &mut size_hasher,
-        active_odx_glyph_plan(app).and_then(|plan| plan.size_scalars.as_ref()),
+        plan.and_then(|draw| draw.size_scalars.as_ref()),
     );
     Some(OdxGlyphResourceKey {
         scene_ptr: Arc::as_ptr(scene) as usize,
         source_kind,
         mode,
-        sphere_vertex_count: scene.sphere_vertices.len(),
-        sphere_index_count: scene.sphere_indices.len(),
+        sphere_vertex_count,
+        sphere_index_count,
         sh_order: scene.sh_order(),
+        sh_detail,
         slice_axis: slice_state.map(|(axis, _)| axis as u8),
         slice_index: slice_state.map(|(_, slice_idx)| slice_idx),
         opacity_gate_fingerprint: opacity_hasher.finish(),
@@ -211,6 +241,71 @@ fn sample_odx_gate_buffers(
 }
 
 impl crate::app::TrxVizApp {
+    fn effective_workflow_node_sizes(&self) -> HashMap<WorkflowNodeUuid, NodeSize> {
+        let mut sizes = estimated_workflow_node_sizes(&self.workflow.document.graph);
+        for (uuid, size) in &self.workflow.measured_node_sizes {
+            if self.workflow.document.graph.contains(*uuid) {
+                sizes.insert(*uuid, *size);
+            }
+        }
+        sizes
+    }
+
+    fn retain_workflow_node_measurements(&mut self) {
+        self.workflow
+            .measured_node_sizes
+            .retain(|uuid, _| self.workflow.document.graph.contains(*uuid));
+        self.workflow
+            .layout_reflow_nodes
+            .retain(|uuid| self.workflow.document.graph.contains(*uuid));
+        self.workflow.layout_reflow_pending = !self.workflow.layout_reflow_nodes.is_empty();
+    }
+
+    pub(in crate::app) fn arrange_workflow_graph(&mut self) -> Option<GraphRect> {
+        self.retain_workflow_node_measurements();
+        if self.workflow.document.graph.is_empty() {
+            return None;
+        }
+        let sizes = self.effective_workflow_node_sizes();
+        let layout = layout_workflow_graph(
+            &self.workflow.document.graph,
+            &sizes,
+            &WorkflowLayoutOptions::default(),
+        );
+        apply_workflow_layout(&mut self.workflow.document.graph, &layout);
+        self.workflow.layout_reflow_nodes.clear();
+        self.workflow.layout_reflow_pending = false;
+        self.rebuild_workflow_editor_from_document();
+        Some(layout.bounds)
+    }
+
+    pub(in crate::app) fn apply_pending_workflow_layout_reflow(&mut self) -> bool {
+        self.retain_workflow_node_measurements();
+        if !self.workflow.layout_reflow_pending || self.workflow.layout_reflow_nodes.is_empty() {
+            return false;
+        }
+
+        let seeds: Vec<_> = self.workflow.layout_reflow_nodes.iter().copied().collect();
+        let component_nodes = weakly_connected_closure(&self.workflow.document.graph, &seeds);
+        self.workflow.layout_reflow_nodes.clear();
+        self.workflow.layout_reflow_pending = false;
+        if component_nodes.is_empty() {
+            return false;
+        }
+
+        let sizes = self.effective_workflow_node_sizes();
+        let layout = layout_workflow_graph_subset(
+            &self.workflow.document.graph,
+            &sizes,
+            &component_nodes,
+            None,
+            &WorkflowLayoutOptions::default(),
+        );
+        apply_workflow_layout(&mut self.workflow.document.graph, &layout);
+        self.rebuild_workflow_editor_from_document();
+        true
+    }
+
     pub(in crate::app) fn ensure_active_odx_glyph_resources(
         &mut self,
         callback_resources: &mut egui_wgpu::CallbackResources,
@@ -240,6 +335,9 @@ impl crate::app::TrxVizApp {
         match resource_key.mode {
             OdxGpuGlyphMode::PreSampledOdf => unreachable!("ODX glyphs now use slice-local upload"),
             OdxGpuGlyphMode::OdfSliceGather => {
+                let (sphere_vertices, sphere_indices) = scene
+                    .odf_render_geometry()
+                    .expect("ODF geometry should exist for ODF glyph mode");
                 let rows_per_chunk = odf_rows_per_chunk(&scene, device);
                 let metadata = scene
                     .odf_slice_metadata(axis, slice_idx, rows_per_chunk)
@@ -260,15 +358,17 @@ impl crate::app::TrxVizApp {
                     device,
                     queue,
                     resource_key.scene_ptr,
-                    &scene.sphere_vertices,
-                    &scene.sphere_indices,
+                    sphere_vertices,
+                    sphere_indices,
                     &metadata.instances,
                     odf_view.as_flat_slice(),
                     scene.compact_voxel_count(),
                     scene
                         .odf_source_row_width()
                         .expect("ODF row width should exist for ODF glyph mode"),
-                    scene.glyph_row_width(),
+                    scene
+                        .odf_render_row_width()
+                        .expect("ODF render row width should exist for ODF glyph mode"),
                     rows_per_chunk,
                     &metadata.chunk_worklists,
                     metadata.amp_norm,
@@ -277,7 +377,19 @@ impl crate::app::TrxVizApp {
                 );
             }
             OdxGpuGlyphMode::ShCompute => {
-                let instances = scene.glyph_instances_for_slice(axis, slice_idx);
+                let detail = clamped_active_odx_sh_detail(self, &scene, Some((axis, slice_idx)));
+                let requested = active_odx_glyph_plan(self)
+                    .map(|draw| draw.detail)
+                    .unwrap_or(trxviz_core::workflow::default_odf_glyph_detail());
+                if detail < requested {
+                    self.status_msg = Some(format!(
+                        "SH detail clamped to {detail} by GPU storage limit for the current slice."
+                    ));
+                }
+                let mesh = scene
+                    .sh_render_mesh(detail)
+                    .expect("SH render mesh should exist for SH glyph mode");
+                let instances = scene.glyph_instances_for_slice(axis, slice_idx, mesh.row_width());
                 if instances.is_empty() {
                     glyph_resources.clear();
                     self.odx_amp_norm = 1.0;
@@ -291,24 +403,18 @@ impl crate::app::TrxVizApp {
                     .sh_view_f32()
                     .expect("SH coefficients should exist for SH glyph mode")
                     .ncols();
-                let transform = scene
-                    .sh_transform_flat()
-                    .expect("SH transform should exist for SH glyph mode");
-                let source_bins = scene
-                    .sh_source_dir_count()
-                    .expect("SH source dir count should exist for SH glyph mode");
                 let (opacity_samples, size_samples) = sample_odx_gate_buffers(self, &instances);
                 self.odx_amp_norm = 1.0;
                 glyph_resources.set_odx_sh_volume(
                     device,
-                    &scene.sphere_vertices,
-                    &scene.sphere_indices,
+                    mesh.vertices(),
+                    mesh.indices(),
                     &instances,
                     &coefficients,
                     ncoeffs,
-                    transform,
-                    source_bins,
-                    scene.glyph_row_width(),
+                    mesh.transform_flat(),
+                    mesh.source_dir_count(),
+                    mesh.row_width(),
                     opacity_samples.as_deref(),
                     size_samples.as_deref(),
                 );
@@ -334,6 +440,7 @@ impl crate::app::TrxVizApp {
     }
 
     pub(in crate::app) fn rebuild_workflow_editor_from_document(&mut self) {
+        self.retain_workflow_node_measurements();
         self.workflow.editor_snarl = snarl_from_graph(&self.workflow.document.graph);
     }
 
@@ -1603,6 +1710,7 @@ impl crate::app::TrxVizApp {
                 } => trxviz_core::data::odx_data::OdxScene::open(&asset_path)
                     .map_err(|err| err.to_string())
                     .map(|odx_scene| {
+                        let warnings = odx_scene.glyph_warnings().to_vec();
                         let name = asset_path
                             .file_name()
                             .map(|n| n.to_string_lossy().to_string())
@@ -1614,6 +1722,7 @@ impl crate::app::TrxVizApp {
                                 name,
                                 path: asset_path,
                                 scene: Arc::new(odx_scene),
+                                warnings,
                                 visible: true,
                             });
                     }),

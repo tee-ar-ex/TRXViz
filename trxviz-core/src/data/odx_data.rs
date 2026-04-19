@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use glam::{Mat4, Vec4};
+use glam::{Mat4, Vec3, Vec4};
 use odx_rs::formats::dsistudio_odf8;
 use odx_rs::typed_view::TypedView2D;
 use odx_rs::{OdxDataset, mrtrix_sh};
@@ -21,14 +21,11 @@ pub struct OdxScene {
     slice_compact_indices: [Vec<Vec<usize>>; 3],
     /// RAS+ center for each compact voxel.
     centers_ras: Vec<[f32; 3]>,
-    glyph_source: Option<GlyphFieldSource>,
-    /// Full-sphere vertex positions (unit vectors).
-    pub sphere_vertices: Vec<[f32; 3]>,
-    /// Triangle indices (flattened from `[[u32; 3]]`).
-    pub sphere_indices: Vec<u32>,
-    /// Number of sphere vertices (per voxel amplitude row width).
-    pub nb_sphere_vertices: usize,
+    odf_source: Option<OdfGlyphSource>,
+    sh_source: Option<ShGlyphSource>,
+    glyph_warnings: Vec<String>,
     odf_slice_cache: Mutex<OdfSliceMetadataCache>,
+    sh_render_mesh_cache: Mutex<HashMap<u32, Arc<ShRenderMesh>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -37,20 +34,64 @@ pub enum OdxGlyphSourceKind {
     Sh,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OdfSampleDomain {
+    FullSphere,
+    Hemisphere,
+}
+
+impl OdfSampleDomain {
+    fn is_hemisphere(self) -> bool {
+        matches!(self, Self::Hemisphere)
+    }
+}
+
 #[derive(Debug)]
-enum GlyphFieldSource {
-    Odf {
-        name: String,
-        hemisphere: bool,
-        ncols: usize,
-    },
-    Sh {
-        name: String,
-        hemisphere: bool,
-        ncoeffs: usize,
-        sh_order: usize,
-        sample_plan: mrtrix_sh::RowSamplePlan,
-    },
+struct OdfGlyphSource {
+    name: String,
+    sample_domain: OdfSampleDomain,
+    ncols: usize,
+    render_vertices: Vec<[f32; 3]>,
+    render_indices: Vec<u32>,
+}
+
+#[derive(Debug)]
+struct ShGlyphSource {
+    name: String,
+    ncoeffs: usize,
+    sh_order: usize,
+}
+
+pub struct ShRenderMesh {
+    vertices: Vec<[f32; 3]>,
+    indices: Vec<u32>,
+    sample_plan: mrtrix_sh::RowSamplePlan,
+}
+
+impl ShRenderMesh {
+    pub fn vertices(&self) -> &[[f32; 3]] {
+        &self.vertices
+    }
+
+    pub fn indices(&self) -> &[u32] {
+        &self.indices
+    }
+
+    pub fn row_width(&self) -> usize {
+        self.vertices.len()
+    }
+
+    pub fn transform_flat(&self) -> &[f32] {
+        self.sample_plan.transform_flat()
+    }
+
+    pub fn source_dir_count(&self) -> usize {
+        self.sample_plan.source_dir_count()
+    }
+
+    fn sample_plan(&self) -> &mrtrix_sh::RowSamplePlan {
+        &self.sample_plan
+    }
 }
 
 pub struct SliceGlyphData {
@@ -124,70 +165,20 @@ impl OdxScene {
             }
         }
         let centers_ras = dataset.mask_voxel_centers_ras();
-
-        // Resolve sphere mesh — prefer dataset's own, fall back to built-in odf8.
-        let (full_verts, faces) = match (dataset.sphere_vertices(), dataset.sphere_faces()) {
-            (Some(v), Some(f)) => (v.to_vec(), f.to_vec()),
-            _ => (
-                dsistudio_odf8::full_vertices_ras().to_vec(),
-                dsistudio_odf8::faces().to_vec(),
-            ),
-        };
-        let sphere_indices: Vec<u32> = faces.iter().flat_map(|f| f.iter().copied()).collect();
-        let nb_sphere_vertices = full_verts.len();
-
-        let is_hemisphere = dataset.header().odf_sample_domain.as_deref() == Some("hemisphere");
-        let glyph_source = if let Ok(odf_view) = dataset.odf::<f32>("amplitudes") {
-            let expected_cols = if is_hemisphere {
-                dsistudio_odf8::hemisphere_vertices_ras().len()
-            } else {
-                nb_sphere_vertices
-            };
-            if odf_view.ncols() != expected_cols {
-                anyhow::bail!(
-                    "ODF amplitudes have {} columns but expected {} for the active sphere",
-                    odf_view.ncols(),
-                    expected_cols
-                );
-            }
-            Some(GlyphFieldSource::Odf {
-                name: "amplitudes".into(),
-                hemisphere: is_hemisphere,
-                ncols: odf_view.ncols(),
-            })
-        } else if let Ok(sh_view) = dataset.sh::<f32>("coefficients") {
-            let dirs: &[[f32; 3]] = if is_hemisphere {
-                dsistudio_odf8::hemisphere_vertices_ras()
-            } else {
-                &full_verts
-            };
-            let ncoeffs = sh_view.ncols();
-            let sh_order = dataset
-                .header()
-                .sh_order
-                .map(|order| order as usize)
-                .unwrap_or(mrtrix_sh::lmax_for_ncoeffs(ncoeffs)?);
-            Some(GlyphFieldSource::Sh {
-                name: "coefficients".into(),
-                hemisphere: is_hemisphere,
-                ncoeffs,
-                sh_order,
-                sample_plan: mrtrix_sh::RowSamplePlan::for_sh_rows_nonnegative(dirs, ncoeffs)?,
-            })
-        } else {
-            None
-        };
+        let mut glyph_warnings = Vec::new();
+        let odf_source = resolve_odf_source(&dataset, &mut glyph_warnings);
+        let sh_source = resolve_sh_source(&dataset, &mut glyph_warnings);
 
         Ok(Self {
             dataset,
             ijk_lookup,
             slice_compact_indices,
             centers_ras,
-            glyph_source,
-            sphere_vertices: full_verts,
-            sphere_indices,
-            nb_sphere_vertices,
+            odf_source,
+            sh_source,
+            glyph_warnings,
             odf_slice_cache: Mutex::new(OdfSliceMetadataCache::default()),
+            sh_render_mesh_cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -201,22 +192,105 @@ impl OdxScene {
     }
 
     pub fn has_glyph_field(&self) -> bool {
-        self.glyph_source.is_some()
+        self.glyph_source_kind().is_some()
     }
 
     pub fn glyph_source_kind(&self) -> Option<OdxGlyphSourceKind> {
-        match self.glyph_source.as_ref() {
-            Some(GlyphFieldSource::Odf { .. }) => Some(OdxGlyphSourceKind::Odf),
-            Some(GlyphFieldSource::Sh { .. }) => Some(OdxGlyphSourceKind::Sh),
-            None => None,
+        if self.sh_source.is_some() {
+            Some(OdxGlyphSourceKind::Sh)
+        } else if self.odf_source.is_some() {
+            Some(OdxGlyphSourceKind::Odf)
+        } else {
+            None
         }
     }
 
-    pub fn glyph_row_width(&self) -> usize {
-        self.nb_sphere_vertices
+    pub fn glyph_warnings(&self) -> &[String] {
+        &self.glyph_warnings
     }
 
-    pub fn glyph_instances_full_volume(&self) -> Vec<GlyphInstance> {
+    pub fn odf_render_geometry(&self) -> Option<(&[[f32; 3]], &[u32])> {
+        self.odf_source.as_ref().map(|source| {
+            (
+                source.render_vertices.as_slice(),
+                source.render_indices.as_slice(),
+            )
+        })
+    }
+
+    pub fn odf_render_row_width(&self) -> Option<usize> {
+        self.odf_source
+            .as_ref()
+            .map(|source| source.render_vertices.len())
+    }
+
+    pub fn sh_render_mesh(&self, detail: u32) -> Option<Arc<ShRenderMesh>> {
+        self.sh_source.as_ref()?;
+        let detail = detail.max(1);
+        if let Ok(cache) = self.sh_render_mesh_cache.lock()
+            && let Some(mesh) = cache.get(&detail)
+        {
+            return Some(mesh.clone());
+        }
+
+        let (vertices, indices) = build_full_icosphere_mesh(detail);
+        let ncoeffs = self.sh_source.as_ref()?.ncoeffs;
+        let sample_plan = mrtrix_sh::RowSamplePlan::for_sh_rows_nonnegative(&vertices, ncoeffs).ok()?;
+        let mesh = Arc::new(ShRenderMesh {
+            vertices,
+            indices,
+            sample_plan,
+        });
+        if let Ok(mut cache) = self.sh_render_mesh_cache.lock() {
+            cache.insert(detail, mesh.clone());
+        }
+        Some(mesh)
+    }
+
+    pub fn clamp_sh_detail_for_slice(
+        &self,
+        axis: usize,
+        slice_idx: u32,
+        requested_detail: u32,
+        max_storage_bytes: usize,
+    ) -> u32 {
+        if self.sh_source.is_none() {
+            return requested_detail.max(1);
+        }
+        let requested_detail = requested_detail.max(1);
+        let instance_count = self.slice_compact_indices(axis, slice_idx).len();
+        if instance_count == 0 {
+            return requested_detail;
+        }
+
+        let mut safe_detail = 1u32;
+        for detail in 1..=requested_detail {
+            let Some(row_width) = self.sh_render_row_width(detail) else {
+                break;
+            };
+            let needed = instance_count
+                .saturating_mul(row_width)
+                .saturating_mul(std::mem::size_of::<f32>());
+            if needed <= max_storage_bytes {
+                safe_detail = detail;
+            } else {
+                break;
+            }
+        }
+        safe_detail
+    }
+
+    pub fn max_sh_detail_for_slice(
+        &self,
+        axis: usize,
+        slice_idx: u32,
+        max_storage_bytes: usize,
+        max_detail: u32,
+    ) -> u32 {
+        self.clamp_sh_detail_for_slice(axis, slice_idx, max_detail, max_storage_bytes)
+    }
+
+    pub fn glyph_instances_full_volume(&self, row_width: usize) -> Vec<GlyphInstance> {
         let scale = self.default_glyph_scale();
         self.centers_ras
             .iter()
@@ -224,7 +298,7 @@ impl OdxScene {
             .map(|(compact_idx, &center)| GlyphInstance {
                 center,
                 scale,
-                amplitude_offset: (compact_idx * self.nb_sphere_vertices) as u32,
+                amplitude_offset: (compact_idx * row_width) as u32,
                 min_contacts: 0,
                 contact_count: 1,
                 _pad: 0,
@@ -232,7 +306,12 @@ impl OdxScene {
             .collect()
     }
 
-    pub fn glyph_instances_for_slice(&self, axis: usize, slice_idx: u32) -> Vec<GlyphInstance> {
+    pub fn glyph_instances_for_slice(
+        &self,
+        axis: usize,
+        slice_idx: u32,
+        row_width: usize,
+    ) -> Vec<GlyphInstance> {
         let scale = self.default_glyph_scale();
         self.slice_compact_indices(axis, slice_idx)
             .iter()
@@ -240,7 +319,7 @@ impl OdxScene {
             .map(|(local_idx, &compact_idx)| GlyphInstance {
                 center: self.centers_ras[compact_idx],
                 scale,
-                amplitude_offset: (local_idx * self.nb_sphere_vertices) as u32,
+                amplitude_offset: (local_idx * row_width) as u32,
                 min_contacts: 0,
                 contact_count: 1,
                 _pad: 0,
@@ -280,21 +359,18 @@ impl OdxScene {
     }
 
     pub fn odf_view_f32(&self) -> Option<TypedView2D<'_, f32>> {
-        match self.glyph_source.as_ref() {
-            Some(GlyphFieldSource::Odf { name, .. }) => self.dataset.odf::<f32>(name).ok(),
-            _ => None,
-        }
+        self.odf_source
+            .as_ref()
+            .and_then(|source| self.dataset.odf::<f32>(&source.name).ok())
     }
 
     pub fn odf_amplitudes_full_sphere(&self) -> Option<Vec<f32>> {
-        let GlyphFieldSource::Odf { hemisphere, .. } = self.glyph_source.as_ref()? else {
-            return None;
-        };
+        let source = self.odf_source.as_ref()?;
         let view = self.odf_view_f32()?;
-        if !hemisphere {
+        if !source.sample_domain.is_hemisphere() {
             return Some(view.as_flat_slice().to_vec());
         }
-        let mut out = Vec::with_capacity(view.nrows() * self.nb_sphere_vertices);
+        let mut out = Vec::with_capacity(view.nrows() * source.render_vertices.len());
         for row in view.rows() {
             append_mirrored_hemisphere_row(row, &mut out);
         }
@@ -302,15 +378,13 @@ impl OdxScene {
     }
 
     pub fn odf_amplitudes_for_slice(&self, axis: usize, slice_idx: u32) -> Option<Vec<f32>> {
-        let GlyphFieldSource::Odf { hemisphere, .. } = self.glyph_source.as_ref()? else {
-            return None;
-        };
+        let source = self.odf_source.as_ref()?;
         let view = self.odf_view_f32()?;
         let slice_indices = self.slice_compact_indices(axis, slice_idx);
-        let mut out = Vec::with_capacity(slice_indices.len() * self.nb_sphere_vertices);
+        let mut out = Vec::with_capacity(slice_indices.len() * source.render_vertices.len());
         for &compact_idx in slice_indices {
             let row = view.row(compact_idx);
-            if *hemisphere {
+            if source.sample_domain.is_hemisphere() {
                 append_mirrored_hemisphere_row(row, &mut out);
             } else {
                 out.extend_from_slice(row);
@@ -320,10 +394,7 @@ impl OdxScene {
     }
 
     pub fn odf_source_row_width(&self) -> Option<usize> {
-        match self.glyph_source.as_ref() {
-            Some(GlyphFieldSource::Odf { ncols, .. }) => Some(*ncols),
-            _ => None,
-        }
+        self.odf_source.as_ref().map(|source| source.ncols)
     }
 
     pub fn odf_rows_per_chunk(&self, max_storage_bytes: usize) -> Option<usize> {
@@ -367,16 +438,13 @@ impl OdxScene {
     }
 
     pub fn sh_view_f32(&self) -> Option<TypedView2D<'_, f32>> {
-        match self.glyph_source.as_ref() {
-            Some(GlyphFieldSource::Sh { name, .. }) => self.dataset.sh::<f32>(name).ok(),
-            _ => None,
-        }
+        self.sh_source
+            .as_ref()
+            .and_then(|source| self.dataset.sh::<f32>(&source.name).ok())
     }
 
     pub fn sh_coefficients_for_slice(&self, axis: usize, slice_idx: u32) -> Option<Vec<f32>> {
-        let GlyphFieldSource::Sh { .. } = self.glyph_source.as_ref()? else {
-            return None;
-        };
+        self.sh_source.as_ref()?;
         let view = self.sh_view_f32()?;
         let slice_indices = self.slice_compact_indices(axis, slice_idx);
         let mut out = Vec::with_capacity(slice_indices.len() * view.ncols());
@@ -387,24 +455,18 @@ impl OdxScene {
     }
 
     pub fn glyph_amplitudes_for_slice(&self, axis: usize, slice_idx: u32) -> Option<Vec<f32>> {
-        match self.glyph_source.as_ref()? {
-            GlyphFieldSource::Odf { .. } => self.odf_amplitudes_for_slice(axis, slice_idx),
-            GlyphFieldSource::Sh {
-                hemisphere,
-                sample_plan,
-                ..
-            } => {
+        match self.glyph_source_kind()? {
+            OdxGlyphSourceKind::Odf => self.odf_amplitudes_for_slice(axis, slice_idx),
+            OdxGlyphSourceKind::Sh => {
+                let mesh = self.sh_render_mesh(3)?;
                 let view = self.sh_view_f32()?;
                 let slice_indices = self.slice_compact_indices(axis, slice_idx);
-                let mut out = Vec::with_capacity(slice_indices.len() * self.nb_sphere_vertices);
-                let mut sampled = vec![0.0f32; sample_plan.ndir()];
+                let mut out = Vec::with_capacity(slice_indices.len() * mesh.row_width());
+                let mut sampled = vec![0.0f32; mesh.row_width()];
                 for &compact_idx in slice_indices {
-                    sample_plan.apply_row_into(view.row(compact_idx), &mut sampled);
-                    if *hemisphere {
-                        append_mirrored_hemisphere_row(&sampled, &mut out);
-                    } else {
-                        out.extend_from_slice(&sampled);
-                    }
+                    mesh.sample_plan()
+                        .apply_row_into(view.row(compact_idx), &mut sampled);
+                    out.extend_from_slice(&sampled);
                 }
                 Some(out)
             }
@@ -412,32 +474,26 @@ impl OdxScene {
     }
 
     pub fn sh_order(&self) -> Option<usize> {
-        match self.glyph_source.as_ref() {
-            Some(GlyphFieldSource::Sh { sh_order, .. }) => Some(*sh_order),
-            _ => None,
-        }
+        self.sh_source.as_ref().map(|source| source.sh_order)
     }
 
-    pub fn sh_source_dir_count(&self) -> Option<usize> {
-        match self.glyph_source.as_ref() {
-            Some(GlyphFieldSource::Sh { sample_plan, .. }) => Some(sample_plan.source_dir_count()),
-            _ => None,
-        }
+    pub fn sh_source_dir_count(&self, detail: u32) -> Option<usize> {
+        self.sh_render_mesh(detail).map(|mesh| mesh.source_dir_count())
     }
 
-    pub fn sh_transform_flat(&self) -> Option<&[f32]> {
-        match self.glyph_source.as_ref() {
-            Some(GlyphFieldSource::Sh { sample_plan, .. }) => Some(sample_plan.transform_flat()),
-            _ => None,
-        }
+    pub fn sh_render_row_width(&self, detail: u32) -> Option<usize> {
+        self.sh_render_mesh(detail).map(|mesh| mesh.row_width())
+    }
+
+    pub fn sh_transform_flat(&self, detail: u32) -> Option<Arc<ShRenderMesh>> {
+        self.sh_render_mesh(detail)
     }
 
     pub fn glyph_source_is_hemisphere(&self) -> bool {
-        match self.glyph_source.as_ref() {
-            Some(GlyphFieldSource::Odf { hemisphere, .. })
-            | Some(GlyphFieldSource::Sh { hemisphere, .. }) => *hemisphere,
-            None => false,
-        }
+        self.odf_source
+            .as_ref()
+            .map(|source| source.sample_domain.is_hemisphere())
+            .unwrap_or(false)
     }
 
     /// Volume dimensions `[nx, ny, nz]`.
@@ -497,11 +553,20 @@ impl OdxScene {
     /// `slice_idx`: the voxel-grid index along `axis`.
     /// `skip`: render every Nth voxel (1 = no skip).
     pub fn glyphs_for_slice(&self, axis: usize, slice_idx: u32, skip: u32) -> SliceGlyphData {
-        let Some(source) = &self.glyph_source else {
+        self.glyphs_for_slice_with_detail(axis, slice_idx, skip, 3)
+    }
+
+    pub fn glyphs_for_slice_with_detail(
+        &self,
+        axis: usize,
+        slice_idx: u32,
+        skip: u32,
+        sh_detail: u32,
+    ) -> SliceGlyphData {
+        let Some(source_kind) = self.glyph_source_kind() else {
             return SliceGlyphData::default();
         };
         let skip = skip.max(1);
-        let nv = self.nb_sphere_vertices;
         let scale = self.default_glyph_scale();
         let Some(slice_indices) = self
             .slice_compact_indices
@@ -511,20 +576,27 @@ impl OdxScene {
             return SliceGlyphData::default();
         };
         let visible_voxels = slice_indices.len();
+        let nv = match source_kind {
+            OdxGlyphSourceKind::Odf => self.odf_render_row_width().unwrap_or(0),
+            OdxGlyphSourceKind::Sh => self.sh_render_row_width(sh_detail).unwrap_or(0),
+        };
+        if nv == 0 {
+            return SliceGlyphData::default();
+        }
         let mut instances = Vec::with_capacity(visible_voxels);
         let mut amplitudes = Vec::with_capacity(visible_voxels * nv);
         let mut count = 0u32;
 
-        match source {
-            GlyphFieldSource::Odf {
-                name,
-                hemisphere,
-                ncols,
-            } => {
-                debug_assert_eq!(*ncols * if *hemisphere { 2 } else { 1 }, nv);
+        match source_kind {
+            OdxGlyphSourceKind::Odf => {
+                let source = self.odf_source.as_ref().expect("ODF source should exist");
+                debug_assert_eq!(
+                    source.ncols * if source.sample_domain.is_hemisphere() { 2 } else { 1 },
+                    nv
+                );
                 let odf_view = self
                     .dataset
-                    .odf::<f32>(name)
+                    .odf::<f32>(&source.name)
                     .expect("ODF source missing during slice materialization");
                 for &compact_idx in slice_indices {
                     if skip > 1 && (count % skip) != 0 {
@@ -534,7 +606,7 @@ impl OdxScene {
                     count += 1;
                     let amp_offset = amplitudes.len() as u32;
                     let row = odf_view.row(compact_idx);
-                    if *hemisphere {
+                    if source.sample_domain.is_hemisphere() {
                         append_mirrored_hemisphere_row(row, &mut amplitudes);
                     } else {
                         amplitudes.extend_from_slice(row);
@@ -549,19 +621,17 @@ impl OdxScene {
                     });
                 }
             }
-            GlyphFieldSource::Sh {
-                name,
-                hemisphere,
-                ncoeffs,
-                sh_order,
-                sample_plan,
-            } => {
-                debug_assert_eq!(mrtrix_sh::ncoeffs_for_lmax(*sh_order), *ncoeffs);
+            OdxGlyphSourceKind::Sh => {
+                let source = self.sh_source.as_ref().expect("SH source should exist");
+                let mesh = self
+                    .sh_render_mesh(sh_detail)
+                    .expect("SH render mesh should exist for glyphs");
+                debug_assert_eq!(mrtrix_sh::ncoeffs_for_lmax(source.sh_order), source.ncoeffs);
                 let sh_view = self
                     .dataset
-                    .sh::<f32>(name)
+                    .sh::<f32>(&source.name)
                     .expect("SH source missing during slice materialization");
-                let mut sampled = vec![0.0f32; sample_plan.ndir()];
+                let mut sampled = vec![0.0f32; mesh.row_width()];
                 for &compact_idx in slice_indices {
                     if skip > 1 && (count % skip) != 0 {
                         count += 1;
@@ -570,12 +640,8 @@ impl OdxScene {
                     count += 1;
                     let amp_offset = amplitudes.len() as u32;
                     let row = sh_view.row(compact_idx);
-                    sample_plan.apply_row_into(row, &mut sampled);
-                    if *hemisphere {
-                        append_mirrored_hemisphere_row(&sampled, &mut amplitudes);
-                    } else {
-                        amplitudes.extend_from_slice(&sampled);
-                    }
+                    mesh.sample_plan().apply_row_into(row, &mut sampled);
+                    amplitudes.extend_from_slice(&sampled);
                     instances.push(GlyphInstance {
                         center: self.centers_ras[compact_idx],
                         scale,
@@ -601,9 +667,7 @@ impl OdxScene {
         slice_idx: u32,
         rows_per_chunk: usize,
     ) -> Option<OdfSliceMetadata> {
-        let GlyphFieldSource::Odf { hemisphere, .. } = self.glyph_source.as_ref()? else {
-            return None;
-        };
+        let source = self.odf_source.as_ref()?;
         let slice_indices = self.slice_compact_indices(axis, slice_idx);
         let odf_view = self.odf_view_f32()?;
         let scale = self.default_glyph_scale();
@@ -632,8 +696,7 @@ impl OdxScene {
                 }),
             }
 
-            let amp_offset = output_row.saturating_mul(self.nb_sphere_vertices) as u32;
-            let _ = hemisphere;
+            let amp_offset = output_row.saturating_mul(source.render_vertices.len()) as u32;
             instances.push(GlyphInstance {
                 center: self.centers_ras[compact_idx],
                 scale,
@@ -985,6 +1048,178 @@ impl OdxCatalog {
     }
 }
 
+fn resolve_odf_source(dataset: &OdxDataset, warnings: &mut Vec<String>) -> Option<OdfGlyphSource> {
+    let odf_view = dataset.odf::<f32>("amplitudes").ok()?;
+    let ncols = odf_view.ncols();
+    let header_domain = match dataset.header().odf_sample_domain.as_deref() {
+        Some("hemisphere") => Some(OdfSampleDomain::Hemisphere),
+        Some("full") => Some(OdfSampleDomain::FullSphere),
+        Some(other) => {
+            warnings.push(format!(
+                "ODF glyphs disabled: unsupported odf_sample_domain '{other}' for {} columns.",
+                ncols
+            ));
+            return None;
+        }
+        None => None,
+    };
+
+    if let (Some(vertices), Some(faces)) = (dataset.sphere_vertices(), dataset.sphere_faces()) {
+        let expected_cols = match header_domain.unwrap_or(OdfSampleDomain::FullSphere) {
+            OdfSampleDomain::Hemisphere => vertices.len() / 2,
+            OdfSampleDomain::FullSphere => vertices.len(),
+        };
+        if ncols == expected_cols {
+            let render_indices: Vec<u32> = faces.iter().flat_map(|face| face.iter().copied()).collect();
+            return Some(OdfGlyphSource {
+                name: "amplitudes".into(),
+                sample_domain: header_domain.unwrap_or(OdfSampleDomain::FullSphere),
+                ncols,
+                render_vertices: vertices.to_vec(),
+                render_indices,
+            });
+        }
+    }
+
+    let fallback_domain = match header_domain {
+        Some(OdfSampleDomain::Hemisphere) if ncols == dsistudio_odf8::hemisphere_vertices_ras().len() => {
+            Some(OdfSampleDomain::Hemisphere)
+        }
+        Some(OdfSampleDomain::FullSphere) if ncols == dsistudio_odf8::full_vertices_ras().len() => {
+            Some(OdfSampleDomain::FullSphere)
+        }
+        Some(_) => None,
+        None if ncols == dsistudio_odf8::hemisphere_vertices_ras().len() => {
+            Some(OdfSampleDomain::Hemisphere)
+        }
+        None if ncols == dsistudio_odf8::full_vertices_ras().len() => {
+            Some(OdfSampleDomain::FullSphere)
+        }
+        None => None,
+    };
+
+    if let Some(sample_domain) = fallback_domain {
+        let render_indices: Vec<u32> = dsistudio_odf8::faces()
+            .iter()
+            .flat_map(|face| face.iter().copied())
+            .collect();
+        return Some(OdfGlyphSource {
+            name: "amplitudes".into(),
+            sample_domain,
+            ncols,
+            render_vertices: dsistudio_odf8::full_vertices_ras().to_vec(),
+            render_indices,
+        });
+    }
+
+    warnings.push(format!(
+        "ODF glyphs disabled: ODF row width {ncols} could not be matched to an explicit sphere-with-faces or built-in odf8."
+    ));
+    None
+}
+
+fn resolve_sh_source(dataset: &OdxDataset, warnings: &mut Vec<String>) -> Option<ShGlyphSource> {
+    let sh_view = dataset.sh::<f32>("coefficients").ok()?;
+    let ncoeffs = sh_view.ncols();
+    let sh_order = match dataset.header().sh_order.map(|order| order as usize) {
+        Some(order) => order,
+        None => match mrtrix_sh::lmax_for_ncoeffs(ncoeffs) {
+            Ok(order) => order,
+            Err(err) => {
+                warnings.push(format!(
+                    "SH glyphs disabled: could not infer SH order from {ncoeffs} coefficients ({err})."
+                ));
+                return None;
+            }
+        },
+    };
+    Some(ShGlyphSource {
+        name: "coefficients".into(),
+        ncoeffs,
+        sh_order,
+    })
+}
+
+fn build_full_icosphere_mesh(detail: u32) -> (Vec<[f32; 3]>, Vec<u32>) {
+    let phi = (1.0 + 5.0_f32.sqrt()) * 0.5;
+    let mut vertices = vec![
+        [-1.0, phi, 0.0],
+        [1.0, phi, 0.0],
+        [-1.0, -phi, 0.0],
+        [1.0, -phi, 0.0],
+        [0.0, -1.0, phi],
+        [0.0, 1.0, phi],
+        [0.0, -1.0, -phi],
+        [0.0, 1.0, -phi],
+        [phi, 0.0, -1.0],
+        [phi, 0.0, 1.0],
+        [-phi, 0.0, -1.0],
+        [-phi, 0.0, 1.0],
+    ];
+    for vertex in &mut vertices {
+        *vertex = Vec3::from_array(*vertex).normalize().to_array();
+    }
+    let mut faces: Vec<[u32; 3]> = vec![
+        [0, 11, 5],
+        [0, 5, 1],
+        [0, 1, 7],
+        [0, 7, 10],
+        [0, 10, 11],
+        [1, 5, 9],
+        [5, 11, 4],
+        [11, 10, 2],
+        [10, 7, 6],
+        [7, 1, 8],
+        [3, 9, 4],
+        [3, 4, 2],
+        [3, 2, 6],
+        [3, 6, 8],
+        [3, 8, 9],
+        [4, 9, 5],
+        [2, 4, 11],
+        [6, 2, 10],
+        [8, 6, 7],
+        [9, 8, 1],
+    ];
+
+    for _ in 0..detail {
+        let mut midpoint_cache: HashMap<(u32, u32), u32> = HashMap::new();
+        let mut subdivided = Vec::with_capacity(faces.len() * 4);
+        for [a, b, c] in faces {
+            let ab = midpoint_index(&mut vertices, &mut midpoint_cache, a, b);
+            let bc = midpoint_index(&mut vertices, &mut midpoint_cache, b, c);
+            let ca = midpoint_index(&mut vertices, &mut midpoint_cache, c, a);
+            subdivided.push([a, ab, ca]);
+            subdivided.push([b, bc, ab]);
+            subdivided.push([c, ca, bc]);
+            subdivided.push([ab, bc, ca]);
+        }
+        faces = subdivided;
+    }
+
+    let indices = faces.into_iter().flat_map(|face| face).collect();
+    (vertices, indices)
+}
+
+fn midpoint_index(
+    vertices: &mut Vec<[f32; 3]>,
+    cache: &mut HashMap<(u32, u32), u32>,
+    a: u32,
+    b: u32,
+) -> u32 {
+    let key = if a < b { (a, b) } else { (b, a) };
+    if let Some(&idx) = cache.get(&key) {
+        return idx;
+    }
+
+    let va = Vec3::from_array(vertices[a as usize]);
+    let vb = Vec3::from_array(vertices[b as usize]);
+    let idx = vertices.len() as u32;
+    vertices.push((va + vb).normalize().to_array());
+    cache.insert(key, idx);
+    idx
+}
+
 fn append_mirrored_hemisphere_row(row: &[f32], out: &mut Vec<f32>) {
     out.extend_from_slice(row);
     out.extend_from_slice(row);
@@ -1081,15 +1316,97 @@ mod tests {
         builder.finalize().unwrap()
     }
 
+    fn build_test_dataset_with_odf_width(
+        ncols: usize,
+        domain: Option<&str>,
+        include_explicit_sphere: bool,
+    ) -> OdxDataset {
+        let full = dsistudio_odf8::full_vertices_ras().to_vec();
+        let faces = dsistudio_odf8::faces().to_vec();
+        let dims = [1, 1, 2];
+        let mask = vec![1u8, 1u8];
+        let mut builder = OdxBuilder::new(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            dims,
+            mask,
+        );
+        if include_explicit_sphere {
+            builder.set_sphere(full, faces);
+        } else {
+            builder.set_sphere_id("dsistudio_odf8");
+        }
+        builder.push_voxel_peaks(&[]);
+        builder.push_voxel_peaks(&[]);
+        if let Some(domain) = domain {
+            builder.set_odf_sample_domain(domain);
+        }
+        let values: Vec<f32> = (0..(ncols * 2)).map(|idx| idx as f32 + 1.0).collect();
+        builder.set_odf_data(
+            "amplitudes",
+            bytemuck::cast_slice(&values).to_vec(),
+            ncols,
+            DType::Float32,
+        );
+        builder.finalize().unwrap()
+    }
+
+    fn build_test_dataset_with_sh_and_odf(odf_cols: usize, odf_domain: Option<&str>) -> OdxDataset {
+        let full = dsistudio_odf8::full_vertices_ras().to_vec();
+        let faces = dsistudio_odf8::faces().to_vec();
+        let dims = [1, 1, 2];
+        let mask = vec![1u8, 1u8];
+        let mut builder = OdxBuilder::new(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            dims,
+            mask,
+        );
+        builder.set_sphere(full, faces);
+        builder.push_voxel_peaks(&[]);
+        builder.push_voxel_peaks(&[]);
+        if let Some(domain) = odf_domain {
+            builder.set_odf_sample_domain(domain);
+        }
+        let odf_values: Vec<f32> = (0..(odf_cols * 2)).map(|idx| idx as f32 + 1.0).collect();
+        builder.set_odf_data(
+            "amplitudes",
+            bytemuck::cast_slice(&odf_values).to_vec(),
+            odf_cols,
+            DType::Float32,
+        );
+        builder.set_sh_info(2, "tournier07".into());
+        let coeffs: Vec<f32> = vec![
+            1.0, 0.1, 0.2, 0.3, 0.4, 0.5, //
+            0.8, 0.2, 0.1, 0.0, -0.1, 0.3,
+        ];
+        builder.set_sh_data(
+            "coefficients",
+            bytemuck::cast_slice(&coeffs).to_vec(),
+            6,
+            DType::Float32,
+        );
+        builder.finalize().unwrap()
+    }
+
     #[test]
     fn lazy_odf_slice_matches_stored_row() {
         let scene = OdxScene::from_dataset(build_test_dataset_with_odf(false)).unwrap();
         let slice = scene.glyphs_for_slice(2, 0, 1);
+        let full_bins = scene.odf_render_row_width().unwrap();
         assert_eq!(slice.instances.len(), 1);
-        assert_eq!(slice.amplitudes.len(), scene.nb_sphere_vertices);
-        let expected: Vec<f32> = (1..=scene.nb_sphere_vertices).map(|v| v as f32).collect();
+        assert_eq!(slice.amplitudes.len(), full_bins);
+        let expected: Vec<f32> = (1..=full_bins).map(|v| v as f32).collect();
         assert_eq!(slice.amplitudes, expected);
-        assert_eq!(slice.amp_norm, scene.nb_sphere_vertices as f32);
+        assert_eq!(slice.amp_norm, full_bins as f32);
     }
 
     #[test]
@@ -1111,7 +1428,9 @@ mod tests {
         assert_eq!(metadata.amp_norm, slice_amp_norm(&expected));
         assert_eq!(
             metadata.instances.len(),
-            scene.glyph_instances_for_slice(2, 0).len()
+            scene
+                .glyph_instances_for_slice(2, 0, scene.odf_render_row_width().unwrap())
+                .len()
         );
     }
 
@@ -1128,7 +1447,8 @@ mod tests {
     #[test]
     fn lazy_sh_slice_matches_sampling_helper() {
         let scene = OdxScene::from_dataset(build_test_dataset_with_sh()).unwrap();
-        let slice = scene.glyphs_for_slice(2, 0, 1);
+        let slice = scene.glyphs_for_slice_with_detail(2, 0, 1, 3);
+        let mesh = scene.sh_render_mesh(3).unwrap();
         let coeffs = scene
             .dataset()
             .sh::<f32>("coefficients")
@@ -1136,7 +1456,7 @@ mod tests {
             .row(0)
             .to_vec();
         let expected =
-            mrtrix_sh::sample_rows_nonnegative(&coeffs, 1, &scene.sphere_vertices, coeffs.len())
+            mrtrix_sh::sample_rows_nonnegative(&coeffs, 1, mesh.vertices(), coeffs.len())
                 .unwrap();
         assert_eq!(slice.instances.len(), 1);
         assert_eq!(slice.amplitudes, expected);
@@ -1204,6 +1524,97 @@ mod tests {
         assert!((center - expected_center).length() < 1e-6);
     }
 
+    #[test]
+    fn sh_is_preferred_when_both_sh_and_valid_odf_are_present() {
+        let scene = OdxScene::from_dataset(build_test_dataset_with_sh_and_odf(642, None)).unwrap();
+        assert_eq!(scene.glyph_source_kind(), Some(OdxGlyphSourceKind::Sh));
+    }
+
+    #[test]
+    fn sh_is_preferred_when_odf_is_invalid() {
+        let scene = OdxScene::from_dataset(build_test_dataset_with_sh_and_odf(123, None)).unwrap();
+        assert_eq!(scene.glyph_source_kind(), Some(OdxGlyphSourceKind::Sh));
+        assert!(
+            scene
+                .glyph_warnings()
+                .iter()
+                .any(|warning| warning.contains("ODF glyphs disabled"))
+        );
+    }
+
+    #[test]
+    fn explicit_sphere_full_odf_uses_dataset_geometry() {
+        let scene = OdxScene::from_dataset(build_test_dataset_with_odf(false)).unwrap();
+        let (vertices, indices) = scene.odf_render_geometry().unwrap();
+        assert_eq!(vertices.len(), dsistudio_odf8::full_vertices_ras().len());
+        assert_eq!(indices.len(), dsistudio_odf8::faces().len() * 3);
+    }
+
+    #[test]
+    fn explicit_sphere_hemisphere_odf_uses_dataset_geometry() {
+        let scene = OdxScene::from_dataset(build_test_dataset_with_odf(true)).unwrap();
+        let (vertices, _) = scene.odf_render_geometry().unwrap();
+        assert_eq!(vertices.len(), dsistudio_odf8::full_vertices_ras().len());
+        assert!(scene.glyph_source_is_hemisphere());
+    }
+
+    #[test]
+    fn built_in_odf8_supports_hemisphere_without_explicit_sphere() {
+        let scene = OdxScene::from_dataset(build_test_dataset_with_odf_width(321, None, false)).unwrap();
+        assert_eq!(scene.glyph_source_kind(), Some(OdxGlyphSourceKind::Odf));
+        assert!(scene.glyph_source_is_hemisphere());
+        assert_eq!(scene.odf_render_row_width(), Some(642));
+    }
+
+    #[test]
+    fn built_in_odf8_supports_full_sphere_without_explicit_sphere() {
+        let scene = OdxScene::from_dataset(build_test_dataset_with_odf_width(642, None, false)).unwrap();
+        assert_eq!(scene.glyph_source_kind(), Some(OdxGlyphSourceKind::Odf));
+        assert!(!scene.glyph_source_is_hemisphere());
+        assert_eq!(scene.odf_render_row_width(), Some(642));
+    }
+
+    #[test]
+    fn conflicting_odf_domain_disables_odf_glyphs() {
+        let scene =
+            OdxScene::from_dataset(build_test_dataset_with_odf_width(642, Some("hemisphere"), false))
+                .unwrap();
+        assert_eq!(scene.glyph_source_kind(), None);
+        assert!(
+            scene
+                .glyph_warnings()
+                .iter()
+                .any(|warning| warning.contains("ODF glyphs disabled"))
+        );
+    }
+
+    #[test]
+    fn sh_detail_changes_render_mesh_resolution() {
+        let scene = OdxScene::from_dataset(build_test_dataset_with_sh()).unwrap();
+        let detail_two = scene.sh_render_mesh(2).unwrap();
+        let detail_three = scene.sh_render_mesh(3).unwrap();
+        assert_ne!(detail_two.row_width(), detail_three.row_width());
+        assert!(detail_three.row_width() > detail_two.row_width());
+    }
+
+    #[test]
+    fn sh_detail_clamps_to_storage_limit() {
+        let scene = OdxScene::from_dataset(build_test_dataset_with_sh()).unwrap();
+        let row_width_4 = scene.sh_render_row_width(4).unwrap();
+        let row_width_5 = scene.sh_render_row_width(5).unwrap();
+        let limit = row_width_4 * std::mem::size_of::<f32>();
+        assert_eq!(scene.clamp_sh_detail_for_slice(2, 0, 5, limit), 4);
+        assert_eq!(
+            scene.clamp_sh_detail_for_slice(
+                2,
+                0,
+                5,
+                row_width_5 * std::mem::size_of::<f32>()
+            ),
+            5
+        );
+    }
+
     fn reconstruct_odf_slice(
         scene: &OdxScene,
         metadata: &OdfSliceMetadata,
@@ -1211,7 +1622,7 @@ mod tests {
     ) -> Vec<f32> {
         let view = scene.odf_view_f32().unwrap();
         let source_bins = scene.odf_source_row_width().unwrap();
-        let full_bins = scene.glyph_row_width();
+        let full_bins = scene.odf_render_row_width().unwrap();
         let mut out = vec![0.0f32; metadata.instances.len() * full_bins];
         for chunk in &metadata.chunk_worklists {
             for work_item in &chunk.work_items {

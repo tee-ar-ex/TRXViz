@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -21,7 +21,7 @@ pub use trxviz_core::scene::{
 };
 
 use crate::app::workflow::{
-    StreamlineDisplayRuntime, WorkflowCamera3D, WorkflowDocument, WorkflowExecutionCache,
+    NodeSize, StreamlineDisplayRuntime, WorkflowCamera3D, WorkflowDocument, WorkflowExecutionCache,
     WorkflowJobKind, WorkflowJobMessage, WorkflowNode, WorkflowNodeUuid, WorkflowRuntime,
     WorkflowSelection, WorkflowSliceView3D, WorkspacePane, default_document,
     default_workspace_tree, snarl_from_graph,
@@ -601,6 +601,9 @@ pub struct WorkflowState {
     pub uploaded_odx_glyph_resource_key: Option<OdxGlyphResourceKey>,
     pub uploaded_fixel_3d_fingerprint: u64,
     pub uploaded_fixel_2d_fingerprint: u64,
+    pub measured_node_sizes: HashMap<WorkflowNodeUuid, NodeSize>,
+    pub layout_reflow_pending: bool,
+    pub layout_reflow_nodes: BTreeSet<WorkflowNodeUuid>,
     pub editor_interaction_active: bool,
     pub last_semantic_edit_at: f64,
     pub job_tx: mpsc::Sender<WorkflowJobMessage>,
@@ -639,6 +642,9 @@ impl WorkflowState {
             uploaded_odx_glyph_resource_key: None,
             uploaded_fixel_3d_fingerprint: 0,
             uploaded_fixel_2d_fingerprint: 0,
+            measured_node_sizes: HashMap::new(),
+            layout_reflow_pending: false,
+            layout_reflow_nodes: BTreeSet::new(),
             editor_interaction_active: false,
             last_semantic_edit_at: 0.0,
             job_tx,

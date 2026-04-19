@@ -450,6 +450,7 @@ fn load_project_state(
             WorkflowAssetDocument::Odx { id, path } => {
                 let odx_scene = OdxScene::open(&path)
                     .map_err(|err| anyhow!("opening ODX {}: {}", path.display(), err))?;
+                let warnings = odx_scene.glyph_warnings().to_vec();
                 let name = path
                     .file_name()
                     .map(|s| s.to_string_lossy().into_owned())
@@ -459,6 +460,7 @@ fn load_project_state(
                     name,
                     path,
                     scene: Arc::new(odx_scene),
+                    warnings,
                     visible: true,
                 });
             }
@@ -617,6 +619,7 @@ fn load_asset_args_state(
             name,
             path: path.clone(),
             scene: Arc::clone(&odx_arc),
+            warnings: odx_arc.glyph_warnings().to_vec(),
             visible: true,
         });
         let dpv_names: Vec<String> = odx_arc.dpv_names().iter().map(|s| s.to_string()).collect();
@@ -887,9 +890,24 @@ fn refresh_workflow_runtime(scene: &HeadlessScene, workflow: &mut HeadlessWorkfl
 
 fn odx_odf_exceeds_binding_limit(odx: &OdxScene, device: &wgpu::Device) -> bool {
     odx.compact_voxel_count()
-        .saturating_mul(odx.glyph_row_width())
+        .saturating_mul(odx.odf_render_row_width().unwrap_or(0))
         .saturating_mul(std::mem::size_of::<f32>())
         > device.limits().max_storage_buffer_binding_size as usize
+}
+
+fn clamped_sh_detail_for_slice(
+    odx: &OdxScene,
+    requested_detail: u32,
+    axis: usize,
+    slice_idx: u32,
+    device: &wgpu::Device,
+) -> u32 {
+    odx.clamp_sh_detail_for_slice(
+        axis,
+        slice_idx,
+        requested_detail,
+        device.limits().max_storage_buffer_binding_size as usize,
+    )
 }
 
 fn execute_workflow_to_completion(
@@ -1361,12 +1379,23 @@ fn build_gpu_resources(
         let odx = &plan.field.scene;
         match odx.glyph_source_kind() {
             Some(crate::data::odx_data::OdxGlyphSourceKind::Odf) => {
+                let (sphere_vertices, sphere_indices) = odx
+                    .odf_render_geometry()
+                    .expect("ODF geometry should exist for ODF glyph mode");
                 let use_slice_local = odx_odf_exceeds_binding_limit(odx, device);
                 let slice_index = scene.slice_indices[plan.slice_axis.viewport_index()] as u32;
                 let instances = if use_slice_local {
-                    odx.glyph_instances_for_slice(plan.slice_axis.odx_axis(), slice_index)
+                    odx.glyph_instances_for_slice(
+                        plan.slice_axis.odx_axis(),
+                        slice_index,
+                        odx.odf_render_row_width()
+                            .expect("ODF render row width should exist for ODF glyph mode"),
+                    )
                 } else {
-                    odx.glyph_instances_full_volume()
+                    odx.glyph_instances_full_volume(
+                        odx.odf_render_row_width()
+                            .expect("ODF render row width should exist for ODF glyph mode"),
+                    )
                 };
                 if !instances.is_empty() {
                     if use_slice_local {
@@ -1375,8 +1404,8 @@ fn build_gpu_resources(
                             .expect("ODF amplitudes should exist for slice-local ODF mode");
                         glyphs.set_odx_slice_odf(
                             device,
-                            &odx.sphere_vertices,
-                            &odx.sphere_indices,
+                            sphere_vertices,
+                            sphere_indices,
                             &instances,
                             &amplitudes,
                             None,
@@ -1388,8 +1417,8 @@ fn build_gpu_resources(
                             .expect("ODF amplitudes should exist for ODF glyph mode");
                         glyphs.set_odx_odf_volume(
                             device,
-                            &odx.sphere_vertices,
-                            &odx.sphere_indices,
+                            sphere_vertices,
+                            sphere_indices,
                             &instances,
                             &amplitudes,
                             None,
@@ -1400,26 +1429,37 @@ fn build_gpu_resources(
             }
             Some(crate::data::odx_data::OdxGlyphSourceKind::Sh) => {
                 let slice_index = scene.slice_indices[plan.slice_axis.viewport_index()] as u32;
-                let instances =
-                    odx.glyph_instances_for_slice(plan.slice_axis.odx_axis(), slice_index);
+                let detail = clamped_sh_detail_for_slice(
+                    odx,
+                    plan.detail,
+                    plan.slice_axis.odx_axis(),
+                    slice_index,
+                    device,
+                );
+                let mesh = odx
+                    .sh_render_mesh(detail)
+                    .expect("SH render mesh should exist for SH glyph mode");
+                let instances = odx.glyph_instances_for_slice(
+                    plan.slice_axis.odx_axis(),
+                    slice_index,
+                    mesh.row_width(),
+                );
                 if !instances.is_empty() {
                     let coefficients = odx
                         .sh_coefficients_for_slice(plan.slice_axis.odx_axis(), slice_index)
                         .expect("SH coefficients should exist for SH glyph mode");
                     glyphs.set_odx_sh_volume(
                         device,
-                        &odx.sphere_vertices,
-                        &odx.sphere_indices,
+                        mesh.vertices(),
+                        mesh.indices(),
                         &instances,
                         &coefficients,
                         odx.sh_view_f32()
                             .expect("SH coefficients should exist for SH glyph mode")
                             .ncols(),
-                        odx.sh_transform_flat()
-                            .expect("SH transform should exist for SH glyph mode"),
-                        odx.sh_source_dir_count()
-                            .expect("SH direction count should exist for SH glyph mode"),
-                        odx.glyph_row_width(),
+                        mesh.transform_flat(),
+                        mesh.source_dir_count(),
+                        mesh.row_width(),
                         None,
                         None,
                     );
@@ -1440,11 +1480,22 @@ fn build_gpu_resources(
     } else if let Some(odx) = &scene.odx_scene {
         match odx.glyph_source_kind() {
             Some(crate::data::odx_data::OdxGlyphSourceKind::Odf) => {
+                let (sphere_vertices, sphere_indices) = odx
+                    .odf_render_geometry()
+                    .expect("ODF geometry should exist for ODF glyph mode");
                 let use_slice_local = odx_odf_exceeds_binding_limit(odx, device);
                 let instances = if use_slice_local {
-                    odx.glyph_instances_for_slice(2, axial_slice)
+                    odx.glyph_instances_for_slice(
+                        2,
+                        axial_slice,
+                        odx.odf_render_row_width()
+                            .expect("ODF render row width should exist for ODF glyph mode"),
+                    )
                 } else {
-                    odx.glyph_instances_full_volume()
+                    odx.glyph_instances_full_volume(
+                        odx.odf_render_row_width()
+                            .expect("ODF render row width should exist for ODF glyph mode"),
+                    )
                 };
                 if !instances.is_empty() {
                     if use_slice_local {
@@ -1453,8 +1504,8 @@ fn build_gpu_resources(
                             .expect("ODF amplitudes should exist for slice-local ODF mode");
                         glyphs.set_odx_slice_odf(
                             device,
-                            &odx.sphere_vertices,
-                            &odx.sphere_indices,
+                            sphere_vertices,
+                            sphere_indices,
                             &instances,
                             &amplitudes,
                             None,
@@ -1466,8 +1517,8 @@ fn build_gpu_resources(
                             .expect("ODF amplitudes should exist for ODF glyph mode");
                         glyphs.set_odx_odf_volume(
                             device,
-                            &odx.sphere_vertices,
-                            &odx.sphere_indices,
+                            sphere_vertices,
+                            sphere_indices,
                             &instances,
                             &amplitudes,
                             None,
@@ -1477,25 +1528,33 @@ fn build_gpu_resources(
                 }
             }
             Some(crate::data::odx_data::OdxGlyphSourceKind::Sh) => {
-                let instances = odx.glyph_instances_for_slice(2, axial_slice);
+                let detail = clamped_sh_detail_for_slice(
+                    odx,
+                    crate::workflow::default_odf_glyph_detail(),
+                    2,
+                    axial_slice,
+                    device,
+                );
+                let mesh = odx
+                    .sh_render_mesh(detail)
+                    .expect("SH render mesh should exist for SH glyph mode");
+                let instances = odx.glyph_instances_for_slice(2, axial_slice, mesh.row_width());
                 if !instances.is_empty() {
                     let coefficients = odx
                         .sh_coefficients_for_slice(2, axial_slice)
                         .expect("SH coefficients should exist for SH glyph mode");
                     glyphs.set_odx_sh_volume(
                         device,
-                        &odx.sphere_vertices,
-                        &odx.sphere_indices,
+                        mesh.vertices(),
+                        mesh.indices(),
                         &instances,
                         &coefficients,
                         odx.sh_view_f32()
                             .expect("SH coefficients should exist for SH glyph mode")
                             .ncols(),
-                        odx.sh_transform_flat()
-                            .expect("SH transform should exist for SH glyph mode"),
-                        odx.sh_source_dir_count()
-                            .expect("SH direction count should exist for SH glyph mode"),
-                        odx.glyph_row_width(),
+                        mesh.transform_flat(),
+                        mesh.source_dir_count(),
+                        mesh.row_width(),
                         None,
                         None,
                     );

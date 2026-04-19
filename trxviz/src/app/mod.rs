@@ -31,6 +31,7 @@ pub struct TrxVizApp {
     pub(crate) merge_streamlines_dialog: MergeStreamlinesDialogState,
     /// Slice-local ODX glyph amplitude normalization used by the shader LUT path.
     pub(crate) odx_amp_norm: f32,
+    pub(crate) max_storage_buffer_binding_size: Option<usize>,
 }
 
 impl TrxVizApp {
@@ -323,6 +324,7 @@ impl TrxVizApp {
             reference_affine_dialog: ReferenceAffineDialogState::default(),
             merge_streamlines_dialog: MergeStreamlinesDialogState::default(),
             odx_amp_norm: 1.0,
+            max_storage_buffer_binding_size: None,
         };
 
         if cc.wgpu_render_state.is_some() {
@@ -342,6 +344,9 @@ impl eframe::App for TrxVizApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.poll_worker_messages(frame);
         self.poll_workflow_job_messages();
+        self.max_storage_buffer_binding_size = frame
+            .wgpu_render_state()
+            .map(|rs| rs.device.limits().max_storage_buffer_binding_size as usize);
 
         // Update slice positions if dirty
         if self.viewport.slices_dirty {

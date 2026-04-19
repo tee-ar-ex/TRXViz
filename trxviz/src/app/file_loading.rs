@@ -849,6 +849,7 @@ impl super::TrxVizApp {
                 name: display_name,
                 path: _path.clone(),
                 scene: scene.clone(),
+                warnings: scene.glyph_warnings().to_vec(),
                 visible: true,
             });
         let show_fixel_3d_by_default = scene.glyph_source_kind().is_none();

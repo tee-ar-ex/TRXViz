@@ -159,6 +159,12 @@ impl super::super::TrxVizApp {
                 self.workflow.run_expensive_requested = true;
                 ui.ctx().request_repaint();
             }
+            if ui.button("Arrange Graph").clicked() {
+                if self.arrange_workflow_graph().is_some() {
+                    self.mark_workflow_nonsemantic_edit();
+                    ui.ctx().request_repaint();
+                }
+            }
             if self.workflow.run_expensive_requested {
                 ui.small("Will run on the next graph refresh.");
             }
@@ -172,6 +178,8 @@ impl super::super::TrxVizApp {
             viewport_rect: ui.max_rect(),
             node_state: &self.workflow.runtime.node_state,
             assets: &self.workflow.document.assets,
+            measured_node_sizes: &mut self.workflow.measured_node_sizes,
+            layout_reflow_nodes: &mut self.workflow.layout_reflow_nodes,
         };
         let response = egui_snarl::ui::SnarlWidget::new()
             .id(egui::Id::new("workflow_graph"))
@@ -189,6 +197,11 @@ impl super::super::TrxVizApp {
         }
         self.workflow.editor_interaction_active =
             response.hovered() && ui.ctx().input(|input| input.pointer.any_down());
+        self.workflow.layout_reflow_pending = !self.workflow.layout_reflow_nodes.is_empty();
+        if !self.workflow.editor_interaction_active && self.apply_pending_workflow_layout_reflow() {
+            self.mark_workflow_nonsemantic_edit();
+            ui.ctx().request_repaint();
+        }
     }
 
     fn show_inspector_pane(&mut self, ui: &mut egui::Ui) {
@@ -364,6 +377,27 @@ impl super::super::TrxVizApp {
                     .collect::<std::collections::BTreeSet<_>>()
                     .len()
             ));
+            return;
+        }
+        if let Some(odx) = self
+            .scene
+            .odx_files
+            .iter()
+            .find(|asset| asset.id == asset_id)
+        {
+            ui.strong(&odx.name);
+            ui.label(odx.path.display().to_string());
+            ui.separator();
+            let dims = odx.scene.dimensions();
+            ui.label(format!("Dims: {} x {} x {}", dims[0], dims[1], dims[2]));
+            ui.label(format!("{} masked voxels", odx.scene.compact_voxel_count()));
+            if !odx.warnings.is_empty() {
+                ui.separator();
+                ui.colored_label(egui::Color32::from_rgb(255, 214, 102), "Glyph warnings");
+                for warning in &odx.warnings {
+                    ui.label(warning);
+                }
+            }
         }
     }
 
@@ -378,6 +412,12 @@ impl super::super::TrxVizApp {
             workflow::WorkflowNodeKind::OdxFixelScalarSelect { .. }
             | workflow::WorkflowNodeKind::OdxVolumeSelect { .. } => {
                 self.resolve_odx_selector_names(node_uuid)
+            }
+            _ => None,
+        };
+        let sh_detail_limit = match &original_node.kind {
+            workflow::WorkflowNodeKind::OdfGlyphRenderer { .. } => {
+                self.max_safe_sh_detail_for_node(node_uuid)
             }
             _ => None,
         };
@@ -887,12 +927,23 @@ impl super::super::TrxVizApp {
                     slice_axis,
                     opacity_gate,
                     size_gate,
+                    detail,
                     visible,
                 } => {
+                    let max_safe_detail = sh_detail_limit.unwrap_or(6);
+                    if *detail > max_safe_detail {
+                        *detail = max_safe_detail;
+                    }
                     ui.checkbox(visible, "Visible");
                     ui.add(egui::Slider::new(scale, 0.1..=5.0).text("Scale"));
                     ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
                     ui.add(egui::Slider::new(gloss, 0.0..=1.0).text("Gloss"));
+                    ui.add(egui::Slider::new(detail, 1..=max_safe_detail).text("SH detail"));
+                    if max_safe_detail < 6 {
+                        ui.small(format!(
+                            "GPU storage limit caps SH detail at {max_safe_detail} for the current slice."
+                        ));
+                    }
                     ui.add(
                         egui::DragValue::new(offset_from_slice)
                             .speed(0.25)
@@ -1169,6 +1220,31 @@ impl super::super::TrxVizApp {
                 .map(|name| name.to_string())
                 .collect(),
         })
+    }
+
+    fn max_safe_sh_detail_for_node(&self, node_uuid: workflow::WorkflowNodeUuid) -> Option<u32> {
+        let limit = self.max_storage_buffer_binding_size?;
+        let plan = self
+            .workflow
+            .runtime
+            .scene_plan
+            .odf_glyph_draws
+            .iter()
+            .find(|plan| plan.node_uuid == node_uuid)?;
+        if plan.field.scene.glyph_source_kind()
+            != Some(trxviz_core::data::odx_data::OdxGlyphSourceKind::Sh)
+        {
+            return None;
+        }
+        let viewport_index = plan.slice_axis.viewport_index();
+        let axis = plan.slice_axis.odx_axis();
+        let slice_idx = self.viewport.slice_indices[viewport_index] as u32;
+        Some(
+            plan.field
+                .scene
+                .max_sh_detail_for_slice(axis, slice_idx, limit, 6)
+                .max(1),
+        )
     }
 
     fn show_preview_pane(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

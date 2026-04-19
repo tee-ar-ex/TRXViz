@@ -46,27 +46,6 @@ pub fn suggest_asset_branch_origin(document: &WorkflowDocument) -> GraphPos {
     }
 }
 
-fn branch_bounds(document: &WorkflowDocument, nodes: &[WorkflowNodeUuid]) -> GraphRect {
-    let mut bounds = GraphRect::EMPTY;
-    for uuid in nodes {
-        if let Some(pos) = document.graph.pos(*uuid) {
-            bounds.extend(pos);
-        }
-    }
-    if bounds.is_finite() {
-        bounds.expanded(220.0, 120.0)
-    } else {
-        GraphRect {
-            min: GraphPos::ZERO,
-            max: GraphPos::new(640.0, 240.0),
-        }
-    }
-}
-
-fn offset(base: GraphPos, dx: f32, dy: f32) -> GraphPos {
-    GraphPos::new(base.x + dx, base.y + dy)
-}
-
 fn connect_chain(document: &mut WorkflowDocument, from: WorkflowNodeUuid, to: WorkflowNodeUuid) {
     document.graph.connect(
         OutPort {
@@ -75,6 +54,47 @@ fn connect_chain(document: &mut WorkflowDocument, from: WorkflowNodeUuid, to: Wo
         },
         InPort { node: to, input: 0 },
     );
+}
+
+fn finalize_seeded_branch(
+    document: &mut WorkflowDocument,
+    nodes: &[WorkflowNodeUuid],
+    primary_selection: WorkflowSelection,
+    anchor: GraphPos,
+) -> SeededWorkflowBranch {
+    let sizes = estimated_workflow_node_sizes(&document.graph);
+    let layout = layout_workflow_graph_subset(
+        &document.graph,
+        &sizes,
+        nodes,
+        Some(anchor),
+        &WorkflowLayoutOptions::default(),
+    );
+    apply_workflow_layout(&mut document.graph, &layout);
+    SeededWorkflowBranch {
+        bounds: layout.bounds,
+        primary_selection,
+    }
+}
+
+fn relayout_connected_component(
+    document: &mut WorkflowDocument,
+    seed: WorkflowNodeUuid,
+) -> Option<GraphRect> {
+    let nodes = weakly_connected_closure(&document.graph, &[seed]);
+    if nodes.is_empty() {
+        return None;
+    }
+    let sizes = estimated_workflow_node_sizes(&document.graph);
+    let layout = layout_workflow_graph_subset(
+        &document.graph,
+        &sizes,
+        &nodes,
+        None,
+        &WorkflowLayoutOptions::default(),
+    );
+    apply_workflow_layout(&mut document.graph, &layout);
+    Some(layout.bounds)
 }
 
 pub fn add_default_nodes_for_asset(
@@ -95,7 +115,7 @@ pub fn add_default_nodes_for_asset(
                 WorkflowNodeKind::GroupSelect {
                     groups_csv: String::new(),
                 },
-                offset(pos, 220.0, 0.0),
+                pos,
             );
             let limit = make_node(
                 document,
@@ -104,13 +124,9 @@ pub fn add_default_nodes_for_asset(
                     randomize: false,
                     seed: 1,
                 },
-                offset(pos, 440.0, 0.0),
+                pos,
             );
-            let color = make_node(
-                document,
-                WorkflowNodeKind::ColorByDirection,
-                offset(pos, 660.0, 0.0),
-            );
+            let color = make_node(document, WorkflowNodeKind::ColorByDirection, pos);
             let display = make_node(
                 document,
                 WorkflowNodeKind::StreamlineDisplay {
@@ -120,16 +136,18 @@ pub fn add_default_nodes_for_asset(
                     tube_sides: 8,
                     slab_half_width_mm: 5.0,
                 },
-                offset(pos, 880.0, 0.0),
+                pos,
             );
             connect_chain(document, source, group);
             connect_chain(document, group, limit);
             connect_chain(document, limit, color);
             connect_chain(document, color, display);
-            SeededWorkflowBranch {
-                bounds: branch_bounds(document, &[source, group, limit, color, display]),
-                primary_selection: WorkflowSelection::Node(limit),
-            }
+            finalize_seeded_branch(
+                document,
+                &[source, group, limit, color, display],
+                WorkflowSelection::Node(limit),
+                pos,
+            )
         }
         WorkflowAssetDocument::Volume { id, .. } => {
             let source = make_node(
@@ -145,13 +163,15 @@ pub fn add_default_nodes_for_asset(
                     window_center: 0.5,
                     window_width: 1.0,
                 },
-                offset(pos, 220.0, 0.0),
+                pos,
             );
             connect_chain(document, source, display);
-            SeededWorkflowBranch {
-                bounds: branch_bounds(document, &[source, display]),
-                primary_selection: WorkflowSelection::Node(source),
-            }
+            finalize_seeded_branch(
+                document,
+                &[source, display],
+                WorkflowSelection::Node(source),
+                pos,
+            )
         }
         WorkflowAssetDocument::Cifti { id, .. } => {
             let source = make_node(
@@ -165,7 +185,7 @@ pub fn add_default_nodes_for_asset(
                     structure: CiftiStructure::CortexLeft,
                     map_index: 0,
                 },
-                offset(pos, 240.0, -80.0),
+                pos,
             );
             let right = make_node(
                 document,
@@ -173,7 +193,7 @@ pub fn add_default_nodes_for_asset(
                     structure: CiftiStructure::CortexRight,
                     map_index: 0,
                 },
-                offset(pos, 240.0, 0.0),
+                pos,
             );
             let subcortical = make_node(
                 document,
@@ -181,7 +201,7 @@ pub fn add_default_nodes_for_asset(
                     structure: CiftiStructure::Subcortical,
                     map_index: 0,
                 },
-                offset(pos, 240.0, 80.0),
+                pos,
             );
             document.graph.connect(
                 OutPort {
@@ -213,10 +233,12 @@ pub fn add_default_nodes_for_asset(
                     input: 0,
                 },
             );
-            SeededWorkflowBranch {
-                bounds: branch_bounds(document, &[source, left, right, subcortical]),
-                primary_selection: WorkflowSelection::Node(source),
-            }
+            finalize_seeded_branch(
+                document,
+                &[source, left, right, subcortical],
+                WorkflowSelection::Node(source),
+                pos,
+            )
         }
         WorkflowAssetDocument::Surface { id, path } => {
             let default_surface_space = if guess_non_anatomical_surface(path) {
@@ -234,7 +256,7 @@ pub fn add_default_nodes_for_asset(
                 WorkflowNodeKind::SurfaceOverlayStack {
                     layers: default_surface_overlay_layers(),
                 },
-                offset(pos, 220.0, 0.0),
+                pos,
             );
             let display = make_node(
                 document,
@@ -252,14 +274,16 @@ pub fn add_default_nodes_for_asset(
                     range_max: 1.0,
                     space: default_surface_space,
                 },
-                offset(pos, 440.0, 0.0),
+                pos,
             );
             connect_chain(document, source, overlay);
             connect_chain(document, overlay, display);
-            SeededWorkflowBranch {
-                bounds: branch_bounds(document, &[source, overlay, display]),
-                primary_selection: WorkflowSelection::Node(source),
-            }
+            finalize_seeded_branch(
+                document,
+                &[source, overlay, display],
+                WorkflowSelection::Node(source),
+                pos,
+            )
         }
         WorkflowAssetDocument::Parcellation { id, .. } => {
             let source = make_node(
@@ -273,13 +297,15 @@ pub fn add_default_nodes_for_asset(
                     labels_csv: String::new(),
                     opacity: 0.9,
                 },
-                offset(pos, 240.0, 0.0),
+                pos,
             );
             connect_chain(document, source, display);
-            SeededWorkflowBranch {
-                bounds: branch_bounds(document, &[source, display]),
-                primary_selection: WorkflowSelection::Node(source),
-            }
+            finalize_seeded_branch(
+                document,
+                &[source, display],
+                WorkflowSelection::Node(source),
+                pos,
+            )
         }
         WorkflowAssetDocument::Odx { id, .. } => {
             let source = make_node(
@@ -296,7 +322,7 @@ pub fn add_default_nodes_for_asset(
                     offset_from_slice: 0.0,
                     visible: true,
                 },
-                offset(pos, 260.0, -180.0),
+                pos,
             );
             let fixel_2d = make_node(
                 document,
@@ -307,7 +333,7 @@ pub fn add_default_nodes_for_asset(
                     length_scale: default_fixel_length_scale(),
                     visible: true,
                 },
-                offset(pos, 260.0, -80.0),
+                pos,
             );
             let glyph = make_node(
                 document,
@@ -320,16 +346,17 @@ pub fn add_default_nodes_for_asset(
                     slice_axis: WorkflowSliceViewKind::Axial,
                     opacity_gate: OpacityGate::default(),
                     size_gate: SizeGate::default(),
+                    detail: default_odf_glyph_detail(),
                     visible: true,
                 },
-                offset(pos, 260.0, 40.0),
+                pos,
             );
             let dpv_select = make_node(
                 document,
                 WorkflowNodeKind::OdxVolumeSelect {
                     dpv_name: String::new(),
                 },
-                offset(pos, 260.0, 140.0),
+                pos,
             );
             let volume_display = make_node(
                 document,
@@ -339,7 +366,7 @@ pub fn add_default_nodes_for_asset(
                     window_center: 0.5,
                     window_width: 1.0,
                 },
-                offset(pos, 520.0, 140.0),
+                pos,
             );
             connect_chain(document, source, fixel_3d);
             connect_chain(document, source, fixel_2d);
@@ -364,20 +391,19 @@ pub fn add_default_nodes_for_asset(
                 },
             );
             connect_chain(document, dpv_select, volume_display);
-            SeededWorkflowBranch {
-                bounds: branch_bounds(
-                    document,
-                    &[
-                        source,
-                        fixel_3d,
-                        fixel_2d,
-                        glyph,
-                        dpv_select,
-                        volume_display,
-                    ],
-                ),
-                primary_selection: WorkflowSelection::Node(source),
-            }
+            finalize_seeded_branch(
+                document,
+                &[
+                    source,
+                    fixel_3d,
+                    fixel_2d,
+                    glyph,
+                    dpv_select,
+                    volume_display,
+                ],
+                WorkflowSelection::Node(source),
+                pos,
+            )
         }
     }
 }
@@ -544,16 +570,12 @@ fn ensure_default_odx_fixel_scalar_branch(
         return false;
     };
 
-    let source_pos = document.graph.pos(source_uuid).unwrap_or(GraphPos::ZERO);
-    let display_pos = document.graph.pos(display_uuid).unwrap_or(source_pos);
-    let selector_pos = GraphPos::new(source_pos.x + 240.0, display_pos.y - 40.0);
-    let color_pos = GraphPos::new(source_pos.x + 500.0, display_pos.y - 20.0);
     let selector_uuid = make_node(
         document,
         WorkflowNodeKind::OdxFixelScalarSelect {
             dpf_name: dpf_name.clone(),
         },
-        selector_pos,
+        document.graph.pos(display_uuid).unwrap_or(GraphPos::ZERO),
     );
     let color_uuid = make_node(
         document,
@@ -562,7 +584,7 @@ fn ensure_default_odx_fixel_scalar_branch(
             range: None,
             length_scale_by_scalar: false,
         },
-        color_pos,
+        document.graph.pos(display_uuid).unwrap_or(GraphPos::ZERO),
     );
     document.graph.connect(
         OutPort {
@@ -604,6 +626,7 @@ fn ensure_default_odx_fixel_scalar_branch(
             input: 0,
         },
     );
+    let _ = relayout_connected_component(document, source_uuid);
     true
 }
 
@@ -628,9 +651,10 @@ mod tests {
         choose_default_odx_dpf_name, choose_default_odx_dpv_name, guess_non_anatomical_surface,
         set_default_odx_fixel_3d_visibility, set_default_odx_fixel_dpf, set_default_odx_volume_dpv,
     };
+    use crate::data::cifti::CiftiIntent;
     use crate::workflow::{
         GraphPos, WorkflowAssetDocument, WorkflowNodeKind, add_default_nodes_for_asset,
-        default_document,
+        default_document, estimated_workflow_node_sizes,
     };
     use std::path::Path;
     use std::path::PathBuf;
@@ -664,6 +688,7 @@ mod tests {
             path: PathBuf::from("subject.odx"),
         };
         add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        assert_graph_has_no_overlaps(&document);
 
         let changed = set_default_odx_fixel_3d_visibility(&mut document, 7, false);
 
@@ -679,6 +704,7 @@ mod tests {
             path: PathBuf::from("subject.odx"),
         };
         add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        assert_graph_has_no_overlaps(&document);
 
         let changed = set_default_odx_fixel_3d_visibility(&mut document, 9, true);
 
@@ -761,6 +787,7 @@ mod tests {
                 .count(),
             2
         );
+        assert_graph_has_no_overlaps(&document);
     }
 
     #[test]
@@ -786,6 +813,42 @@ mod tests {
                 .count(),
             0
         );
+        assert_graph_has_no_overlaps(&document);
+    }
+
+    #[test]
+    fn seeded_streamline_branch_is_non_overlapping() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Streamlines {
+            id: 1,
+            path: PathBuf::from("tracks.trx"),
+            imported: false,
+        };
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, Some(10_000));
+        assert_graph_has_no_overlaps(&document);
+    }
+
+    #[test]
+    fn seeded_surface_branch_is_non_overlapping() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Surface {
+            id: 2,
+            path: PathBuf::from("subject.L.midthickness.surf.gii"),
+        };
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        assert_graph_has_no_overlaps(&document);
+    }
+
+    #[test]
+    fn seeded_cifti_branch_is_non_overlapping() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Cifti {
+            id: 3,
+            path: PathBuf::from("subject.dscalar.nii"),
+            intent: CiftiIntent::DenseScalar,
+        };
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        assert_graph_has_no_overlaps(&document);
     }
 
     #[test]
@@ -907,5 +970,36 @@ mod tests {
                 WorkflowNodeKind::OdxVolumeSelect { dpv_name } => Some(dpv_name.clone()),
                 _ => None,
             })
+    }
+
+    fn assert_graph_has_no_overlaps(document: &crate::workflow::WorkflowDocument) {
+        let sizes = estimated_workflow_node_sizes(&document.graph);
+        let rects: Vec<_> = document
+            .graph
+            .nodes()
+            .filter_map(|(uuid, _)| {
+                let pos = document.graph.pos(uuid)?;
+                let size = sizes.get(&uuid).copied()?;
+                Some((
+                    uuid,
+                    crate::workflow::GraphRect {
+                        min: pos,
+                        max: crate::workflow::GraphPos::new(
+                            pos.x + size.width,
+                            pos.y + size.height,
+                        ),
+                    },
+                ))
+            })
+            .collect();
+        for (idx, (_, left)) in rects.iter().enumerate() {
+            for (_, right) in rects.iter().skip(idx + 1) {
+                let overlaps = left.min.x < right.max.x
+                    && left.max.x > right.min.x
+                    && left.min.y < right.max.y
+                    && left.max.y > right.min.y;
+                assert!(!overlaps, "workflow nodes should not overlap");
+            }
+        }
     }
 }
