@@ -57,3 +57,20 @@ jobs:
         # machete exits 0 when clean, non-zero when unused deps found.
         # Run with --with-metadata to also catch dev/build deps.
         run: cargo machete --with-metadata
+
+  core-no-egui:
+    name: trxviz-core must not depend on egui
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Assert no egui in core dep tree
+        run: |
+          count=$(cargo tree -p trxviz-core | grep -ic egui || true)
+          if [ "$count" -gt 0 ]; then
+            echo "ERROR: egui found in trxviz-core dependency tree!"
+            cargo tree -p trxviz-core | grep -i egui
+            exit 1
+          fi
+          echo "OK: no egui in trxviz-core dep tree"

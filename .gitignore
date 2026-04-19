@@ -16,3 +16,6 @@ trxviz/site
 
 # macOS
 .DS_Store
+
+# Refactor planning doc (local session artifact — not for version control)
+refactor_trxviz.md

@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow, bail};
 use glam::{Mat4, Vec3};
+#[cfg(feature = "png-export")]
 use image::{ColorType, ImageEncoder};
 use pollster::block_on;
 use serde_json::{Map, Value, json};
@@ -235,6 +236,7 @@ struct SlicePanel {
 }
 
 /// Load a workflow project and render the visible scene to a PNG.
+#[cfg(feature = "png-export")]
 pub fn render_project_png(
     project_path: &Path,
     output_path: &Path,
@@ -245,6 +247,7 @@ pub fn render_project_png(
 }
 
 /// Build a default scene from loose assets and render it to a PNG.
+#[cfg(feature = "png-export")]
 pub fn render_assets_png(
     args: &AssetArgs,
     output_path: &Path,
@@ -284,6 +287,7 @@ pub fn export_state_glb(
     export_loaded_scene(scene, workflow, output_path, options)
 }
 
+#[cfg(feature = "png-export")]
 fn render_loaded_scene(
     mut scene: HeadlessScene,
     mut workflow: HeadlessWorkflowState,
@@ -1990,6 +1994,7 @@ fn stage_panel_transform(
         * center_transform
 }
 
+#[cfg(feature = "png-export")]
 fn render_scene3d_to_png(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -2312,6 +2317,7 @@ fn render_scene3d_to_png(
     readback_texture_to_png(device, queue, encoder, &texture, width, height, output_path)
 }
 
+#[cfg(feature = "png-export")]
 fn render_scene2d_to_png(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -2773,6 +2779,7 @@ fn max_slice_index(scene: &HeadlessScene, axis_index: usize) -> usize {
         .unwrap_or(scene.slice_indices[axis_index].saturating_add(128))
 }
 
+#[cfg(feature = "png-export")]
 fn readback_texture_to_png(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -3336,6 +3343,7 @@ fn surface_vertex_colors_for_export(
     bake_surface_vertex_colors(surface, draw)
 }
 
+#[cfg(feature = "png-export")]
 fn bake_surface_vertex_colors(
     surface: &GiftiSurfaceData,
     draw: &crate::workflow::SurfaceDrawPlan,
@@ -3420,6 +3428,7 @@ fn interpolate_colormap(t: f32, colors: &[[f32; 3]]) -> [f32; 3] {
     ]
 }
 
+#[cfg(feature = "png-export")]
 fn bake_slice_png(
     volume: &NiftiVolume,
     draw: &VolumeDrawInfo,

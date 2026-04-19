@@ -7,17 +7,21 @@ readme = "README.md"
 license = "BSD-2-Clause"
 documentation = "https://docs.rs/trxviz-core"
 
+[features]
+default = ["glb-export", "png-export"]
+# Enable GLB scene export (no extra deps beyond wgpu/glam already present)
+glb-export = []
+# Enable PNG readback via the `image` crate
+png-export = ["dep:image"]
+
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
 bytemuck = { version = "1", features = ["derive"] }
-egui = "0.33"
-egui-snarl = { version = "0.9.0", features = ["serde"] }
-egui_tiles = { version = "0.14", features = ["serde"] }
 flate2 = "1"
 glam = { version = "0.29", features = ["bytemuck"] }
 half = { version = "2", features = ["bytemuck"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 lin_alg = "1.3.5"
 log = "0.4"
 mcubes = "0.1.7"
