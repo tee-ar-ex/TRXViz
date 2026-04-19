@@ -28,7 +28,7 @@ jobs:
             archive: TRXViz-macos.dmg
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: trxviz
 
@@ -111,7 +111,7 @@ jobs:
 
       - name: Upload macOS artifact
         if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: trxviz/target/release/TRXViz-macos.dmg
@@ -128,7 +128,7 @@ jobs:
 
       - name: Upload Windows artifact
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: trxviz/target/release/TRXViz-windows.zip
@@ -143,26 +143,78 @@ jobs:
 
       - name: Upload Linux artifact
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: trxviz/target/release/TRXViz-linux.tar.gz
 
+  build-linux-rhel8:
+    name: Build (linux-rhel8)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: trxviz
+
+      - name: Build in Rocky Linux 8 container
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/trxviz:/work" \
+            -w /work \
+            rockylinux:8 \
+            bash -lc '
+              set -euxo pipefail
+              dnf install -y \
+                ca-certificates \
+                curl \
+                gcc \
+                gcc-c++ \
+                git \
+                glib2-devel \
+                gtk3-devel \
+                libX11-devel \
+                libxcb-devel \
+                libxkbcommon-devel \
+                libxkbcommon-x11-devel \
+                libXext-devel \
+                make \
+                mesa-libEGL-devel \
+                mesa-libGL-devel \
+                pkgconfig \
+                wayland-devel \
+                which
+              curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+              . "$HOME/.cargo/env"
+              cargo build -p trxviz -p trxviz-cli --release
+            '
+
+      - name: Package Linux RHEL 8 .tar.gz
+        working-directory: trxviz
+        run: |
+          tar -czf target/release/TRXViz-linux-rhel8.tar.gz \
+            -C target/release trxviz trxviz-cli
+
+      - name: Upload Linux RHEL 8 artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: trxviz-linux-rhel8
+          path: trxviz/target/release/TRXViz-linux-rhel8.tar.gz
+
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [build, build-linux-rhel8]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: artifacts/**/*
           generate_release_notes: true
