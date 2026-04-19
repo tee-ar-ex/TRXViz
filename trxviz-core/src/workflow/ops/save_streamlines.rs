@@ -1,10 +1,20 @@
 use std::path::PathBuf;
 
-use super::super::{EvalCtx, PortKind, SaveStreamlinePlan, WorkflowOp, expect_streamline_input};
+use super::super::{
+    EvalCtx, PortKind, SaveStreamlinePlan, WorkflowNodeKind, WorkflowOp, expect_streamline_input,
+};
 
 #[derive(Debug, Clone)]
 pub struct SaveStreamlinesOp {
     pub output_path: String,
+}
+
+impl Default for SaveStreamlinesOp {
+    fn default() -> Self {
+        Self {
+            output_path: String::new(),
+        }
+    }
 }
 
 impl WorkflowOp for SaveStreamlinesOp {
@@ -43,5 +53,13 @@ impl WorkflowOp for SaveStreamlinesOp {
             },
         );
         Ok(Vec::new())
+    }
+}
+
+impl From<SaveStreamlinesOp> for WorkflowNodeKind {
+    fn from(op: SaveStreamlinesOp) -> Self {
+        Self::SaveStreamlines {
+            output_path: op.output_path,
+        }
     }
 }

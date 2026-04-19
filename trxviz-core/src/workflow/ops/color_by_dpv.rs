@@ -1,12 +1,21 @@
 use crate::data::trx_data::ColorMode;
 
 use super::super::{
-    DpvFieldName, EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_streamline_input,
+    DpvFieldName, EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue,
+    expect_streamline_input,
 };
 
 #[derive(Debug, Clone)]
 pub struct ColorByDpvOp {
     pub field: DpvFieldName,
+}
+
+impl Default for ColorByDpvOp {
+    fn default() -> Self {
+        Self {
+            field: DpvFieldName::default(),
+        }
+    }
 }
 
 impl WorkflowOp for ColorByDpvOp {
@@ -38,5 +47,11 @@ impl WorkflowOp for ColorByDpvOp {
             })
             .into(),
         ])
+    }
+}
+
+impl From<ColorByDpvOp> for WorkflowNodeKind {
+    fn from(op: ColorByDpvOp) -> Self {
+        Self::ColorByDPV { field: op.field }
     }
 }

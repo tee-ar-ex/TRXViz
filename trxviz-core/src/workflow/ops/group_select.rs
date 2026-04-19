@@ -4,12 +4,21 @@ use std::sync::Arc;
 use crate::units::StreamlineIndex;
 
 use super::super::{
-    EvalCtx, GroupFilter, PortKind, WorkflowOp, WorkflowValue, expect_streamline_input,
+    EvalCtx, GroupFilter, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue,
+    expect_streamline_input,
 };
 
 #[derive(Debug, Clone)]
 pub struct GroupSelectOp {
     pub groups: GroupFilter,
+}
+
+impl Default for GroupSelectOp {
+    fn default() -> Self {
+        Self {
+            groups: GroupFilter::All,
+        }
+    }
 }
 
 impl WorkflowOp for GroupSelectOp {
@@ -75,5 +84,11 @@ impl WorkflowOp for GroupSelectOp {
                 ])
             }
         }
+    }
+}
+
+impl From<GroupSelectOp> for WorkflowNodeKind {
+    fn from(op: GroupSelectOp) -> Self {
+        Self::GroupSelect { groups: op.groups }
     }
 }

@@ -3,12 +3,23 @@ use std::sync::Arc;
 
 use crate::units::StreamlineIndex;
 
-use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_streamline_input};
+use super::super::{
+    EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_streamline_input,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct RandomSubsetOp {
     pub limit: usize,
     pub seed: u64,
+}
+
+impl Default for RandomSubsetOp {
+    fn default() -> Self {
+        Self {
+            limit: 10_000,
+            seed: 1,
+        }
+    }
 }
 
 impl WorkflowOp for RandomSubsetOp {
@@ -48,5 +59,14 @@ impl WorkflowOp for RandomSubsetOp {
             })
             .into(),
         ])
+    }
+}
+
+impl From<RandomSubsetOp> for WorkflowNodeKind {
+    fn from(op: RandomSubsetOp) -> Self {
+        Self::RandomSubset {
+            limit: op.limit,
+            seed: op.seed,
+        }
     }
 }

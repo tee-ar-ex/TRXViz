@@ -1,6 +1,8 @@
 use crate::data::cifti::CiftiStructure;
 
-use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_cifti_input};
+use super::super::{
+    EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_cifti_input,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct CiftiStructureOp {
@@ -83,6 +85,15 @@ impl WorkflowOp for CiftiStructureOp {
                     ))
                 })
                 .map(|v: super::super::EvaluatedValue| vec![v]),
+        }
+    }
+}
+
+impl From<CiftiStructureOp> for WorkflowNodeKind {
+    fn from(op: CiftiStructureOp) -> Self {
+        Self::CiftiStructure {
+            structure: op.structure,
+            map_index: op.map_index,
         }
     }
 }

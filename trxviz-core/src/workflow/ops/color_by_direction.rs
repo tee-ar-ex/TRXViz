@@ -1,9 +1,17 @@
 use crate::data::trx_data::ColorMode;
 
-use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_streamline_input};
+use super::super::{
+    EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_streamline_input,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ColorByDirectionOp;
+
+impl Default for ColorByDirectionOp {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl WorkflowOp for ColorByDirectionOp {
     fn tag(&self) -> &'static str {
@@ -34,5 +42,11 @@ impl WorkflowOp for ColorByDirectionOp {
             })
             .into(),
         ])
+    }
+}
+
+impl From<ColorByDirectionOp> for WorkflowNodeKind {
+    fn from(_: ColorByDirectionOp) -> Self {
+        Self::ColorByDirection
     }
 }

@@ -1,12 +1,21 @@
 use super::super::{
-    EvalCtx, ParcelIdSet, ParcellationDrawPlan, PortKind, WorkflowOp, expect_parcellation_input,
-    resolve_selected_labels,
+    EvalCtx, ParcelIdSet, ParcellationDrawPlan, PortKind, WorkflowNodeKind, WorkflowOp,
+    expect_parcellation_input, resolve_selected_labels,
 };
 
 #[derive(Debug, Clone)]
 pub struct ParcellationDisplayOp {
     pub labels: ParcelIdSet,
     pub opacity: f32,
+}
+
+impl Default for ParcellationDisplayOp {
+    fn default() -> Self {
+        Self {
+            labels: ParcelIdSet::default(),
+            opacity: 0.9,
+        }
+    }
 }
 
 impl WorkflowOp for ParcellationDisplayOp {
@@ -43,5 +52,14 @@ impl WorkflowOp for ParcellationDisplayOp {
                 opacity: self.opacity,
             });
         Ok(Vec::new())
+    }
+}
+
+impl From<ParcellationDisplayOp> for WorkflowNodeKind {
+    fn from(op: ParcellationDisplayOp) -> Self {
+        Self::ParcellationDisplay {
+            labels: op.labels,
+            opacity: op.opacity,
+        }
     }
 }

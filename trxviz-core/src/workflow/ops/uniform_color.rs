@@ -1,10 +1,20 @@
 use crate::data::trx_data::ColorMode;
 
-use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_streamline_input};
+use super::super::{
+    EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_streamline_input,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct UniformColorOp {
     pub color: [f32; 4],
+}
+
+impl Default for UniformColorOp {
+    fn default() -> Self {
+        Self {
+            color: [0.95, 0.8, 0.2, 1.0],
+        }
+    }
 }
 
 impl WorkflowOp for UniformColorOp {
@@ -36,5 +46,11 @@ impl WorkflowOp for UniformColorOp {
             })
             .into(),
         ])
+    }
+}
+
+impl From<UniformColorOp> for WorkflowNodeKind {
+    fn from(op: UniformColorOp) -> Self {
+        Self::UniformColor { color: op.color }
     }
 }

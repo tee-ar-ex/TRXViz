@@ -1,10 +1,16 @@
 use super::super::{
-    EvalCtx, PortKind, ReactiveStreamlineOp, ReactiveStreamlinePlan, WorkflowOp, WorkflowValue,
-    evaluate_derived_streamline_plan, expect_streamline_input,
+    EvalCtx, PortKind, ReactiveStreamlineOp, ReactiveStreamlinePlan, WorkflowNodeKind, WorkflowOp,
+    WorkflowValue, evaluate_derived_streamline_plan, expect_streamline_input,
 };
 
 #[derive(Debug, Clone, Copy)]
 pub struct AddGroupsFromParcellationOp;
+
+impl Default for AddGroupsFromParcellationOp {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl WorkflowOp for AddGroupsFromParcellationOp {
     fn tag(&self) -> &'static str {
@@ -64,5 +70,11 @@ impl WorkflowOp for AddGroupsFromParcellationOp {
             ctx.execution_cache,
             ctx.node_state,
         )
+    }
+}
+
+impl From<AddGroupsFromParcellationOp> for WorkflowNodeKind {
+    fn from(_: AddGroupsFromParcellationOp) -> Self {
+        Self::AddGroupsFromParcellation
     }
 }

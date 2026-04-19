@@ -2,13 +2,24 @@ use std::sync::Arc;
 
 use glam::Vec3;
 
-use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_streamline_input};
+use super::super::{
+    EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_streamline_input,
+};
 use crate::units::Millimeters;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SphereQueryOp {
     pub center: [f32; 3],
     pub radius_mm: Millimeters,
+}
+
+impl Default for SphereQueryOp {
+    fn default() -> Self {
+        Self {
+            center: [0.0; 3],
+            radius_mm: Millimeters(10.0),
+        }
+    }
 }
 
 impl WorkflowOp for SphereQueryOp {
@@ -50,5 +61,14 @@ impl WorkflowOp for SphereQueryOp {
             })
             .into(),
         ])
+    }
+}
+
+impl From<SphereQueryOp> for WorkflowNodeKind {
+    fn from(op: SphereQueryOp) -> Self {
+        Self::SphereQuery {
+            center: op.center,
+            radius_mm: op.radius_mm,
+        }
     }
 }

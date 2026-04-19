@@ -1,6 +1,6 @@
 use super::super::{
-    EvalCtx, PortKind, VolumeDrawPlan, VolumeScalarDrawPlan, WorkflowOp, expect_volume_input,
-    expect_volume_scalars_input,
+    EvalCtx, PortKind, VolumeDrawPlan, VolumeScalarDrawPlan, WorkflowNodeKind, WorkflowOp,
+    expect_volume_input, expect_volume_scalars_input,
 };
 use crate::data::loaded_files::VolumeColormap;
 
@@ -16,6 +16,26 @@ pub struct VolumeDisplayOp {
 pub struct VolumeScalarsDisplayOp {
     pub colormap: VolumeColormap,
     pub opacity: f32,
+}
+
+impl Default for VolumeDisplayOp {
+    fn default() -> Self {
+        Self {
+            colormap: VolumeColormap::Grayscale,
+            opacity: 1.0,
+            window_center: 0.5,
+            window_width: 1.0,
+        }
+    }
+}
+
+impl Default for VolumeScalarsDisplayOp {
+    fn default() -> Self {
+        Self {
+            colormap: VolumeColormap::Hot,
+            opacity: 1.0,
+        }
+    }
 }
 
 impl WorkflowOp for VolumeDisplayOp {
@@ -87,5 +107,25 @@ impl WorkflowOp for VolumeScalarsDisplayOp {
                 opacity: self.opacity,
             });
         Ok(Vec::new())
+    }
+}
+
+impl From<VolumeDisplayOp> for WorkflowNodeKind {
+    fn from(op: VolumeDisplayOp) -> Self {
+        Self::VolumeDisplay {
+            colormap: op.colormap,
+            opacity: op.opacity,
+            window_center: op.window_center,
+            window_width: op.window_width,
+        }
+    }
+}
+
+impl From<VolumeScalarsDisplayOp> for WorkflowNodeKind {
+    fn from(op: VolumeScalarsDisplayOp) -> Self {
+        Self::VolumeScalarsDisplay {
+            colormap: op.colormap,
+            opacity: op.opacity,
+        }
     }
 }

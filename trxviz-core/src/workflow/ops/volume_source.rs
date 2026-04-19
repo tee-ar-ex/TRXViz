@@ -1,6 +1,6 @@
 use crate::data::loaded_files::FileId;
 
-use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue};
+use super::super::{EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue};
 
 #[derive(Debug, Clone, Copy)]
 pub struct VolumeSourceOp {
@@ -35,5 +35,13 @@ impl WorkflowOp for VolumeSourceOp {
             ))
         })?;
         Ok(vec![WorkflowValue::Volume(self.source_id).into()])
+    }
+}
+
+impl From<VolumeSourceOp> for WorkflowNodeKind {
+    fn from(op: VolumeSourceOp) -> Self {
+        Self::VolumeSource {
+            source_id: op.source_id,
+        }
     }
 }

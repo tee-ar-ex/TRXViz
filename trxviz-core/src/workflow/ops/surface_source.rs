@@ -1,6 +1,6 @@
 use crate::data::loaded_files::FileId;
 
-use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue};
+use super::super::{EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue};
 
 #[derive(Debug, Clone, Copy)]
 pub struct SurfaceSourceOp {
@@ -35,5 +35,13 @@ impl WorkflowOp for SurfaceSourceOp {
             ))
         })?;
         Ok(vec![WorkflowValue::Surface(self.source_id).into()])
+    }
+}
+
+impl From<SurfaceSourceOp> for WorkflowNodeKind {
+    fn from(op: SurfaceSourceOp) -> Self {
+        Self::SurfaceSource {
+            source_id: op.source_id,
+        }
     }
 }

@@ -1,6 +1,7 @@
 use super::super::{
-    EvalCtx, PortKind, SurfaceDisplaySpace, SurfaceDrawPlan, SurfaceOverlayLayerConfig, WorkflowOp,
-    WorkflowValue, compose_surface_appearance, expect_surface_appearance_input,
+    DEFAULT_SURFACE_COLOR, DEFAULT_SURFACE_OPACITY, EvalCtx, PortKind, SurfaceDisplaySpace,
+    SurfaceDrawPlan, SurfaceOverlayLayerConfig, WorkflowNodeKind, WorkflowOp, WorkflowValue,
+    compose_surface_appearance, default_surface_overlay_layers, expect_surface_appearance_input,
     expect_surface_input, mark_expensive_success, surface_display_model_matrix,
     sync_node_state_from_run_record, workflow_surface_overlay_fingerprint,
 };
@@ -26,6 +27,33 @@ pub struct SurfaceDisplayOp {
     pub range_min: f32,
     pub range_max: f32,
     pub space: SurfaceDisplaySpace,
+}
+
+impl Default for SurfaceOverlayStackOp {
+    fn default() -> Self {
+        Self {
+            layers: default_surface_overlay_layers(),
+        }
+    }
+}
+
+impl Default for SurfaceDisplayOp {
+    fn default() -> Self {
+        Self {
+            color: DEFAULT_SURFACE_COLOR,
+            opacity: DEFAULT_SURFACE_OPACITY,
+            outline_color: DEFAULT_SURFACE_COLOR,
+            outline_thickness: 1.25,
+            show_projection_map: false,
+            map_opacity: 1.0,
+            map_threshold: 0.0,
+            gloss: 0.45,
+            projection_colormap: SurfaceColormap::Inferno,
+            range_min: 0.0,
+            range_max: 1.0,
+            space: SurfaceDisplaySpace::Anatomical,
+        }
+    }
 }
 
 impl WorkflowOp for SurfaceOverlayStackOp {
@@ -148,5 +176,30 @@ impl WorkflowOp for SurfaceDisplayOp {
             SurfaceDisplaySpace::Stage => ctx.scene_plan.stage_surface_draws.push(draw),
         }
         Ok(Vec::new())
+    }
+}
+
+impl From<SurfaceOverlayStackOp> for WorkflowNodeKind {
+    fn from(op: SurfaceOverlayStackOp) -> Self {
+        Self::SurfaceOverlayStack { layers: op.layers }
+    }
+}
+
+impl From<SurfaceDisplayOp> for WorkflowNodeKind {
+    fn from(op: SurfaceDisplayOp) -> Self {
+        Self::SurfaceDisplay {
+            color: op.color,
+            opacity: op.opacity,
+            outline_color: op.outline_color,
+            outline_thickness: op.outline_thickness,
+            show_projection_map: op.show_projection_map,
+            map_opacity: op.map_opacity,
+            map_threshold: op.map_threshold,
+            gloss: op.gloss,
+            projection_colormap: op.projection_colormap,
+            range_min: op.range_min,
+            range_max: op.range_max,
+            space: op.space,
+        }
     }
 }

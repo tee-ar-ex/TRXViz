@@ -1,9 +1,14 @@
 use super::super::{
     BoundaryFieldPlan, BoundaryGlyphDrawPlan, BundleDrawPlan, BundleSurfaceBuildMode,
     BundleSurfaceColorMode, BundleSurfacePlan, EvalCtx, PortKind, StreamlineDisplayRuntime,
-    WorkflowOp, expect_boundary_field_input, expect_bundle_surface_input,
-    expect_parcel_selection_input, expect_streamline_input, prime_expensive_record,
-    sync_node_state_from_run_record, workflow_boundary_plan_fingerprint,
+    WorkflowNodeKind, WorkflowOp, default_boundary_field_normalization,
+    default_boundary_field_sphere_lod, default_boundary_field_voxel_size_mm,
+    default_boundary_glyph_color_mode, default_boundary_glyph_density_3d_step,
+    default_boundary_glyph_min_contacts, default_boundary_glyph_scale,
+    default_boundary_glyph_slice_density_step, default_bundle_surface_min_component_volume_mm3,
+    default_bundle_surface_outline_thickness, default_enabled, expect_boundary_field_input,
+    expect_bundle_surface_input, expect_parcel_selection_input, expect_streamline_input,
+    prime_expensive_record, sync_node_state_from_run_record, workflow_boundary_plan_fingerprint,
     workflow_bundle_display_fingerprint, workflow_bundle_plan_fingerprint,
 };
 
@@ -45,6 +50,60 @@ pub struct BoundaryGlyphDisplayOp {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ParcelSurfaceBuildOp;
+
+impl Default for ParcelSurfaceBuildOp {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for BundleSurfaceBuildOp {
+    fn default() -> Self {
+        Self {
+            per_group: false,
+            build_mode: BundleSurfaceBuildMode::MarchingCubes,
+            voxel_size_mm: crate::units::Millimeters(2.0),
+            threshold: 3.0,
+            smooth_sigma: 0.5,
+            min_component_volume_mm3: default_bundle_surface_min_component_volume_mm3(),
+            tube_radius_mm: crate::units::Millimeters(0.4),
+            tube_sides: 8,
+            opacity: 0.5,
+        }
+    }
+}
+
+impl Default for BoundaryFieldBuildOp {
+    fn default() -> Self {
+        Self {
+            voxel_size_mm: default_boundary_field_voxel_size_mm(),
+            sphere_lod: default_boundary_field_sphere_lod(),
+            normalization: default_boundary_field_normalization(),
+        }
+    }
+}
+
+impl Default for BundleSurfaceDisplayOp {
+    fn default() -> Self {
+        Self {
+            color_mode: BundleSurfaceColorMode::Solid,
+            outline_thickness: default_bundle_surface_outline_thickness(),
+        }
+    }
+}
+
+impl Default for BoundaryGlyphDisplayOp {
+    fn default() -> Self {
+        Self {
+            enabled: default_enabled(),
+            scale: default_boundary_glyph_scale(),
+            density_3d_step: default_boundary_glyph_density_3d_step(),
+            slice_density_step: default_boundary_glyph_slice_density_step(),
+            color_mode: default_boundary_glyph_color_mode(),
+            min_contacts: default_boundary_glyph_min_contacts(),
+        }
+    }
+}
 
 impl WorkflowOp for BundleSurfaceBuildOp {
     fn tag(&self) -> &'static str {
@@ -319,5 +378,59 @@ impl WorkflowOp for ParcelSurfaceBuildOp {
                 opacity: 0.9,
             });
         Ok(Vec::new())
+    }
+}
+
+impl From<ParcelSurfaceBuildOp> for WorkflowNodeKind {
+    fn from(_: ParcelSurfaceBuildOp) -> Self {
+        Self::ParcelSurfaceBuild
+    }
+}
+
+impl From<BundleSurfaceBuildOp> for WorkflowNodeKind {
+    fn from(op: BundleSurfaceBuildOp) -> Self {
+        Self::BundleSurfaceBuild {
+            per_group: op.per_group,
+            build_mode: op.build_mode,
+            voxel_size_mm: op.voxel_size_mm,
+            threshold: op.threshold,
+            smooth_sigma: op.smooth_sigma,
+            min_component_volume_mm3: op.min_component_volume_mm3,
+            tube_radius_mm: op.tube_radius_mm,
+            tube_sides: op.tube_sides,
+            opacity: op.opacity,
+        }
+    }
+}
+
+impl From<BoundaryFieldBuildOp> for WorkflowNodeKind {
+    fn from(op: BoundaryFieldBuildOp) -> Self {
+        Self::BoundaryFieldBuild {
+            voxel_size_mm: op.voxel_size_mm,
+            sphere_lod: op.sphere_lod,
+            normalization: op.normalization,
+        }
+    }
+}
+
+impl From<BundleSurfaceDisplayOp> for WorkflowNodeKind {
+    fn from(op: BundleSurfaceDisplayOp) -> Self {
+        Self::BundleSurfaceDisplay {
+            color_mode: op.color_mode,
+            outline_thickness: op.outline_thickness,
+        }
+    }
+}
+
+impl From<BoundaryGlyphDisplayOp> for WorkflowNodeKind {
+    fn from(op: BoundaryGlyphDisplayOp) -> Self {
+        Self::BoundaryGlyphDisplay {
+            enabled: op.enabled,
+            scale: op.scale,
+            density_3d_step: op.density_3d_step,
+            slice_density_step: op.slice_density_step,
+            color_mode: op.color_mode,
+            min_contacts: op.min_contacts,
+        }
     }
 }

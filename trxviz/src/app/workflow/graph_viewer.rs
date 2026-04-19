@@ -22,9 +22,6 @@ use egui_snarl::{
 };
 use regex::Regex;
 
-use trxviz_core::data::loaded_files::VolumeColormap;
-use trxviz_core::data::trx_data::RenderStyle;
-use trxviz_core::renderer::mesh_renderer::SurfaceColormap;
 use trxviz_core::workflow::PortKind;
 
 use super::*;
@@ -412,66 +409,50 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::LimitStreamlines {
-                    limit: 30_000,
-                    randomize: false,
-                    seed: 1,
-                },
+                LimitStreamlinesOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::GroupSelect {
-                    groups: trxviz_core::workflow::GroupFilter::All,
-                },
+                GroupSelectOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::RandomSubset {
-                    limit: 10_000,
-                    seed: 1,
-                },
+                RandomSubsetOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::SphereQuery {
-                    center: [0.0, 0.0, 0.0],
-                    radius_mm: trxviz_core::units::Millimeters(10.0),
-                },
+                SphereQueryOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::SurfaceDepthQuery {
-                    depth_mm: trxviz_core::units::Millimeters(2.0),
-                },
+                SurfaceDepthQueryOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::RemoveDuplicates {
-                    params: trx_rs::DuplicateRemovalParams::default(),
-                },
+                RemoveDuplicatesOp::default().into(),
                 measured_node_sizes,
             );
-            add_node_button(ui, snarl, pos, WorkflowNodeKind::Merge, measured_node_sizes);
+            add_node_button(ui, snarl, pos, MergeOp.into(), measured_node_sizes);
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::AddGroupsFromParcellation,
+                AddGroupsFromParcellationOp.into(),
                 measured_node_sizes,
             );
         });
@@ -481,61 +462,44 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::ParcelSelect {
-                    labels: trxviz_core::workflow::ParcelIdSet::default(),
-                },
+                ParcelSelectOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(ui, snarl, pos, ParcelRoiOp.into(), measured_node_sizes);
+            add_node_button(ui, snarl, pos, ParcelRoaOp.into(), measured_node_sizes);
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                ParcelEndOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::ParcelROI,
+                ParcelCropOp { keep_inside: true }.into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::ParcelROA,
+                ParcelCropOp { keep_inside: false }.into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::ParcelEnd { endpoint_count: 1 },
+                ParcelSurfaceBuildOp.into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::ParcelLimiting,
-                measured_node_sizes,
-            );
-            add_node_button(
-                ui,
-                snarl,
-                pos,
-                WorkflowNodeKind::ParcelTerminative,
-                measured_node_sizes,
-            );
-            add_node_button(
-                ui,
-                snarl,
-                pos,
-                WorkflowNodeKind::ParcelSurfaceBuild,
-                measured_node_sizes,
-            );
-            add_node_button(
-                ui,
-                snarl,
-                pos,
-                WorkflowNodeKind::ParcellationDisplay {
-                    labels: trxviz_core::workflow::ParcelIdSet::default(),
-                    opacity: 0.9,
-                },
+                ParcellationDisplayOp::default().into(),
                 measured_node_sizes,
             );
         });
@@ -545,60 +509,43 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::ColorByDirection,
+                ColorByDirectionOp.into(),
+                measured_node_sizes,
+            );
+            add_node_button(ui, snarl, pos, ColorByGroupOp.into(), measured_node_sizes);
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                ColorByDpvOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::ColorByGroup,
+                ColorByDpsOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::ColorByDPV {
-                    field: trxviz_core::workflow::DpvFieldName::default(),
-                },
+                UniformColorOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::ColorByDPS {
-                    field: trxviz_core::workflow::DpsFieldName::default(),
-                },
+                SurfaceProjectionDensityOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::UniformColor {
-                    color: [0.95, 0.8, 0.2, 1.0],
-                },
-                measured_node_sizes,
-            );
-            add_node_button(
-                ui,
-                snarl,
-                pos,
-                WorkflowNodeKind::SurfaceProjectionDensity {
-                    depth_mm: trxviz_core::units::Millimeters(2.0),
-                },
-                measured_node_sizes,
-            );
-            add_node_button(
-                ui,
-                snarl,
-                pos,
-                WorkflowNodeKind::SurfaceProjectionMeanDps {
-                    depth_mm: trxviz_core::units::Millimeters(2.0),
-                    field: trxviz_core::workflow::DpsFieldName::default(),
-                },
+                SurfaceProjectionMeanDpsOp::default().into(),
                 measured_node_sizes,
             );
         });
@@ -608,106 +555,56 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::StreamlineDisplay {
-                    enabled: true,
-                    render_style: RenderStyle::Flat,
-                    tube_radius_mm: trxviz_core::units::Millimeters(0.4),
-                    tube_sides: 8,
-                    slab_half_width_mm: trxviz_core::units::Millimeters(5.0),
-                },
+                StreamlineDisplayOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::VolumeDisplay {
-                    colormap: VolumeColormap::Grayscale,
-                    opacity: 1.0,
-                    window_center: 0.5,
-                    window_width: 1.0,
-                },
+                VolumeDisplayOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::SurfaceDisplay {
-                    color: DEFAULT_SURFACE_COLOR,
-                    opacity: DEFAULT_SURFACE_OPACITY,
-                    outline_color: DEFAULT_SURFACE_COLOR,
-                    outline_thickness: 1.25,
-                    show_projection_map: false,
-                    map_opacity: 1.0,
-                    map_threshold: 0.0,
-                    gloss: 0.45,
-                    projection_colormap: SurfaceColormap::Inferno,
-                    range_min: 0.0,
-                    range_max: 1.0,
-                    space: SurfaceDisplaySpace::Anatomical,
-                },
+                SurfaceDisplayOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::BundleSurfaceBuild {
-                    per_group: false,
-                    build_mode: BundleSurfaceBuildMode::MarchingCubes,
-                    voxel_size_mm: trxviz_core::units::Millimeters(2.0),
-                    threshold: 3.0,
-                    smooth_sigma: 0.5,
-                    min_component_volume_mm3: trxviz_core::units::Millimeters(0.0),
-                    tube_radius_mm: trxviz_core::units::Millimeters(0.4),
-                    tube_sides: 8,
-                    opacity: 0.5,
-                },
+                BundleSurfaceBuildOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::BundleSurfaceDisplay {
-                    color_mode: BundleSurfaceColorMode::Solid,
-                    outline_thickness: 1.15,
-                },
+                BundleSurfaceDisplayOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::BoundaryFieldBuild {
-                    voxel_size_mm: default_boundary_field_voxel_size_mm(),
-                    sphere_lod: default_boundary_field_sphere_lod(),
-                    normalization: default_boundary_field_normalization(),
-                },
+                BoundaryFieldBuildOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::BoundaryGlyphDisplay {
-                    enabled: default_enabled(),
-                    scale: default_boundary_glyph_scale(),
-                    density_3d_step: default_boundary_glyph_density_3d_step(),
-                    slice_density_step: default_boundary_glyph_slice_density_step(),
-                    color_mode: default_boundary_glyph_color_mode(),
-                    min_contacts: default_boundary_glyph_min_contacts(),
-                },
+                BoundaryGlyphDisplayOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                WorkflowNodeKind::SaveStreamlines {
-                    output_path: String::new(),
-                },
+                SaveStreamlinesOp::default().into(),
                 measured_node_sizes,
             );
         });
@@ -1113,7 +1010,7 @@ mod tests {
             label: "Display".into(),
             kind: WorkflowNodeKind::StreamlineDisplay {
                 enabled: true,
-                render_style: RenderStyle::Flat,
+                render_style: trxviz_core::data::trx_data::RenderStyle::Flat,
                 tube_radius_mm: trxviz_core::units::Millimeters(0.4),
                 tube_sides: 8,
                 slab_half_width_mm: trxviz_core::units::Millimeters(5.0),

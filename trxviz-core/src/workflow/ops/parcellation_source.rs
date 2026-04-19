@@ -1,6 +1,6 @@
 use crate::data::loaded_files::FileId;
 
-use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue};
+use super::super::{EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ParcellationSourceOp {
@@ -37,5 +37,13 @@ impl WorkflowOp for ParcellationSourceOp {
                 ))
             })?;
         Ok(vec![WorkflowValue::Parcellation(self.source_id).into()])
+    }
+}
+
+impl From<ParcellationSourceOp> for WorkflowNodeKind {
+    fn from(op: ParcellationSourceOp) -> Self {
+        Self::ParcellationSource {
+            source_id: op.source_id,
+        }
     }
 }

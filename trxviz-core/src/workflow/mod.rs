@@ -54,7 +54,16 @@ pub(crate) use evaluate::{
 };
 pub(crate) use op::{EvalCtx, WorkflowOp};
 pub use ops::{
-    ColorByFixelScalarsOp, Fixel2DDisplayOp, Fixel3DDisplayOp, OdfGlyphRendererOp,
-    OdxFixelScalarSelectOp, OdxSourceOp, OdxVolumeSelectOp,
+    AddGroupsFromParcellationOp, BoundaryFieldBuildOp, BoundaryGlyphDisplayOp,
+    BundleSurfaceBuildOp, BundleSurfaceDisplayOp, CiftiSourceOp, CiftiStructureOp,
+    ColorByDirectionOp, ColorByDpsOp, ColorByDpvOp, ColorByFixelScalarsOp, ColorByGroupOp,
+    Fixel2DDisplayOp, Fixel3DDisplayOp, GroupSelectOp, LimitStreamlinesOp, MergeOp,
+    OdfGlyphRendererOp, OdxFixelScalarSelectOp, OdxSourceOp, OdxVolumeSelectOp, ParcelCropOp,
+    ParcelEndOp, ParcelRoaOp, ParcelRoiOp, ParcelSelectOp, ParcelSurfaceBuildOp,
+    ParcellationDisplayOp, ParcellationSourceOp, RandomSubsetOp, RemoveDuplicatesOp,
+    SaveStreamlinesOp, SphereQueryOp, StreamlineDisplayOp, StreamlineSourceOp, SurfaceDepthQueryOp,
+    SurfaceDisplayOp, SurfaceOverlayStackOp, SurfaceProjectionDensityOp,
+    SurfaceProjectionMeanDpsOp, SurfaceSourceOp, UniformColorOp, VolumeDisplayOp,
+    VolumeScalarsDisplayOp, VolumeSourceOp,
 };
 pub(crate) use types::{EvaluatedValue, WorkflowValue};

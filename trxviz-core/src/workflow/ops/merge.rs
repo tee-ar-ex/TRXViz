@@ -1,10 +1,16 @@
 use super::super::{
-    EvalCtx, PortKind, ReactiveStreamlineOp, ReactiveStreamlinePlan, WorkflowOp, WorkflowValue,
-    evaluate_derived_streamline_plan, expect_streamline_input,
+    EvalCtx, PortKind, ReactiveStreamlineOp, ReactiveStreamlinePlan, WorkflowNodeKind, WorkflowOp,
+    WorkflowValue, evaluate_derived_streamline_plan, expect_streamline_input,
 };
 
 #[derive(Debug, Clone, Copy)]
 pub struct MergeOp;
+
+impl Default for MergeOp {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl WorkflowOp for MergeOp {
     fn tag(&self) -> &'static str {
@@ -58,5 +64,11 @@ impl WorkflowOp for MergeOp {
             ctx.execution_cache,
             ctx.node_state,
         )
+    }
+}
+
+impl From<MergeOp> for WorkflowNodeKind {
+    fn from(_: MergeOp) -> Self {
+        Self::Merge
     }
 }

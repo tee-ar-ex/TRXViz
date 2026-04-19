@@ -3,8 +3,8 @@ use crate::units::Millimeters;
 
 use super::super::{
     EvalCtx, PortKind, StreamlineDisplayRuntime, StreamlineDrawPlan, WorkflowExecutionStatus,
-    WorkflowOp, expect_streamline_input, prime_expensive_record, sync_node_state_from_run_record,
-    workflow_streamline_fingerprint,
+    WorkflowNodeKind, WorkflowOp, expect_streamline_input, prime_expensive_record,
+    sync_node_state_from_run_record, workflow_streamline_fingerprint,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -14,6 +14,18 @@ pub struct StreamlineDisplayOp {
     pub tube_radius_mm: Millimeters,
     pub tube_sides: u32,
     pub slab_half_width_mm: Millimeters,
+}
+
+impl Default for StreamlineDisplayOp {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            render_style: RenderStyle::Flat,
+            tube_radius_mm: Millimeters(0.4),
+            tube_sides: 8,
+            slab_half_width_mm: Millimeters(5.0),
+        }
+    }
 }
 
 impl WorkflowOp for StreamlineDisplayOp {
@@ -80,5 +92,17 @@ impl WorkflowOp for StreamlineDisplayOp {
         }
         ctx.scene_plan.streamline_draws.push(plan);
         Ok(Vec::new())
+    }
+}
+
+impl From<StreamlineDisplayOp> for WorkflowNodeKind {
+    fn from(op: StreamlineDisplayOp) -> Self {
+        Self::StreamlineDisplay {
+            enabled: op.enabled,
+            render_style: op.render_style,
+            tube_radius_mm: op.tube_radius_mm,
+            tube_sides: op.tube_sides,
+            slab_half_width_mm: op.slab_half_width_mm,
+        }
     }
 }

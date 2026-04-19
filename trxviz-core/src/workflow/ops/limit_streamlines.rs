@@ -3,13 +3,25 @@ use std::sync::Arc;
 
 use crate::units::StreamlineIndex;
 
-use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_streamline_input};
+use super::super::{
+    EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_streamline_input,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct LimitStreamlinesOp {
     pub limit: usize,
     pub randomize: bool,
     pub seed: u64,
+}
+
+impl Default for LimitStreamlinesOp {
+    fn default() -> Self {
+        Self {
+            limit: 30_000,
+            randomize: false,
+            seed: 1,
+        }
+    }
 }
 
 impl WorkflowOp for LimitStreamlinesOp {
@@ -51,5 +63,15 @@ impl WorkflowOp for LimitStreamlinesOp {
             })
             .into(),
         ])
+    }
+}
+
+impl From<LimitStreamlinesOp> for WorkflowNodeKind {
+    fn from(op: LimitStreamlinesOp) -> Self {
+        Self::LimitStreamlines {
+            limit: op.limit,
+            randomize: op.randomize,
+            seed: op.seed,
+        }
     }
 }

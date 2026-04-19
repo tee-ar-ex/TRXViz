@@ -32,11 +32,42 @@ mod uniform_color;
 mod volume_display;
 mod volume_source;
 
+pub use add_groups_from_parcellation::AddGroupsFromParcellationOp;
+pub use bundle_boundary::{
+    BoundaryFieldBuildOp, BoundaryGlyphDisplayOp, BundleSurfaceBuildOp, BundleSurfaceDisplayOp,
+    ParcelSurfaceBuildOp,
+};
+pub use cifti_source::CiftiSourceOp;
+pub use cifti_structure::CiftiStructureOp;
+pub use color_by_direction::ColorByDirectionOp;
+pub use color_by_dps::ColorByDpsOp;
+pub use color_by_dpv::ColorByDpvOp;
 pub use color_by_fixel_scalars::ColorByFixelScalarsOp;
+pub use color_by_group::ColorByGroupOp;
 pub use fixel_display::{Fixel2DDisplayOp, Fixel3DDisplayOp};
+pub use group_select::GroupSelectOp;
+pub use limit_streamlines::LimitStreamlinesOp;
+pub use merge::MergeOp;
 pub use odf_glyph_renderer::OdfGlyphRendererOp;
 pub use odx_select::{OdxFixelScalarSelectOp, OdxVolumeSelectOp};
 pub use odx_source::OdxSourceOp;
+pub use parcel_reactive::{ParcelCropOp, ParcelEndOp, ParcelRoaOp, ParcelRoiOp};
+pub use parcel_select::ParcelSelectOp;
+pub use parcellation_display::ParcellationDisplayOp;
+pub use parcellation_source::ParcellationSourceOp;
+pub use random_subset::RandomSubsetOp;
+pub use remove_duplicates::RemoveDuplicatesOp;
+pub use save_streamlines::SaveStreamlinesOp;
+pub use sphere_query::SphereQueryOp;
+pub use streamline_display::StreamlineDisplayOp;
+pub use streamline_source::StreamlineSourceOp;
+pub use surface_depth_query::SurfaceDepthQueryOp;
+pub use surface_display::{SurfaceDisplayOp, SurfaceOverlayStackOp};
+pub use surface_projection::{SurfaceProjectionDensityOp, SurfaceProjectionMeanDpsOp};
+pub use surface_source::SurfaceSourceOp;
+pub use uniform_color::UniformColorOp;
+pub use volume_display::{VolumeDisplayOp, VolumeScalarsDisplayOp};
+pub use volume_source::VolumeSourceOp;
 
 use super::{EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowResult};
 use crate::error::WorkflowError;

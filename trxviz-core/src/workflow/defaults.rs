@@ -4,9 +4,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use crate::data::cifti::CiftiStructure;
-use crate::data::loaded_files::{FileId, VolumeColormap};
-use crate::data::trx_data::RenderStyle;
-use crate::renderer::mesh_renderer::SurfaceColormap;
+use crate::data::loaded_files::FileId;
 
 use super::graph::{GraphPos, GraphRect, InPort, OutPort};
 use super::*;
@@ -105,39 +103,19 @@ pub fn add_default_nodes_for_asset(
 ) -> SeededWorkflowBranch {
     match asset {
         WorkflowAssetDocument::Streamlines { id, .. } => {
-            let source = make_node(
-                document,
-                WorkflowNodeKind::StreamlineSource { source_id: *id },
-                pos,
-            );
-            let group = make_node(
-                document,
-                WorkflowNodeKind::GroupSelect {
-                    groups: GroupFilter::All,
-                },
-                pos,
-            );
+            let source = make_node(document, StreamlineSourceOp { source_id: *id }.into(), pos);
+            let group = make_node(document, GroupSelectOp::default().into(), pos);
             let limit = make_node(
                 document,
-                WorkflowNodeKind::LimitStreamlines {
+                LimitStreamlinesOp {
                     limit: streamline_limit.unwrap_or(30_000).max(1),
-                    randomize: false,
-                    seed: 1,
-                },
+                    ..Default::default()
+                }
+                .into(),
                 pos,
             );
-            let color = make_node(document, WorkflowNodeKind::ColorByDirection, pos);
-            let display = make_node(
-                document,
-                WorkflowNodeKind::StreamlineDisplay {
-                    enabled: true,
-                    render_style: RenderStyle::Flat,
-                    tube_radius_mm: crate::units::Millimeters(0.4),
-                    tube_sides: 8,
-                    slab_half_width_mm: crate::units::Millimeters(5.0),
-                },
-                pos,
-            );
+            let color = make_node(document, ColorByDirectionOp.into(), pos);
+            let display = make_node(document, StreamlineDisplayOp::default().into(), pos);
             connect_chain(document, source, group);
             connect_chain(document, group, limit);
             connect_chain(document, limit, color);
@@ -150,21 +128,8 @@ pub fn add_default_nodes_for_asset(
             )
         }
         WorkflowAssetDocument::Volume { id, .. } => {
-            let source = make_node(
-                document,
-                WorkflowNodeKind::VolumeSource { source_id: *id },
-                pos,
-            );
-            let display = make_node(
-                document,
-                WorkflowNodeKind::VolumeDisplay {
-                    colormap: VolumeColormap::Grayscale,
-                    opacity: 1.0,
-                    window_center: 0.5,
-                    window_width: 1.0,
-                },
-                pos,
-            );
+            let source = make_node(document, VolumeSourceOp { source_id: *id }.into(), pos);
+            let display = make_node(document, VolumeDisplayOp::default().into(), pos);
             connect_chain(document, source, display);
             finalize_seeded_branch(
                 document,
@@ -174,33 +139,32 @@ pub fn add_default_nodes_for_asset(
             )
         }
         WorkflowAssetDocument::Cifti { id, .. } => {
-            let source = make_node(
-                document,
-                WorkflowNodeKind::CiftiSource { source_id: *id },
-                pos,
-            );
+            let source = make_node(document, CiftiSourceOp { source_id: *id }.into(), pos);
             let left = make_node(
                 document,
-                WorkflowNodeKind::CiftiStructure {
+                CiftiStructureOp {
                     structure: CiftiStructure::CortexLeft,
                     map_index: 0,
-                },
+                }
+                .into(),
                 pos,
             );
             let right = make_node(
                 document,
-                WorkflowNodeKind::CiftiStructure {
+                CiftiStructureOp {
                     structure: CiftiStructure::CortexRight,
                     map_index: 0,
-                },
+                }
+                .into(),
                 pos,
             );
             let subcortical = make_node(
                 document,
-                WorkflowNodeKind::CiftiStructure {
+                CiftiStructureOp {
                     structure: CiftiStructure::Subcortical,
                     map_index: 0,
-                },
+                }
+                .into(),
                 pos,
             );
             document.graph.connect(
@@ -246,34 +210,15 @@ pub fn add_default_nodes_for_asset(
             } else {
                 SurfaceDisplaySpace::Anatomical
             };
-            let source = make_node(
-                document,
-                WorkflowNodeKind::SurfaceSource { source_id: *id },
-                pos,
-            );
-            let overlay = make_node(
-                document,
-                WorkflowNodeKind::SurfaceOverlayStack {
-                    layers: default_surface_overlay_layers(),
-                },
-                pos,
-            );
+            let source = make_node(document, SurfaceSourceOp { source_id: *id }.into(), pos);
+            let overlay = make_node(document, SurfaceOverlayStackOp::default().into(), pos);
             let display = make_node(
                 document,
-                WorkflowNodeKind::SurfaceDisplay {
-                    color: DEFAULT_SURFACE_COLOR,
-                    opacity: DEFAULT_SURFACE_OPACITY,
-                    outline_color: DEFAULT_SURFACE_COLOR,
-                    outline_thickness: 1.25,
-                    show_projection_map: false,
-                    map_opacity: 1.0,
-                    map_threshold: 0.0,
-                    gloss: 0.45,
-                    projection_colormap: SurfaceColormap::Inferno,
-                    range_min: 0.0,
-                    range_max: 1.0,
+                SurfaceDisplayOp {
                     space: default_surface_space,
-                },
+                    ..Default::default()
+                }
+                .into(),
                 pos,
             );
             connect_chain(document, source, overlay);
@@ -288,17 +233,10 @@ pub fn add_default_nodes_for_asset(
         WorkflowAssetDocument::Parcellation { id, .. } => {
             let source = make_node(
                 document,
-                WorkflowNodeKind::ParcellationSource { source_id: *id },
+                ParcellationSourceOp { source_id: *id }.into(),
                 pos,
             );
-            let display = make_node(
-                document,
-                WorkflowNodeKind::ParcellationDisplay {
-                    labels: ParcelIdSet::default(),
-                    opacity: 0.9,
-                },
-                pos,
-            );
+            let display = make_node(document, ParcellationDisplayOp::default().into(), pos);
             connect_chain(document, source, display);
             finalize_seeded_branch(
                 document,
@@ -313,16 +251,7 @@ pub fn add_default_nodes_for_asset(
             let fixel_2d = make_node(document, Fixel2DDisplayOp::default().into(), pos);
             let glyph = make_node(document, OdfGlyphRendererOp::default().into(), pos);
             let dpv_select = make_node(document, OdxVolumeSelectOp::default().into(), pos);
-            let volume_display = make_node(
-                document,
-                WorkflowNodeKind::VolumeDisplay {
-                    colormap: VolumeColormap::Grayscale,
-                    opacity: 1.0,
-                    window_center: 0.5,
-                    window_width: 1.0,
-                },
-                pos,
-            );
+            let volume_display = make_node(document, VolumeDisplayOp::default().into(), pos);
             connect_chain(document, source, fixel_3d);
             connect_chain(document, source, fixel_2d);
             document.graph.connect(

@@ -1,6 +1,6 @@
 use crate::data::loaded_files::FileId;
 
-use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue};
+use super::super::{EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue};
 
 #[derive(Debug, Clone, Copy)]
 pub struct CiftiSourceOp {
@@ -35,5 +35,13 @@ impl WorkflowOp for CiftiSourceOp {
             ))
         })?;
         Ok(vec![WorkflowValue::Cifti(self.source_id).into()])
+    }
+}
+
+impl From<CiftiSourceOp> for WorkflowNodeKind {
+    fn from(op: CiftiSourceOp) -> Self {
+        Self::CiftiSource {
+            source_id: op.source_id,
+        }
     }
 }

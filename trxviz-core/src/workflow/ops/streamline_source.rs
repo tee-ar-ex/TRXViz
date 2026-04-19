@@ -5,7 +5,8 @@ use crate::data::trx_data::ColorMode;
 use crate::units::StreamlineIndex;
 
 use super::super::{
-    EvalCtx, PortKind, StreamlineDataset, StreamlineFlow, WorkflowOp, WorkflowValue,
+    EvalCtx, PortKind, StreamlineDataset, StreamlineFlow, WorkflowNodeKind, WorkflowOp,
+    WorkflowValue,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -64,5 +65,13 @@ impl WorkflowOp for StreamlineSourceOp {
             })
             .into(),
         ])
+    }
+}
+
+impl From<StreamlineSourceOp> for WorkflowNodeKind {
+    fn from(op: StreamlineSourceOp) -> Self {
+        Self::StreamlineSource {
+            source_id: op.source_id,
+        }
     }
 }

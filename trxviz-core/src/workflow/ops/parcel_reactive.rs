@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::super::{
-    EvalCtx, PortKind, ReactiveStreamlineOp, ReactiveStreamlinePlan, WorkflowOp,
+    EvalCtx, PortKind, ReactiveStreamlineOp, ReactiveStreamlinePlan, WorkflowNodeKind, WorkflowOp,
     evaluate_derived_streamline_plan, expect_parcel_selection_input, expect_streamline_input,
 };
 use crate::data::parcellation_data::ParcellationVolume;
@@ -20,6 +20,24 @@ pub struct ParcelEndOp {
 #[derive(Debug, Clone)]
 pub struct ParcelCropOp {
     pub keep_inside: bool,
+}
+
+impl Default for ParcelRoiOp {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for ParcelRoaOp {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for ParcelEndOp {
+    fn default() -> Self {
+        Self { endpoint_count: 1 }
+    }
 }
 
 fn lookup_parcellation(
@@ -199,5 +217,35 @@ impl WorkflowOp for ParcelCropOp {
                 keep_inside: self.keep_inside,
             },
         )
+    }
+}
+
+impl From<ParcelRoiOp> for WorkflowNodeKind {
+    fn from(_: ParcelRoiOp) -> Self {
+        Self::ParcelROI
+    }
+}
+
+impl From<ParcelRoaOp> for WorkflowNodeKind {
+    fn from(_: ParcelRoaOp) -> Self {
+        Self::ParcelROA
+    }
+}
+
+impl From<ParcelEndOp> for WorkflowNodeKind {
+    fn from(op: ParcelEndOp) -> Self {
+        Self::ParcelEnd {
+            endpoint_count: op.endpoint_count,
+        }
+    }
+}
+
+impl From<ParcelCropOp> for WorkflowNodeKind {
+    fn from(op: ParcelCropOp) -> Self {
+        if op.keep_inside {
+            Self::ParcelLimiting
+        } else {
+            Self::ParcelTerminative
+        }
     }
 }

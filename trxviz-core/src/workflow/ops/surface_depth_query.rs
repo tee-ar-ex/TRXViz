@@ -1,12 +1,20 @@
 use super::super::{
-    CachedSurfaceQuery, EvalCtx, PortKind, SurfaceQueryPlan, WorkflowOp, WorkflowValue,
-    expect_streamline_input, expect_surface_input, prime_expensive_record,
+    CachedSurfaceQuery, EvalCtx, PortKind, SurfaceQueryPlan, WorkflowNodeKind, WorkflowOp,
+    WorkflowValue, expect_streamline_input, expect_surface_input, prime_expensive_record,
     sync_node_state_from_run_record, workflow_surface_query_fingerprint,
 };
 
 #[derive(Debug, Clone, Copy)]
 pub struct SurfaceDepthQueryOp {
     pub depth_mm: crate::units::Millimeters,
+}
+
+impl Default for SurfaceDepthQueryOp {
+    fn default() -> Self {
+        Self {
+            depth_mm: crate::units::Millimeters(2.0),
+        }
+    }
 }
 
 impl WorkflowOp for SurfaceDepthQueryOp {
@@ -70,5 +78,13 @@ impl WorkflowOp for SurfaceDepthQueryOp {
             .unwrap_or("Run required")
             .to_string();
         Ok(Vec::new())
+    }
+}
+
+impl From<SurfaceDepthQueryOp> for WorkflowNodeKind {
+    fn from(op: SurfaceDepthQueryOp) -> Self {
+        Self::SurfaceDepthQuery {
+            depth_mm: op.depth_mm,
+        }
     }
 }

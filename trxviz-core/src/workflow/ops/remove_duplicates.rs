@@ -1,13 +1,21 @@
 use trx_rs::DuplicateRemovalParams;
 
 use super::super::{
-    EvalCtx, PortKind, ReactiveStreamlineOp, ReactiveStreamlinePlan, WorkflowOp,
+    EvalCtx, PortKind, ReactiveStreamlineOp, ReactiveStreamlinePlan, WorkflowNodeKind, WorkflowOp,
     evaluate_derived_streamline_plan, expect_streamline_input,
 };
 
 #[derive(Debug, Clone)]
 pub struct RemoveDuplicatesOp {
     pub params: DuplicateRemovalParams,
+}
+
+impl Default for RemoveDuplicatesOp {
+    fn default() -> Self {
+        Self {
+            params: DuplicateRemovalParams::default(),
+        }
+    }
 }
 
 impl WorkflowOp for RemoveDuplicatesOp {
@@ -49,5 +57,11 @@ impl WorkflowOp for RemoveDuplicatesOp {
             ctx.execution_cache,
             ctx.node_state,
         )
+    }
+}
+
+impl From<RemoveDuplicatesOp> for WorkflowNodeKind {
+    fn from(op: RemoveDuplicatesOp) -> Self {
+        Self::RemoveDuplicates { params: op.params }
     }
 }

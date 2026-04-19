@@ -1,11 +1,19 @@
 use super::super::{
-    EvalCtx, ParcelIdSet, ParcelSelection, PortKind, WorkflowOp, WorkflowValue,
+    EvalCtx, ParcelIdSet, ParcelSelection, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue,
     expect_parcellation_input, resolve_selected_labels,
 };
 
 #[derive(Debug, Clone)]
 pub struct ParcelSelectOp {
     pub labels: ParcelIdSet,
+}
+
+impl Default for ParcelSelectOp {
+    fn default() -> Self {
+        Self {
+            labels: ParcelIdSet::default(),
+        }
+    }
 }
 
 impl WorkflowOp for ParcelSelectOp {
@@ -37,5 +45,11 @@ impl WorkflowOp for ParcelSelectOp {
         Ok(vec![
             WorkflowValue::ParcelSelection(ParcelSelection { source_id, labels }).into(),
         ])
+    }
+}
+
+impl From<ParcelSelectOp> for WorkflowNodeKind {
+    fn from(op: ParcelSelectOp) -> Self {
+        Self::ParcelSelect { labels: op.labels }
     }
 }

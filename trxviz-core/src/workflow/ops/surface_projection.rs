@@ -1,7 +1,8 @@
 use super::super::{
-    CachedSurfaceStreamlineMap, DpsFieldName, EvalCtx, PortKind, SurfaceMapPlan, WorkflowOp,
-    WorkflowValue, expect_streamline_input, expect_surface_input, prime_expensive_record,
-    summarize_value, sync_node_state_from_run_record, workflow_surface_projection_fingerprint,
+    CachedSurfaceStreamlineMap, DpsFieldName, EvalCtx, PortKind, SurfaceMapPlan, WorkflowNodeKind,
+    WorkflowOp, WorkflowValue, expect_streamline_input, expect_surface_input,
+    prime_expensive_record, summarize_value, sync_node_state_from_run_record,
+    workflow_surface_projection_fingerprint,
 };
 use crate::units::Millimeters;
 
@@ -14,6 +15,23 @@ pub struct SurfaceProjectionDensityOp {
 pub struct SurfaceProjectionMeanDpsOp {
     pub depth_mm: Millimeters,
     pub field: DpsFieldName,
+}
+
+impl Default for SurfaceProjectionDensityOp {
+    fn default() -> Self {
+        Self {
+            depth_mm: Millimeters(2.0),
+        }
+    }
+}
+
+impl Default for SurfaceProjectionMeanDpsOp {
+    fn default() -> Self {
+        Self {
+            depth_mm: Millimeters(2.0),
+            field: DpsFieldName::default(),
+        }
+    }
 }
 
 fn evaluate_projection(
@@ -123,5 +141,22 @@ impl WorkflowOp for SurfaceProjectionMeanDpsOp {
         ctx: &mut EvalCtx<'_, '_>,
     ) -> crate::error::WorkflowResult<Vec<super::super::EvaluatedValue>> {
         evaluate_projection(ctx, self.title(), self.depth_mm, Some(self.field.clone()))
+    }
+}
+
+impl From<SurfaceProjectionDensityOp> for WorkflowNodeKind {
+    fn from(op: SurfaceProjectionDensityOp) -> Self {
+        Self::SurfaceProjectionDensity {
+            depth_mm: op.depth_mm,
+        }
+    }
+}
+
+impl From<SurfaceProjectionMeanDpsOp> for WorkflowNodeKind {
+    fn from(op: SurfaceProjectionMeanDpsOp) -> Self {
+        Self::SurfaceProjectionMeanDps {
+            depth_mm: op.depth_mm,
+            field: op.field,
+        }
     }
 }

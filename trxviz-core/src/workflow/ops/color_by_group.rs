@@ -1,9 +1,17 @@
 use crate::data::trx_data::ColorMode;
 
-use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_streamline_input};
+use super::super::{
+    EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_streamline_input,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ColorByGroupOp;
+
+impl Default for ColorByGroupOp {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl WorkflowOp for ColorByGroupOp {
     fn tag(&self) -> &'static str {
@@ -34,5 +42,11 @@ impl WorkflowOp for ColorByGroupOp {
             })
             .into(),
         ])
+    }
+}
+
+impl From<ColorByGroupOp> for WorkflowNodeKind {
+    fn from(_: ColorByGroupOp) -> Self {
+        Self::ColorByGroup
     }
 }
