@@ -5,6 +5,7 @@ mod evaluate;
 mod fingerprint;
 mod graph;
 mod jobs;
+mod layout;
 mod project_io;
 mod simple_workflow;
 mod types;
@@ -22,6 +23,11 @@ pub use jobs::{
     bundle_surface_component_flows, bundle_surface_solid_color, mark_expensive_success,
     materialize_flow_gpu, prime_expensive_record, run_workflow_job,
     sync_node_state_from_run_record, workflow_job_kind_title,
+};
+pub use layout::{
+    NodeSize, WorkflowLayoutOptions, WorkflowLayoutResult, apply_workflow_layout,
+    estimate_workflow_node_size, estimated_workflow_node_sizes, layout_workflow_graph,
+    layout_workflow_graph_subset, weakly_connected_closure,
 };
 pub use project_io::{
     load_workflow_project_from_path, relativized_document, resolve_document_asset_paths,

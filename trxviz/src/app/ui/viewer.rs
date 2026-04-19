@@ -74,6 +74,30 @@ struct ViewerRenderData {
     odx_fixel_2d_scalar_range: [f32; 2],
 }
 
+fn active_fixel_draw_3d(
+    app: &super::super::TrxVizApp,
+) -> Option<&trxviz_core::workflow::FixelDrawPlan> {
+    app.workflow
+        .runtime
+        .scene_plan
+        .fixel_3d_draws
+        .iter()
+        .find(|plan| plan.visible)
+        .or_else(|| app.workflow.runtime.scene_plan.fixel_3d_draws.first())
+}
+
+fn active_fixel_draw_2d(
+    app: &super::super::TrxVizApp,
+) -> Option<&trxviz_core::workflow::FixelDrawPlan> {
+    app.workflow
+        .runtime
+        .scene_plan
+        .fixel_2d_draws
+        .iter()
+        .find(|plan| plan.visible)
+        .or_else(|| app.workflow.runtime.scene_plan.fixel_2d_draws.first())
+}
+
 impl super::super::TrxVizApp {
     pub(in crate::app) fn show_viewports(&mut self, ctx: &egui::Context) {
         self.show_export_dialog(ctx);
@@ -830,22 +854,7 @@ impl super::super::TrxVizApp {
             .find(|p| p.visible)
             .or_else(|| scene_plan.odf_glyph_draws.first())
             .map(|p| p.field.scene.as_ref())
-            .or_else(|| {
-                scene_plan
-                    .fixel_3d_draws
-                    .iter()
-                    .find(|p| p.visible)
-                    .or_else(|| scene_plan.fixel_3d_draws.first())
-                    .map(|p| p.field.scene.as_ref())
-            })
-            .or_else(|| {
-                scene_plan
-                    .fixel_2d_draws
-                    .iter()
-                    .find(|p| p.visible)
-                    .or_else(|| scene_plan.fixel_2d_draws.first())
-                    .map(|p| p.field.scene.as_ref())
-            })
+            .or_else(|| active_fixel_draw_3d(self).map(|p| p.field.scene.as_ref()))
             .or(self.scene.odx_scene.as_deref());
         let (fixel_slab_center, fixel_slab_half_width) = if let Some(odx) = active_odx_scene {
             let z = self.viewport.slice_world_offsets[0];
@@ -1053,6 +1062,8 @@ impl super::super::TrxVizApp {
         // volumes it degenerates to the familiar X/Y/Z world axis.
         let (slab_normal, slab_center) = if let Some(nf) = self.scene.nifti_files.first() {
             nf.volume.slice_plane(axis_index, slice_index)
+        } else if let Some(odx) = self.scene.odx_scene.as_ref() {
+            odx.slice_plane(axis_index, slice_index)
         } else {
             // No NIfTI loaded — fall back to world-axis normals.
             let normal = match axis_index {
@@ -1196,8 +1207,11 @@ impl super::super::TrxVizApp {
             .iter()
             .find(|p| p.visible)
             .or_else(|| self.workflow.runtime.scene_plan.odf_glyph_draws.first());
-        let odx_glyphs_active =
-            odf_draw.map(|p| p.visible).unwrap_or(self.scene.odx_scene.is_some());
+        let odx_glyphs_active = odf_draw
+            .map(|p| p.visible)
+            .unwrap_or(self.scene.odx_scene.is_some());
+        let fixel_3d_draw = active_fixel_draw_3d(self);
+        let fixel_2d_draw = active_fixel_draw_2d(self);
         let odx_fixels_active = self
             .workflow
             .runtime
@@ -1233,82 +1247,20 @@ impl super::super::TrxVizApp {
             odx_show_fixels: odx_fixels_active,
             odx_glyph_opacity: odf_draw.map(|p| p.opacity).unwrap_or(0.95),
             odx_glyph_gloss: odf_draw.map(|p| p.gloss).unwrap_or(0.0),
-            odx_fixel_line_width: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_3d_draws
-                .first()
-                .or_else(|| self.workflow.runtime.scene_plan.fixel_2d_draws.first())
-                .map(|p| p.line_width)
-                .unwrap_or(0.006),
-            odx_fixel_opacity: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_2d_draws
-                .first()
-                .or_else(|| self.workflow.runtime.scene_plan.fixel_3d_draws.first())
-                .map(|p| p.opacity)
-                .unwrap_or(1.0),
-            odx_fixel_slab_half_width_mm: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_2d_draws
-                .first()
+            odx_fixel_line_width: fixel_3d_draw.map(|p| p.line_width).unwrap_or(0.006),
+            odx_fixel_opacity: fixel_3d_draw.map(|p| p.opacity).unwrap_or(1.0),
+            odx_fixel_slab_half_width_mm: fixel_2d_draw
                 .map(|p| (p.slab_thickness_mm * 0.5).max(0.0))
                 .unwrap_or(1.5),
             odx_glyph_scale: odf_draw.map(|p| p.scale).unwrap_or(1.0),
-            odx_fixel_length_scale: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_3d_draws
-                .first()
-                .or_else(|| self.workflow.runtime.scene_plan.fixel_2d_draws.first())
-                .map(|p| p.length_scale)
-                .unwrap_or(1.0),
-            odx_fixel_2d_line_width: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_2d_draws
-                .first()
-                .map(|p| p.line_width)
-                .unwrap_or(0.006),
-            odx_fixel_2d_opacity: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_2d_draws
-                .first()
-                .map(|p| p.opacity)
-                .unwrap_or(1.0),
-            odx_fixel_2d_length_scale: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_2d_draws
-                .first()
-                .map(|p| p.length_scale)
-                .unwrap_or(1.0),
-            odx_fixel_2d_visible: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_2d_draws
-                .first()
+            odx_fixel_length_scale: fixel_3d_draw.map(|p| p.length_scale).unwrap_or(1.0),
+            odx_fixel_2d_line_width: fixel_2d_draw.map(|p| p.line_width).unwrap_or(0.006),
+            odx_fixel_2d_opacity: fixel_2d_draw.map(|p| p.opacity).unwrap_or(1.0),
+            odx_fixel_2d_length_scale: fixel_2d_draw.map(|p| p.length_scale).unwrap_or(1.0),
+            odx_fixel_2d_visible: fixel_2d_draw
                 .map(|p| p.visible)
-                .unwrap_or(true),
-            odx_fixel_3d_visible: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_3d_draws
-                .first()
-                .map(|p| p.visible)
-                .unwrap_or(true),
+                .unwrap_or(self.scene.odx_scene.is_some()),
+            odx_fixel_3d_visible: fixel_3d_draw.map(|p| p.visible).unwrap_or(true),
             odx_glyph_colormap: odf_draw
                 .map(|p| p.vertex_colormap)
                 .unwrap_or(trxviz_core::workflow::GlyphColormap::Directional),
@@ -1333,38 +1285,12 @@ impl super::super::TrxVizApp {
                 })
                 .unwrap_or([0.0, 1.0, 1.0, 1.0]),
             odx_amp_norm: self.odx_amp_norm,
-            odx_fixel_colormap_code: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_3d_draws
-                .first()
-                .or_else(|| self.workflow.runtime.scene_plan.fixel_2d_draws.first())
-                .map(|p| p.colormap_code)
-                .unwrap_or(0),
-            odx_fixel_scalar_range: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_3d_draws
-                .first()
-                .or_else(|| self.workflow.runtime.scene_plan.fixel_2d_draws.first())
+            odx_fixel_colormap_code: fixel_3d_draw.map(|p| p.colormap_code).unwrap_or(0),
+            odx_fixel_scalar_range: fixel_3d_draw
                 .map(|p| [p.scalar_range.0, p.scalar_range.1])
                 .unwrap_or([0.0, 1.0]),
-            odx_fixel_2d_colormap_code: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_2d_draws
-                .first()
-                .map(|p| p.colormap_code)
-                .unwrap_or(0),
-            odx_fixel_2d_scalar_range: self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_2d_draws
-                .first()
+            odx_fixel_2d_colormap_code: fixel_2d_draw.map(|p| p.colormap_code).unwrap_or(0),
+            odx_fixel_2d_scalar_range: fixel_2d_draw
                 .map(|p| [p.scalar_range.0, p.scalar_range.1])
                 .unwrap_or([0.0, 1.0]),
         }

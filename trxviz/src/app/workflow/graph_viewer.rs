@@ -193,6 +193,8 @@ pub struct WorkflowGraphViewer<'a> {
     pub viewport_rect: Rect,
     pub node_state: &'a HashMap<WorkflowNodeUuid, NodeEvalState>,
     pub assets: &'a [WorkflowAssetDocument],
+    pub measured_node_sizes: &'a mut HashMap<WorkflowNodeUuid, NodeSize>,
+    pub layout_reflow_nodes: &'a mut BTreeSet<WorkflowNodeUuid>,
 }
 
 impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
@@ -248,7 +250,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
     ) -> impl egui_snarl::ui::SnarlPin + 'static {
         let port = snarl[pin.id.node].kind.outputs()[pin.id.output];
         ui.horizontal(|ui| {
-            ui.label(port_name(port));
+            ui.label(output_port_label(&snarl[pin.id.node].kind, pin.id.output, port));
             // Reserve space so the pin circle doesn't overlap the trailing label glyphs.
             ui.add_space(10.0);
         });
@@ -381,6 +383,16 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
         }) {
             *self.selected = Some(WorkflowSelection::Node(snarl[node].uuid));
         }
+
+        let uuid = snarl[node].uuid;
+        if uuid.0 == 0 {
+            return;
+        }
+        let (_, size_changed) =
+            store_node_measurement(self.measured_node_sizes, uuid, rect.size().x, rect.size().y);
+        if size_changed && node_overlaps_snarl(snarl, node, self.measured_node_sizes) {
+            self.layout_reflow_nodes.insert(uuid);
+        }
     }
 
     fn has_graph_menu(&mut self, _pos: Pos2, _snarl: &mut Snarl<WorkflowNode>) -> bool {
@@ -388,6 +400,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
     }
 
     fn show_graph_menu(&mut self, pos: Pos2, ui: &mut egui::Ui, snarl: &mut Snarl<WorkflowNode>) {
+        let measured_node_sizes = &*self.measured_node_sizes;
         ui.menu_button("Streamline Filters", |ui| {
             add_node_button(
                 ui,
@@ -398,6 +411,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     randomize: false,
                     seed: 1,
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -406,6 +420,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 WorkflowNodeKind::GroupSelect {
                     groups_csv: String::new(),
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -415,6 +430,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     limit: 10_000,
                     seed: 1,
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -424,12 +440,14 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     center: [0.0, 0.0, 0.0],
                     radius_mm: 10.0,
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
                 WorkflowNodeKind::SurfaceDepthQuery { depth_mm: 2.0 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -438,9 +456,16 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 WorkflowNodeKind::RemoveDuplicates {
                     params: trx_rs::DuplicateRemovalParams::default(),
                 },
+                measured_node_sizes,
             );
-            add_node_button(ui, snarl, pos, WorkflowNodeKind::Merge);
-            add_node_button(ui, snarl, pos, WorkflowNodeKind::AddGroupsFromParcellation);
+            add_node_button(ui, snarl, pos, WorkflowNodeKind::Merge, measured_node_sizes);
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::AddGroupsFromParcellation,
+                measured_node_sizes,
+            );
         });
 
         ui.menu_button("Parcellation", |ui| {
@@ -451,18 +476,50 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 WorkflowNodeKind::ParcelSelect {
                     labels_csv: String::new(),
                 },
+                measured_node_sizes,
             );
-            add_node_button(ui, snarl, pos, WorkflowNodeKind::ParcelROI);
-            add_node_button(ui, snarl, pos, WorkflowNodeKind::ParcelROA);
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::ParcelROI,
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::ParcelROA,
+                measured_node_sizes,
+            );
             add_node_button(
                 ui,
                 snarl,
                 pos,
                 WorkflowNodeKind::ParcelEnd { endpoint_count: 1 },
+                measured_node_sizes,
             );
-            add_node_button(ui, snarl, pos, WorkflowNodeKind::ParcelLimiting);
-            add_node_button(ui, snarl, pos, WorkflowNodeKind::ParcelTerminative);
-            add_node_button(ui, snarl, pos, WorkflowNodeKind::ParcelSurfaceBuild);
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::ParcelLimiting,
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::ParcelTerminative,
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::ParcelSurfaceBuild,
+                measured_node_sizes,
+            );
             add_node_button(
                 ui,
                 snarl,
@@ -471,12 +528,25 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     labels_csv: String::new(),
                     opacity: 0.9,
                 },
+                measured_node_sizes,
             );
         });
 
         ui.menu_button("Styling", |ui| {
-            add_node_button(ui, snarl, pos, WorkflowNodeKind::ColorByDirection);
-            add_node_button(ui, snarl, pos, WorkflowNodeKind::ColorByGroup);
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::ColorByDirection,
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::ColorByGroup,
+                measured_node_sizes,
+            );
             add_node_button(
                 ui,
                 snarl,
@@ -484,6 +554,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 WorkflowNodeKind::ColorByDPV {
                     field: String::new(),
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -492,6 +563,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 WorkflowNodeKind::ColorByDPS {
                     field: String::new(),
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -500,12 +572,14 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 WorkflowNodeKind::UniformColor {
                     color: [0.95, 0.8, 0.2, 1.0],
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
                 snarl,
                 pos,
                 WorkflowNodeKind::SurfaceProjectionDensity { depth_mm: 2.0 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -515,6 +589,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     depth_mm: 2.0,
                     field: String::new(),
                 },
+                measured_node_sizes,
             );
         });
 
@@ -530,6 +605,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     tube_sides: 8,
                     slab_half_width_mm: 5.0,
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -541,6 +617,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     window_center: 0.5,
                     window_width: 1.0,
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -560,6 +637,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     range_max: 1.0,
                     space: SurfaceDisplaySpace::Anatomical,
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -576,6 +654,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     tube_sides: 8,
                     opacity: 0.5,
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -585,6 +664,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     color_mode: BundleSurfaceColorMode::Solid,
                     outline_thickness: 1.15,
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -595,6 +675,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     sphere_lod: default_boundary_field_sphere_lod(),
                     normalization: default_boundary_field_normalization(),
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -608,6 +689,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     color_mode: default_boundary_glyph_color_mode(),
                     min_contacts: default_boundary_glyph_min_contacts(),
                 },
+                measured_node_sizes,
             );
             add_node_button(
                 ui,
@@ -616,6 +698,83 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 WorkflowNodeKind::SaveStreamlines {
                     output_path: String::new(),
                 },
+                measured_node_sizes,
+            );
+        });
+
+        ui.menu_button("ODX", |ui| {
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::OdxFixelScalarSelect {
+                    dpf_name: String::new(),
+                },
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::ColorByFixelScalars {
+                    colormap: SurfaceColormap::Inferno,
+                    range: None,
+                    length_scale_by_scalar: false,
+                },
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::OdxVolumeSelect {
+                    dpv_name: String::new(),
+                },
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::Fixel3DDisplay {
+                    line_width: default_fixel_line_width(),
+                    length_scale: default_fixel_length_scale(),
+                    opacity: default_full_opacity(),
+                    offset_from_slice: 0.0,
+                    visible: true,
+                },
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::Fixel2DDisplay {
+                    line_width: default_fixel_line_width(),
+                    opacity: default_full_opacity(),
+                    slab_thickness_mm: default_fixel_slab_thickness_mm(),
+                    length_scale: default_fixel_length_scale(),
+                    visible: true,
+                },
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                WorkflowNodeKind::OdfGlyphRenderer {
+                    scale: default_odf_glyph_scale(),
+                    opacity: default_full_opacity(),
+                    offset_from_slice: 0.0,
+                    gloss: 0.0,
+                    vertex_colormap: trxviz_core::workflow::GlyphColormap::default(),
+                    slice_axis: WorkflowSliceViewKind::Axial,
+                    opacity_gate: OpacityGate::default(),
+                    size_gate: SizeGate::default(),
+                    detail: default_odf_glyph_detail(),
+                    visible: true,
+                },
+                measured_node_sizes,
             );
         });
     }
@@ -711,6 +870,12 @@ fn port_name(port: PortKind) -> &'static str {
 
 fn input_port_label(node_kind: &WorkflowNodeKind, input_index: usize, port: PortKind) -> String {
     match node_kind {
+        WorkflowNodeKind::OdfGlyphRenderer { .. } => match input_index {
+            0 => "ODF Field".to_string(),
+            1 => "Opacity Scalars".to_string(),
+            2 => "Size Scalars".to_string(),
+            _ => port_name(port).to_string(),
+        },
         WorkflowNodeKind::SurfaceOverlayStack { layers } => {
             if input_index == 0 {
                 "Surface".to_string()
@@ -737,23 +902,123 @@ fn input_port_label(node_kind: &WorkflowNodeKind, input_index: usize, port: Port
     }
 }
 
+fn output_port_label(node_kind: &WorkflowNodeKind, output_index: usize, port: PortKind) -> String {
+    match node_kind {
+        WorkflowNodeKind::OdxVolumeSelect { .. } => match output_index {
+            0 => "Volume".to_string(),
+            1 => "Volume Scalars".to_string(),
+            _ => port_name(port).to_string(),
+        },
+        _ => port_name(port).to_string(),
+    }
+}
+
 fn add_node_button(
     ui: &mut egui::Ui,
     snarl: &mut Snarl<WorkflowNode>,
     pos: Pos2,
     kind: WorkflowNodeKind,
+    measured_node_sizes: &HashMap<WorkflowNodeUuid, NodeSize>,
 ) {
     if ui.button(kind.title()).clicked() {
-        snarl.insert_node(
-            pos,
-            WorkflowNode {
-                uuid: WorkflowNodeUuid(0),
-                label: kind.title().to_string(),
-                kind,
-            },
-        );
+        let node = WorkflowNode {
+            uuid: WorkflowNodeUuid(0),
+            label: kind.title().to_string(),
+            kind,
+        };
+        let insert_pos = find_nearest_free_node_position(snarl, pos, &node, measured_node_sizes);
+        snarl.insert_node(insert_pos, node);
         ui.close();
     }
+}
+
+fn find_nearest_free_node_position(
+    snarl: &Snarl<WorkflowNode>,
+    desired_pos: Pos2,
+    node: &WorkflowNode,
+    measured_node_sizes: &HashMap<WorkflowNodeUuid, NodeSize>,
+) -> Pos2 {
+    let size = estimate_workflow_node_size(node);
+    if !snarl_position_overlaps(snarl, desired_pos, size, measured_node_sizes, None) {
+        return desired_pos;
+    }
+
+    const GRID_STEP: f32 = 40.0;
+    for radius in 1..=20 {
+        let radius = radius as f32;
+        for dy in -((radius) as i32)..=((radius) as i32) {
+            for dx in -((radius) as i32)..=((radius) as i32) {
+                if dx.abs() != radius as i32 && dy.abs() != radius as i32 {
+                    continue;
+                }
+                let candidate = Pos2::new(
+                    desired_pos.x + dx as f32 * GRID_STEP,
+                    desired_pos.y + dy as f32 * GRID_STEP,
+                );
+                if !snarl_position_overlaps(snarl, candidate, size, measured_node_sizes, None) {
+                    return candidate;
+                }
+            }
+        }
+    }
+
+    desired_pos
+}
+
+fn store_node_measurement(
+    measured_node_sizes: &mut HashMap<WorkflowNodeUuid, NodeSize>,
+    uuid: WorkflowNodeUuid,
+    width: f32,
+    height: f32,
+) -> (NodeSize, bool) {
+    let measured = NodeSize::new(width, height);
+    let prior = measured_node_sizes.insert(uuid, measured);
+    let size_changed = prior.map_or(true, |size| {
+        (size.width - measured.width).abs() > 8.0 || (size.height - measured.height).abs() > 8.0
+    });
+    (measured, size_changed)
+}
+
+fn node_overlaps_snarl(
+    snarl: &Snarl<WorkflowNode>,
+    node_id: NodeId,
+    measured_node_sizes: &HashMap<WorkflowNodeUuid, NodeSize>,
+) -> bool {
+    let Some(info) = snarl.get_node_info(node_id) else {
+        return false;
+    };
+    let size = measured_node_sizes
+        .get(&info.value.uuid)
+        .copied()
+        .unwrap_or_else(|| estimate_workflow_node_size(&info.value));
+    snarl_position_overlaps(snarl, info.pos, size, measured_node_sizes, Some(node_id))
+}
+
+fn snarl_position_overlaps(
+    snarl: &Snarl<WorkflowNode>,
+    pos: Pos2,
+    size: NodeSize,
+    measured_node_sizes: &HashMap<WorkflowNodeUuid, NodeSize>,
+    ignore: Option<NodeId>,
+) -> bool {
+    let candidate = expanded_node_rect(pos, size);
+    snarl.node_ids().any(|(other_id, _)| {
+        if Some(other_id) == ignore {
+            return false;
+        }
+        let Some(other_node) = snarl.get_node_info(other_id) else {
+            return false;
+        };
+        let other_size = measured_node_sizes
+            .get(&other_node.value.uuid)
+            .copied()
+            .unwrap_or_else(|| estimate_workflow_node_size(&other_node.value));
+        candidate.intersects(expanded_node_rect(other_node.pos, other_size))
+    })
+}
+
+fn expanded_node_rect(pos: Pos2, size: NodeSize) -> Rect {
+    Rect::from_min_size(pos, egui::vec2(size.width, size.height)).expand(20.0)
 }
 
 fn pin_info_for_port(port: PortKind) -> PinInfo {
@@ -846,6 +1111,95 @@ mod tests {
         assert_eq!(
             guess_surface_hemisphere(Path::new("subject.R-inflated.surf.gii")),
             Some(HemisphereGuess::Right)
+        );
+    }
+
+    #[test]
+    fn manual_insert_avoids_existing_node_overlap() {
+        let mut snarl = Snarl::new();
+        snarl.insert_node(
+            Pos2::new(0.0, 0.0),
+            WorkflowNode {
+                uuid: WorkflowNodeUuid(1),
+                label: "Existing".into(),
+                kind: WorkflowNodeKind::LimitStreamlines {
+                    limit: 10,
+                    randomize: false,
+                    seed: 1,
+                },
+            },
+        );
+        let new_node = WorkflowNode {
+            uuid: WorkflowNodeUuid(0),
+            label: "Display".into(),
+            kind: WorkflowNodeKind::StreamlineDisplay {
+                enabled: true,
+                render_style: RenderStyle::Flat,
+                tube_radius_mm: 0.4,
+                tube_sides: 8,
+                slab_half_width_mm: 5.0,
+            },
+        };
+
+        let pos = find_nearest_free_node_position(&snarl, Pos2::ZERO, &new_node, &HashMap::new());
+
+        assert_ne!(pos, Pos2::ZERO);
+        assert!(!snarl_position_overlaps(
+            &snarl,
+            pos,
+            estimate_workflow_node_size(&new_node),
+            &HashMap::new(),
+            None
+        ));
+    }
+
+    #[test]
+    fn store_node_measurement_updates_cache() {
+        let mut cache = HashMap::new();
+
+        let (size, changed) = store_node_measurement(&mut cache, WorkflowNodeUuid(9), 240.0, 120.0);
+
+        assert_eq!(size, NodeSize::new(240.0, 120.0));
+        assert!(changed);
+        assert_eq!(
+            cache.get(&WorkflowNodeUuid(9)),
+            Some(&NodeSize::new(240.0, 120.0))
+        );
+    }
+
+    #[test]
+    fn odf_glyph_renderer_volume_inputs_have_specific_labels() {
+        let node = WorkflowNodeKind::OdfGlyphRenderer {
+            scale: default_odf_glyph_scale(),
+            opacity: default_full_opacity(),
+            offset_from_slice: 0.0,
+            gloss: 0.0,
+            vertex_colormap: trxviz_core::workflow::GlyphColormap::default(),
+            slice_axis: WorkflowSliceViewKind::Axial,
+            opacity_gate: OpacityGate::default(),
+            size_gate: SizeGate::default(),
+            detail: default_odf_glyph_detail(),
+            visible: true,
+        };
+        assert_eq!(
+            input_port_label(&node, 1, PortKind::VolumeScalars),
+            "Opacity Scalars"
+        );
+        assert_eq!(
+            input_port_label(&node, 2, PortKind::VolumeScalars),
+            "Size Scalars"
+        );
+    }
+
+    #[test]
+    fn odx_volume_select_outputs_have_specific_labels() {
+        let node = WorkflowNodeKind::OdxVolumeSelect {
+            dpv_name: String::new(),
+        };
+        assert_eq!(output_port_label(&node, 0, PortKind::Volume), "Volume");
+        assert_eq!(
+            output_port_label(&node, 1, PortKind::VolumeScalars),
+            "Volume Scalars"
         );
     }
 }

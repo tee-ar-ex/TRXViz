@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -21,7 +21,7 @@ pub use trxviz_core::scene::{
 };
 
 use crate::app::workflow::{
-    StreamlineDisplayRuntime, WorkflowCamera3D, WorkflowDocument, WorkflowExecutionCache,
+    NodeSize, StreamlineDisplayRuntime, WorkflowCamera3D, WorkflowDocument, WorkflowExecutionCache,
     WorkflowJobKind, WorkflowJobMessage, WorkflowNode, WorkflowNodeUuid, WorkflowRuntime,
     WorkflowSelection, WorkflowSliceView3D, WorkspacePane, default_document,
     default_workspace_tree, snarl_from_graph,
@@ -160,6 +160,30 @@ impl Default for View2DState {
 pub struct PendingFileLoad {
     pub job_id: u64,
     pub label: String,
+}
+
+#[derive(Clone, Default)]
+pub struct ReferenceAffineDialogState {
+    pub open: bool,
+    pub source_path: Option<PathBuf>,
+    pub reference_path: Option<PathBuf>,
+    pub error_msg: Option<String>,
+}
+
+impl ReferenceAffineDialogState {
+    pub fn open_for_source(&mut self, path: PathBuf) {
+        self.open = true;
+        self.source_path = Some(path);
+        self.reference_path = None;
+        self.error_msg = None;
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+        self.source_path = None;
+        self.reference_path = None;
+        self.error_msg = None;
+    }
 }
 
 #[derive(Clone)]
@@ -575,7 +599,11 @@ pub struct WorkflowState {
     pub last_resource_sync_revision: u64,
     pub uploaded_dpv_by_source: HashMap<FileId, (WorkflowNodeUuid, String)>,
     pub uploaded_odx_glyph_resource_key: Option<OdxGlyphResourceKey>,
-    pub uploaded_fixel_fingerprint: u64,
+    pub uploaded_fixel_3d_fingerprint: u64,
+    pub uploaded_fixel_2d_fingerprint: u64,
+    pub measured_node_sizes: HashMap<WorkflowNodeUuid, NodeSize>,
+    pub layout_reflow_pending: bool,
+    pub layout_reflow_nodes: BTreeSet<WorkflowNodeUuid>,
     pub editor_interaction_active: bool,
     pub last_semantic_edit_at: f64,
     pub job_tx: mpsc::Sender<WorkflowJobMessage>,
@@ -612,7 +640,11 @@ impl WorkflowState {
             last_resource_sync_revision: 0,
             uploaded_dpv_by_source: HashMap::new(),
             uploaded_odx_glyph_resource_key: None,
-            uploaded_fixel_fingerprint: 0,
+            uploaded_fixel_3d_fingerprint: 0,
+            uploaded_fixel_2d_fingerprint: 0,
+            measured_node_sizes: HashMap::new(),
+            layout_reflow_pending: false,
+            layout_reflow_nodes: BTreeSet::new(),
             editor_interaction_active: false,
             last_semantic_edit_at: 0.0,
             job_tx,
@@ -682,6 +714,37 @@ mod tests {
         assert_eq!(state.detected_format, Some(Format::Tck));
         assert!(state.reference_path.is_none());
         assert_eq!(state.vtk_coordinate_mode, VtkCoordinateMode::HeaderOrWarn);
+        assert!(state.error_msg.is_none());
+    }
+
+    #[test]
+    fn reference_affine_dialog_open_records_source_and_resets_errors() {
+        let mut state = ReferenceAffineDialogState {
+            open: false,
+            source_path: None,
+            reference_path: Some(PathBuf::from("old.nii.gz")),
+            error_msg: Some("old error".into()),
+        };
+        let path = PathBuf::from("sample.fib.gz");
+        state.open_for_source(path.clone());
+        assert!(state.open);
+        assert_eq!(state.source_path.as_deref(), Some(path.as_path()));
+        assert!(state.reference_path.is_none());
+        assert!(state.error_msg.is_none());
+    }
+
+    #[test]
+    fn reference_affine_dialog_close_clears_state() {
+        let mut state = ReferenceAffineDialogState {
+            open: true,
+            source_path: Some(PathBuf::from("sample.fib.gz")),
+            reference_path: Some(PathBuf::from("ref.nii.gz")),
+            error_msg: Some("bad".into()),
+        };
+        state.close();
+        assert!(!state.open);
+        assert!(state.source_path.is_none());
+        assert!(state.reference_path.is_none());
         assert!(state.error_msg.is_none());
     }
 

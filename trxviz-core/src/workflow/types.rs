@@ -246,6 +246,8 @@ pub enum WorkflowNodeKind {
         opacity_gate: OpacityGate,
         #[serde(default)]
         size_gate: SizeGate,
+        #[serde(default = "default_odf_glyph_detail")]
+        detail: u32,
         #[serde(default = "default_enabled")]
         visible: bool,
     },
@@ -321,6 +323,10 @@ pub fn default_fixel_slab_thickness_mm() -> f32 {
 
 pub fn default_odf_glyph_scale() -> f32 {
     3.25
+}
+
+pub fn default_odf_glyph_detail() -> u32 {
+    3
 }
 
 pub fn default_workflow_slice_view_kind() -> WorkflowSliceViewKind {
@@ -779,6 +785,7 @@ pub struct OdfGlyphDrawPlan {
     pub slice_axis: WorkflowSliceViewKind,
     pub opacity_gate: OpacityGate,
     pub size_gate: SizeGate,
+    pub detail: u32,
     pub opacity_scalars: Option<VolumeScalars>,
     pub size_scalars: Option<VolumeScalars>,
     pub visible: bool,
@@ -1380,7 +1387,7 @@ impl WorkflowNodeKind {
                 PortKind::FixelScalars,
             ],
             Self::OdxFixelScalarSelect { .. } => vec![PortKind::FixelScalars],
-            Self::OdxVolumeSelect { .. } => vec![PortKind::Volume],
+            Self::OdxVolumeSelect { .. } => vec![PortKind::Volume, PortKind::VolumeScalars],
             Self::ColorByFixelScalars { .. } => vec![PortKind::Fixels],
             Self::ParcelSurfaceBuild
             | Self::StreamlineDisplay { .. }
@@ -1422,8 +1429,9 @@ pub fn ensure_node_uuids(document: &mut WorkflowDocument) {
 #[cfg(test)]
 mod tests {
     use super::{
-        WorkflowCamera3D, WorkflowDocument, WorkflowOrthoSliceCamera, WorkflowProject,
-        WorkflowSliceView3D, WorkflowSliceViewKind, WorkflowSliceViewUi, WorkflowView2DMode,
+        PortKind, WorkflowCamera3D, WorkflowDocument, WorkflowNodeKind, WorkflowOrthoSliceCamera,
+        WorkflowProject, WorkflowSliceView3D, WorkflowSliceViewKind, WorkflowSliceViewUi,
+        WorkflowView2DMode,
     };
     use crate::lighting::{SceneLightingPreset, WorkflowBackground3D, WorkflowRender3D};
 
@@ -1474,6 +1482,17 @@ mod tests {
     }
 
     #[test]
+    fn odx_volume_select_exposes_volume_and_volume_scalars_outputs() {
+        assert_eq!(
+            WorkflowNodeKind::OdxVolumeSelect {
+                dpv_name: String::new()
+            }
+            .outputs(),
+            vec![PortKind::Volume, PortKind::VolumeScalars]
+        );
+    }
+
+    #[test]
     fn workflow_document_defaults_next_node_uuid_when_missing() {
         let json = r#"{"graph":{"nodes":{},"wires":[]},"assets":[]}"#;
         let restored: WorkflowDocument = serde_json::from_str(json).unwrap();
@@ -1504,6 +1523,28 @@ mod tests {
         let json = serde_json::to_string(&project).unwrap();
         let restored: WorkflowProject = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.slice_view_ui, project.slice_view_ui);
+    }
+
+    #[test]
+    fn odf_glyph_renderer_detail_defaults_when_missing() {
+        let json = r#"{
+            "OdfGlyphRenderer": {
+                "scale": 3.25,
+                "opacity": 1.0,
+                "offset_from_slice": 0.0,
+                "gloss": 0.0,
+                "vertex_colormap": "Directional",
+                "slice_axis": "Axial",
+                "opacity_gate": {"range":[0.0,1.0],"below":0.0,"above":1.0},
+                "size_gate": {"range":[0.0,1.0],"min_scale":0.5,"max_scale":1.5},
+                "visible": true
+            }
+        }"#;
+        let restored: WorkflowNodeKind = serde_json::from_str(json).unwrap();
+        match restored {
+            WorkflowNodeKind::OdfGlyphRenderer { detail, .. } => assert_eq!(detail, 3),
+            _ => panic!("expected OdfGlyphRenderer"),
+        }
     }
 }
 #[derive(Clone)]

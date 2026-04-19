@@ -46,7 +46,8 @@ impl super::super::TrxVizApp {
                     for asset in assets {
                         match asset {
                             WorkflowAssetDocument::Streamlines { id, .. } => {
-                                if let Some(binding) = editability.bindings.streamline.get(&id).copied()
+                                if let Some(binding) =
+                                    editability.bindings.streamline.get(&id).copied()
                                 {
                                     self.show_simple_streamline_asset(ui, id, binding, None);
                                 } else {
@@ -59,7 +60,8 @@ impl super::super::TrxVizApp {
                                 }
                             }
                             WorkflowAssetDocument::Volume { id, .. } => {
-                                if let Some(binding) = editability.bindings.volume.get(&id).copied() {
+                                if let Some(binding) = editability.bindings.volume.get(&id).copied()
+                                {
                                     self.show_simple_volume_asset(ui, id, binding, None);
                                 } else {
                                     self.show_simple_volume_asset(
@@ -71,7 +73,9 @@ impl super::super::TrxVizApp {
                                 }
                             }
                             WorkflowAssetDocument::Surface { id, .. } => {
-                                if let Some(binding) = editability.bindings.surface.get(&id).copied() {
+                                if let Some(binding) =
+                                    editability.bindings.surface.get(&id).copied()
+                                {
                                     self.show_simple_surface_asset(ui, id, binding, None);
                                 } else {
                                     self.show_simple_surface_asset(
@@ -227,11 +231,10 @@ impl super::super::TrxVizApp {
                 }) = self.workflow_node_kind_mut(binding.display)
                 {
                     ui.checkbox(enabled, "Visible");
-                    ui
-                        .add(
-                            egui::Slider::new(slab_half_width_mm, 0.0..=50.0)
-                                .text("Slice slab half-width"),
-                        );
+                    ui.add(
+                        egui::Slider::new(slab_half_width_mm, 0.0..=50.0)
+                            .text("Slice slab half-width"),
+                    );
                 }
                 if let Some(original_kind) = original_kind {
                     self.finish_simple_render_only_edit(binding.display, original_kind);
@@ -320,8 +323,9 @@ impl super::super::TrxVizApp {
                 }
 
                 let original_display = self.workflow_node_kind(binding.display).cloned();
-                let original_overlay =
-                    binding.overlay_stack.and_then(|uuid| self.workflow_node_kind(uuid).cloned());
+                let original_overlay = binding
+                    .overlay_stack
+                    .and_then(|uuid| self.workflow_node_kind(uuid).cloned());
                 if let Some(WorkflowNodeKind::SurfaceDisplay { opacity, .. }) =
                     self.workflow_node_kind_mut(binding.display)
                 {
@@ -452,7 +456,11 @@ impl super::super::TrxVizApp {
     }
 
     fn workflow_node_kind(&self, uuid: WorkflowNodeUuid) -> Option<&WorkflowNodeKind> {
-        self.workflow.document.graph.get(uuid).map(|node| &node.kind)
+        self.workflow
+            .document
+            .graph
+            .get(uuid)
+            .map(|node| &node.kind)
     }
 
     fn sync_editor_node_from_document(&mut self, node_uuid: WorkflowNodeUuid) {

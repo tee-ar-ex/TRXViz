@@ -21,6 +21,7 @@ pub struct OdxGlyphResourceKey {
     pub sphere_vertex_count: usize,
     pub sphere_index_count: usize,
     pub sh_order: Option<usize>,
+    pub sh_detail: Option<u32>,
     pub slice_axis: Option<u8>,
     pub slice_index: Option<u32>,
     pub opacity_gate_fingerprint: u64,
@@ -576,15 +577,15 @@ impl GlyphResources {
             "glyph_opacity_gate_samples",
             &vec![f32::NAN; instances.len().max(1)],
         ));
-        self.buffer_capacities.opacity_bytes = (instances.len().max(1)
-            * std::mem::size_of::<f32>()) as u64;
+        self.buffer_capacities.opacity_bytes =
+            (instances.len().max(1) * std::mem::size_of::<f32>()) as u64;
         self.size_buffer = Some(make_gate_sample_buffer(
             device,
             "glyph_size_gate_samples",
             &vec![f32::NAN; instances.len().max(1)],
         ));
-        self.buffer_capacities.size_bytes = (instances.len().max(1)
-            * std::mem::size_of::<f32>()) as u64;
+        self.buffer_capacities.size_bytes =
+            (instances.len().max(1) * std::mem::size_of::<f32>()) as u64;
         self.num_indices = indices.len() as u32;
         self.num_instances = instances.len() as u32;
         self.current_bins = nbins;
@@ -648,15 +649,15 @@ impl GlyphResources {
             "odx_glyph_opacity_gate_samples",
             gate_samples_for_instances(instances.len(), opacity_samples).as_slice(),
         ));
-        self.buffer_capacities.opacity_bytes = (instances.len().max(1)
-            * std::mem::size_of::<f32>()) as u64;
+        self.buffer_capacities.opacity_bytes =
+            (instances.len().max(1) * std::mem::size_of::<f32>()) as u64;
         self.size_buffer = Some(make_gate_sample_buffer(
             device,
             "odx_glyph_size_gate_samples",
             gate_samples_for_instances(instances.len(), size_samples).as_slice(),
         ));
-        self.buffer_capacities.size_bytes = (instances.len().max(1)
-            * std::mem::size_of::<f32>()) as u64;
+        self.buffer_capacities.size_bytes =
+            (instances.len().max(1) * std::mem::size_of::<f32>()) as u64;
         self.num_indices = sphere_indices.len() as u32;
         self.num_instances = instances.len() as u32;
         self.current_bins = sphere_vertices.len() as u32;
@@ -743,8 +744,10 @@ impl GlyphResources {
 
         let mut bind_groups_dirty = self.ensure_output_amplitude_buffer(
             device,
-            (instances.len().saturating_mul(full_bins).saturating_mul(std::mem::size_of::<f32>()))
-                as u64,
+            (instances
+                .len()
+                .saturating_mul(full_bins)
+                .saturating_mul(std::mem::size_of::<f32>())) as u64,
         );
         let opacity_values = gate_samples_for_instances(instances.len(), opacity_samples);
         bind_groups_dirty |= self.ensure_gate_buffer(
@@ -849,15 +852,15 @@ impl GlyphResources {
             "odx_sh_glyph_opacity_gate_samples",
             gate_samples_for_instances(instances.len(), opacity_samples).as_slice(),
         ));
-        self.buffer_capacities.opacity_bytes = (instances.len().max(1)
-            * std::mem::size_of::<f32>()) as u64;
+        self.buffer_capacities.opacity_bytes =
+            (instances.len().max(1) * std::mem::size_of::<f32>()) as u64;
         self.size_buffer = Some(make_gate_sample_buffer(
             device,
             "odx_sh_glyph_size_gate_samples",
             gate_samples_for_instances(instances.len(), size_samples).as_slice(),
         ));
-        self.buffer_capacities.size_bytes = (instances.len().max(1)
-            * std::mem::size_of::<f32>()) as u64;
+        self.buffer_capacities.size_bytes =
+            (instances.len().max(1) * std::mem::size_of::<f32>()) as u64;
         self.odx_sh_coeff_buffer = Some(device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("odx_sh_coefficients"),
@@ -905,7 +908,7 @@ impl GlyphResources {
     pub fn dispatch_odx_sh_slice(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        _queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         slice_compact_indices: &[u32],
     ) {
@@ -923,6 +926,13 @@ impl GlyphResources {
         }
 
         let rows_per_dispatch = max_rows_per_dispatch(full_bins);
+        let (Some(coeffs), Some(transform), Some(amplitudes)) = (
+            self.odx_sh_coeff_buffer.as_ref(),
+            self.odx_sh_transform_buffer.as_ref(),
+            self.amplitude_buffer.as_ref(),
+        ) else {
+            return;
+        };
         for slice_chunk in slice_compact_indices.chunks(rows_per_dispatch) {
             let next = OdxShComputeParams {
                 full_bins: stored.full_bins,
@@ -930,33 +940,57 @@ impl GlyphResources {
                 ncoeffs: stored.ncoeffs,
                 slice_count: slice_chunk.len() as u32,
             };
-            let Some(params_buffer) = self.odx_sh_params_buffer.as_ref() else {
-                return;
-            };
-            queue.write_buffer(params_buffer, 0, bytemuck::bytes_of(&next));
-
-            self.odx_sh_slice_buffer = Some(device.create_buffer_init(
+            let params_buffer = device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("odx_sh_compute_params_chunk"),
+                    contents: bytemuck::bytes_of(&next),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                },
+            );
+            let slice_buffer = device.create_buffer_init(
                 &wgpu::util::BufferInitDescriptor {
                     label: Some("odx_sh_slice_indices"),
                     contents: bytemuck::cast_slice(slice_chunk),
                     usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 },
-            ));
-            self.rebuild_odx_sh_bind_group(device);
+            );
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("odx_sh_compute_bg_chunk"),
+                layout: &self.odx_sh_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: coeffs.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: transform.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: slice_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: amplitudes.as_entire_binding(),
+                    },
+                ],
+            });
 
             let total = (slice_chunk.len() * full_bins) as u32;
             if total == 0 {
                 continue;
             }
-            let Some(bind_group) = self.odx_sh_bind_group.as_ref() else {
-                return;
-            };
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("odx_sh_compute_pass"),
                 timestamp_writes: None,
             });
             pass.set_pipeline(&self.odx_sh_pipeline);
-            pass.set_bind_group(0, bind_group, &[]);
+            pass.set_bind_group(0, &bind_group, &[]);
             pass.dispatch_workgroups(total.div_ceil(COMPUTE_WORKGROUP_SIZE_X), 1, 1);
         }
     }
@@ -1044,8 +1078,14 @@ impl GlyphResources {
         let bytes = bytemuck::cast_slice(values);
         let needed = bytes.len().max(std::mem::size_of::<f32>()) as u64;
         let (slot, capacity) = match which {
-            GateBufferKind::Opacity => (&mut self.opacity_buffer, &mut self.buffer_capacities.opacity_bytes),
-            GateBufferKind::Size => (&mut self.size_buffer, &mut self.buffer_capacities.size_bytes),
+            GateBufferKind::Opacity => (
+                &mut self.opacity_buffer,
+                &mut self.buffer_capacities.opacity_bytes,
+            ),
+            GateBufferKind::Size => (
+                &mut self.size_buffer,
+                &mut self.buffer_capacities.size_bytes,
+            ),
         };
         let should_recreate = slot.is_none() || *capacity < needed;
         if should_recreate {
@@ -1077,12 +1117,13 @@ impl GlyphResources {
             let chunk_end_row = (chunk_start_row + rows_per_chunk).min(source_rows);
             let flat_start = chunk_start_row * source_bins;
             let flat_end = chunk_end_row * source_bins;
-            self.odx_odf_source_chunks
-                .push(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            self.odx_odf_source_chunks.push(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
                     label: Some("odx_odf_source_chunk"),
                     contents: bytemuck::cast_slice(&source_amplitudes[flat_start..flat_end]),
                     usage: wgpu::BufferUsages::STORAGE,
-                }));
+                },
+            ));
         }
         self.odx_odf_source_key = Some(key);
         self.current_bins = full_bins as u32;
@@ -1125,11 +1166,12 @@ impl GlyphResources {
                     contents: bytemuck::bytes_of(&params),
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
-                let worklist_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("odx_odf_worklist"),
-                    contents: bytemuck::cast_slice(work_item_chunk),
-                    usage: wgpu::BufferUsages::STORAGE,
-                });
+                let worklist_buffer =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("odx_odf_worklist"),
+                        contents: bytemuck::cast_slice(work_item_chunk),
+                        usage: wgpu::BufferUsages::STORAGE,
+                    });
 
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("odx_odf_compute_bg"),

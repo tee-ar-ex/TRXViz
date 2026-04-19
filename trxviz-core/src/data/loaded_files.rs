@@ -91,5 +91,6 @@ pub struct LoadedOdx {
     pub name: String,
     pub path: PathBuf,
     pub scene: Arc<crate::data::odx_data::OdxScene>,
+    pub warnings: Vec<String>,
     pub visible: bool,
 }
