@@ -42,4 +42,8 @@ pub use types::*;
 
 pub(crate) use op::{EvalCtx, WorkflowOp};
 pub(crate) use evaluate::{evaluate_derived_streamline_plan, expect_streamline_input};
+pub(crate) use evaluate::{
+    expect_parcel_selection_input, expect_parcellation_input, expect_surface_input,
+    resolve_selected_labels, summarize_value,
+};
 pub(crate) use types::{EvaluatedValue, WorkflowValue};

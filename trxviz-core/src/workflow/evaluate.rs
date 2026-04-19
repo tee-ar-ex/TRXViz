@@ -273,18 +273,30 @@ fn evaluate_node(
 
     match &node.kind {
         WorkflowNodeKind::StreamlineSource { .. }
+        | WorkflowNodeKind::ParcellationSource { .. }
         | WorkflowNodeKind::LimitStreamlines { .. }
         | WorkflowNodeKind::GroupSelect { .. }
         | WorkflowNodeKind::RandomSubset { .. }
         | WorkflowNodeKind::SphereQuery { .. }
+        | WorkflowNodeKind::SurfaceDepthQuery { .. }
         | WorkflowNodeKind::RemoveDuplicates { .. }
         | WorkflowNodeKind::Merge
+        | WorkflowNodeKind::AddGroupsFromParcellation
+        | WorkflowNodeKind::ParcelSelect { .. }
+        | WorkflowNodeKind::ParcelROI
+        | WorkflowNodeKind::ParcelROA
+        | WorkflowNodeKind::ParcelEnd { .. }
+        | WorkflowNodeKind::ParcelLimiting
+        | WorkflowNodeKind::ParcelTerminative
         | WorkflowNodeKind::ColorByDirection
         | WorkflowNodeKind::ColorByGroup
         | WorkflowNodeKind::ColorByDPV { .. }
         | WorkflowNodeKind::ColorByDPS { .. }
         | WorkflowNodeKind::UniformColor { .. }
+        | WorkflowNodeKind::SurfaceProjectionDensity { .. }
+        | WorkflowNodeKind::SurfaceProjectionMeanDps { .. }
         | WorkflowNodeKind::StreamlineDisplay { .. }
+        | WorkflowNodeKind::ParcellationDisplay { .. }
         | WorkflowNodeKind::SaveStreamlines { .. } => {
             unreachable!("handled by workflow op dispatch")
         }
@@ -349,257 +361,6 @@ fn evaluate_node(
                     })
                     .map(|v: EvaluatedValue| vec![v]),
             }
-        }
-        WorkflowNodeKind::ParcellationSource { source_id } => {
-            parcellation_assets
-                .get(source_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing parcellation source {source_id}")))?;
-            Ok(vec![WorkflowValue::Parcellation(*source_id).into()])
-        }
-        WorkflowNodeKind::SurfaceDepthQuery { depth_mm } => {
-            let flow = expect_streamline_input(inputs, "Surface Depth Query")?;
-            let surface_id = expect_surface_input(inputs, "Surface Depth Query")?;
-            let fingerprint = workflow_surface_query_fingerprint(&flow, surface_id, *depth_mm);
-            let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
-            let surface = surface_assets
-                .get(&surface_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing surface {surface_id}")))?;
-            let record = execution_cache.node_runs.entry(node.uuid).or_default();
-            prime_expensive_record(record, fingerprint);
-            scene_plan.surface_query_plans.push(SurfaceQueryPlan {
-                node_uuid: node.uuid,
-                flow,
-                surface_id,
-                surface: surface.data.clone(),
-                depth_mm: *depth_mm,
-            });
-
-            sync_node_state_from_run_record(node_state, record);
-            if let Some(cache) = execution_cache.surface_query_cache.get(&node.uuid) {
-                node_state.summary =
-                    format!("{} streamlines", cache.flow.selected_streamlines.len());
-                return Ok(vec![EvaluatedValue {
-                    value: WorkflowValue::Streamline(cache.flow.clone()),
-                    stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
-                }]);
-            }
-
-            node_state.summary = node_state
-                .execution
-                .as_ref()
-                .map(|status| status.label())
-                .unwrap_or("Run required")
-                .to_string();
-            Ok(Vec::new())
-        }
-        WorkflowNodeKind::ParcelSelect { labels } => {
-            let source_id = expect_parcellation_input(inputs, "Parcel Select")?;
-            let parcellation = parcellation_assets
-                .get(&source_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing parcellation {source_id}")))?;
-            let labels = resolve_selected_labels(labels, &parcellation.asset.data);
-            Ok(vec![
-                WorkflowValue::ParcelSelection(ParcelSelection { source_id, labels }).into(),
-            ])
-        }
-        WorkflowNodeKind::ParcelROI => {
-            let flow = expect_streamline_input(inputs, "Parcel ROI")?;
-            let parcel_selection = expect_parcel_selection_input(inputs, "Parcel ROI")?;
-            let parcellation = parcellation_assets
-                .get(&parcel_selection.source_id)
-                .ok_or_else(|| WorkflowError::Evaluation("Parcel ROI is missing its parcellation".to_string()))?;
-            let plan = ReactiveStreamlinePlan {
-                node_uuid: node.uuid,
-                label: node.label.clone(),
-                op: ReactiveStreamlineOp::ParcelROI {
-                    parcellation: parcellation.asset.data.clone(),
-                    labels: parcel_selection.labels,
-                },
-                left: flow.clone(),
-                right: flow,
-            };
-            scene_plan.reactive_streamline_plans.push(plan.clone());
-            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
-        }
-        WorkflowNodeKind::ParcelROA => {
-            let flow = expect_streamline_input(inputs, "Parcel ROA")?;
-            let parcel_selection = expect_parcel_selection_input(inputs, "Parcel ROA")?;
-            let parcellation = parcellation_assets
-                .get(&parcel_selection.source_id)
-                .ok_or_else(|| WorkflowError::Evaluation("Parcel ROA is missing its parcellation".to_string()))?;
-            let plan = ReactiveStreamlinePlan {
-                node_uuid: node.uuid,
-                label: node.label.clone(),
-                op: ReactiveStreamlineOp::ParcelROA {
-                    parcellation: parcellation.asset.data.clone(),
-                    labels: parcel_selection.labels,
-                },
-                left: flow.clone(),
-                right: flow,
-            };
-            scene_plan.reactive_streamline_plans.push(plan.clone());
-            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
-        }
-        WorkflowNodeKind::ParcelEnd { endpoint_count } => {
-            let flow = expect_streamline_input(inputs, "Parcel End")?;
-            let parcel_selection = expect_parcel_selection_input(inputs, "Parcel End")?;
-            let parcellation = parcellation_assets
-                .get(&parcel_selection.source_id)
-                .ok_or_else(|| WorkflowError::Evaluation("Parcel End is missing its parcellation".to_string()))?;
-            let plan = ReactiveStreamlinePlan {
-                node_uuid: node.uuid,
-                label: node.label.clone(),
-                op: ReactiveStreamlineOp::ParcelEnd {
-                    parcellation: parcellation.asset.data.clone(),
-                    labels: parcel_selection.labels,
-                    endpoint_count: *endpoint_count,
-                },
-                left: flow.clone(),
-                right: flow,
-            };
-            scene_plan.reactive_streamline_plans.push(plan.clone());
-            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
-        }
-        WorkflowNodeKind::ParcelLimiting | WorkflowNodeKind::ParcelTerminative => {
-            let flow = expect_streamline_input(inputs, node.kind.title())?;
-            let parcel_selection = expect_parcel_selection_input(inputs, node.kind.title())?;
-            let parcellation = parcellation_assets
-                .get(&parcel_selection.source_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("{} is missing its parcellation", node.kind.title())))?;
-            let keep_inside = matches!(node.kind, WorkflowNodeKind::ParcelLimiting);
-            let plan = ReactiveStreamlinePlan {
-                node_uuid: node.uuid,
-                label: node.label.clone(),
-                op: ReactiveStreamlineOp::ParcelCrop {
-                    parcellation: parcellation.asset.data.clone(),
-                    labels: parcel_selection.labels,
-                    keep_inside,
-                },
-                left: flow.clone(),
-                right: flow,
-            };
-            scene_plan.reactive_streamline_plans.push(plan.clone());
-            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
-        }
-        WorkflowNodeKind::AddGroupsFromParcellation => {
-            let flow = expect_streamline_input(inputs, "Add Groups From Parcellation")?;
-            let source_id = match inputs.get(1).cloned().flatten() {
-                Some(value) => match value.value {
-                    WorkflowValue::Parcellation(source_id) => source_id,
-                    _ => {
-                        return Err(WorkflowError::Evaluation(
-                            "Add Groups From Parcellation needs a parcellation input".to_string()
-                        ));
-                    }
-                },
-                _ => {
-                    return Err(WorkflowError::Evaluation(
-                        "Add Groups From Parcellation needs a parcellation input".to_string()
-                    ));
-                }
-            };
-            let parcellation = parcellation_assets
-                .get(&source_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing parcellation {source_id}")))?;
-            let plan = ReactiveStreamlinePlan {
-                node_uuid: node.uuid,
-                label: node.label.clone(),
-                op: ReactiveStreamlineOp::AddGroupsFromParcellation {
-                    parcellation: parcellation.asset.data.clone(),
-                    parcellation_name: parcellation.asset.name.clone(),
-                },
-                left: flow.clone(),
-                right: flow,
-            };
-            scene_plan.reactive_streamline_plans.push(plan.clone());
-            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
-        }
-        WorkflowNodeKind::SurfaceProjectionDensity { depth_mm } => {
-            let flow = expect_streamline_input(inputs, "Map Streamlines to Surface")?;
-            let surface_id = expect_surface_input(inputs, "Map Streamlines to Surface")?;
-            let fingerprint =
-                workflow_surface_projection_fingerprint(&flow, surface_id, *depth_mm, None);
-            let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
-            let surface = surface_assets
-                .get(&surface_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing surface {surface_id}")))?;
-            let record = execution_cache.node_runs.entry(node.uuid).or_default();
-            prime_expensive_record(record, fingerprint);
-            scene_plan.surface_map_plans.push(SurfaceMapPlan {
-                node_uuid: node.uuid,
-                flow,
-                surface_id,
-                surface: surface.data.clone(),
-                depth_mm: *depth_mm,
-                dps_field: None,
-            });
-
-            sync_node_state_from_run_record(node_state, record);
-            if let Some(cache) = execution_cache.surface_streamline_map_cache.get(&node.uuid) {
-                if let Some(surface_id) = cache.map.source_surface_id {
-                    projection_by_surface.insert(surface_id, cache.map.clone());
-                }
-                node_state.summary =
-                    summarize_value(&WorkflowValue::SurfaceScalars(cache.map.clone()));
-                return Ok(vec![EvaluatedValue {
-                    value: WorkflowValue::SurfaceScalars(cache.map.clone()),
-                    stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
-                }]);
-            }
-
-            node_state.summary = node_state
-                .execution
-                .as_ref()
-                .map(|status| status.label())
-                .unwrap_or("Run required")
-                .to_string();
-            Ok(Vec::new())
-        }
-        WorkflowNodeKind::SurfaceProjectionMeanDps { depth_mm, field } => {
-            let flow = expect_streamline_input(inputs, "Map Streamlines to Surface (Mean DPS)")?;
-            let surface_id = expect_surface_input(inputs, "Map Streamlines to Surface (Mean DPS)")?;
-            let fingerprint =
-                workflow_surface_projection_fingerprint(
-                    &flow,
-                    surface_id,
-                    *depth_mm,
-                    Some(field.as_str()),
-                );
-            let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
-            let surface = surface_assets
-                .get(&surface_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing surface {surface_id}")))?;
-            let record = execution_cache.node_runs.entry(node.uuid).or_default();
-            prime_expensive_record(record, fingerprint);
-            scene_plan.surface_map_plans.push(SurfaceMapPlan {
-                node_uuid: node.uuid,
-                flow,
-                surface_id,
-                surface: surface.data.clone(),
-                depth_mm: *depth_mm,
-                dps_field: Some(field.clone()),
-            });
-
-            sync_node_state_from_run_record(node_state, record);
-            if let Some(cache) = execution_cache.surface_streamline_map_cache.get(&node.uuid) {
-                if let Some(surface_id) = cache.map.source_surface_id {
-                    projection_by_surface.insert(surface_id, cache.map.clone());
-                }
-                node_state.summary =
-                    summarize_value(&WorkflowValue::SurfaceScalars(cache.map.clone()));
-                return Ok(vec![EvaluatedValue {
-                    value: WorkflowValue::SurfaceScalars(cache.map.clone()),
-                    stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
-                }]);
-            }
-
-            node_state.summary = node_state
-                .execution
-                .as_ref()
-                .map(|status| status.label())
-                .unwrap_or("Run required")
-                .to_string();
-            Ok(Vec::new())
         }
         WorkflowNodeKind::BundleSurfaceBuild {
             per_group,
@@ -747,19 +508,6 @@ fn evaluate_node(
                 SurfaceDisplaySpace::Anatomical => scene_plan.surface_draws.push(draw),
                 SurfaceDisplaySpace::Stage => scene_plan.stage_surface_draws.push(draw),
             }
-            Ok(Vec::new())
-        }
-        WorkflowNodeKind::ParcellationDisplay { labels, opacity } => {
-            let source_id = expect_parcellation_input(inputs, "Parcellation Display")?;
-            let parcellation = parcellation_assets
-                .get(&source_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing parcellation {source_id}")))?;
-            let labels = resolve_selected_labels(labels, &parcellation.asset.data);
-            scene_plan.parcellation_draws.push(ParcellationDrawPlan {
-                source_id,
-                labels,
-                opacity: *opacity,
-            });
             Ok(Vec::new())
         }
         WorkflowNodeKind::BoundaryFieldBuild {
@@ -1178,7 +926,10 @@ pub(crate) fn expect_streamline_input(
     }
 }
 
-fn expect_surface_input(inputs: &[Option<EvaluatedValue>], label: &str) -> WorkflowResult<FileId> {
+pub(crate) fn expect_surface_input(
+    inputs: &[Option<EvaluatedValue>],
+    label: &str,
+) -> WorkflowResult<FileId> {
     inputs
         .iter()
         .flatten()
@@ -1266,7 +1017,7 @@ fn expect_volume_input(inputs: &[Option<EvaluatedValue>], label: &str) -> Workfl
     }
 }
 
-fn expect_parcellation_input(
+pub(crate) fn expect_parcellation_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
 ) -> WorkflowResult<FileId> {
@@ -1279,7 +1030,7 @@ fn expect_parcellation_input(
     }
 }
 
-fn expect_parcel_selection_input(
+pub(crate) fn expect_parcel_selection_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
 ) -> WorkflowResult<ParcelSelection> {
@@ -1292,7 +1043,7 @@ fn expect_parcel_selection_input(
     }
 }
 
-fn resolve_selected_labels(
+pub(crate) fn resolve_selected_labels(
     labels: &ParcelIdSet,
     parcellation: &ParcellationVolume,
 ) -> BTreeSet<ParcelId> {
@@ -1753,7 +1504,7 @@ fn streamline_points(data: &TrxGpuData, streamline_index: usize) -> &[[f32; 3]] 
     &data.positions[start..end]
 }
 
-fn summarize_value(value: &WorkflowValue) -> String {
+pub(crate) fn summarize_value(value: &WorkflowValue) -> String {
     match value {
         WorkflowValue::Streamline(flow) => {
             format!("{} streamlines", flow.selected_streamlines.len())

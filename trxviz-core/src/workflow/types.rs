@@ -1359,18 +1359,30 @@ impl WorkflowNodeKind {
         }
         match self {
             Self::StreamlineSource { .. }
+            | Self::ParcellationSource { .. }
             | Self::LimitStreamlines { .. }
             | Self::GroupSelect { .. }
             | Self::RandomSubset { .. }
             | Self::SphereQuery { .. }
+            | Self::SurfaceDepthQuery { .. }
             | Self::RemoveDuplicates { .. }
             | Self::Merge
+            | Self::AddGroupsFromParcellation
+            | Self::ParcelSelect { .. }
+            | Self::ParcelROI
+            | Self::ParcelROA
+            | Self::ParcelEnd { .. }
+            | Self::ParcelLimiting
+            | Self::ParcelTerminative
             | Self::ColorByDirection
             | Self::ColorByGroup
             | Self::ColorByDPV { .. }
             | Self::ColorByDPS { .. }
             | Self::UniformColor { .. }
+            | Self::SurfaceProjectionDensity { .. }
+            | Self::SurfaceProjectionMeanDps { .. }
             | Self::StreamlineDisplay { .. }
+            | Self::ParcellationDisplay { .. }
             | Self::SaveStreamlines { .. } => unreachable!("handled by workflow op registry"),
             Self::VolumeSource { .. } => "Volume Source",
             Self::CiftiSource { .. } => "CIFTI Source",
@@ -1380,18 +1392,7 @@ impl WorkflowNodeKind {
                 CiftiStructure::CortexRight => "CIFTI Right Cortex",
                 CiftiStructure::Subcortical => "CIFTI Subcortex",
             },
-            Self::ParcellationSource { .. } => "Parcellation Source",
-            Self::SurfaceDepthQuery { .. } => "Surface Depth Query",
-            Self::AddGroupsFromParcellation => "Add Groups From Parcellation",
-            Self::ParcelSelect { .. } => "Parcel Select",
-            Self::ParcelROI => "Parcel ROI",
-            Self::ParcelROA => "Parcel ROA",
-            Self::ParcelEnd { .. } => "Parcel End",
-            Self::ParcelLimiting => "Parcel Limiting",
-            Self::ParcelTerminative => "Parcel Terminative",
             Self::ParcelSurfaceBuild => "Parcel Surface Build",
-            Self::SurfaceProjectionDensity { .. } => "Map Streamlines to Surface",
-            Self::SurfaceProjectionMeanDps { .. } => "Map Streamlines to Surface (Mean DPS)",
             Self::SurfaceOverlayStack { .. } => "Surface Overlay Stack",
             Self::BundleSurfaceBuild { .. } => "Bundle Surface Build",
             Self::BoundaryFieldBuild { .. } => "Boundary Field Build",
@@ -1400,7 +1401,6 @@ impl WorkflowNodeKind {
             Self::SurfaceDisplay { .. } => "Surface Display",
             Self::BundleSurfaceDisplay { .. } => "Bundle Surface Display",
             Self::BoundaryGlyphDisplay { .. } => "Boundary Glyph Display",
-            Self::ParcellationDisplay { .. } => "Parcellation Display",
             Self::OdxSource { .. } => "ODX Source",
             Self::OdxFixelScalarSelect { .. } => "ODX Fixel Scalar Select",
             Self::OdxVolumeSelect { .. } => "ODX Volume Select",
@@ -1417,49 +1417,45 @@ impl WorkflowNodeKind {
         }
         match self {
             Self::StreamlineSource { .. }
+            | Self::ParcellationSource { .. }
             | Self::LimitStreamlines { .. }
             | Self::GroupSelect { .. }
             | Self::RandomSubset { .. }
             | Self::SphereQuery { .. }
+            | Self::SurfaceDepthQuery { .. }
             | Self::RemoveDuplicates { .. }
             | Self::Merge
+            | Self::AddGroupsFromParcellation
+            | Self::ParcelSelect { .. }
+            | Self::ParcelROI
+            | Self::ParcelROA
+            | Self::ParcelEnd { .. }
+            | Self::ParcelLimiting
+            | Self::ParcelTerminative
             | Self::ColorByDirection
             | Self::ColorByGroup
             | Self::ColorByDPV { .. }
             | Self::ColorByDPS { .. }
             | Self::UniformColor { .. }
+            | Self::SurfaceProjectionDensity { .. }
+            | Self::SurfaceProjectionMeanDps { .. }
             | Self::StreamlineDisplay { .. }
+            | Self::ParcellationDisplay { .. }
             | Self::SaveStreamlines { .. } => unreachable!("handled by workflow op registry"),
-            Self::VolumeSource { .. }
-            | Self::CiftiSource { .. }
-            | Self::SurfaceSource { .. }
-            | Self::ParcellationSource { .. } => Vec::new(),
+            Self::VolumeSource { .. } | Self::CiftiSource { .. } | Self::SurfaceSource { .. } => {
+                Vec::new()
+            }
             Self::BundleSurfaceBuild { .. } => vec![PortKind::Streamline],
             Self::BoundaryFieldBuild { .. } => vec![PortKind::Streamline],
             Self::BundleSurfaceDisplay { .. } => {
                 vec![PortKind::BundleSurface, PortKind::BoundaryField]
             }
             Self::BoundaryGlyphDisplay { .. } => vec![PortKind::BoundaryField],
-            Self::SurfaceDepthQuery { .. } => vec![PortKind::Streamline, PortKind::Surface],
             Self::CiftiStructure { structure, .. } => match structure {
                 CiftiStructure::Subcortical => vec![PortKind::Cifti],
                 _ => vec![PortKind::Cifti],
             },
-            Self::AddGroupsFromParcellation => vec![PortKind::Streamline, PortKind::Parcellation],
-            Self::ParcelSelect { .. } | Self::ParcellationDisplay { .. } => {
-                vec![PortKind::Parcellation]
-            }
-            Self::ParcelROI
-            | Self::ParcelROA
-            | Self::ParcelEnd { .. }
-            | Self::ParcelLimiting
-            | Self::ParcelTerminative => {
-                vec![PortKind::Streamline, PortKind::ParcelSelection]
-            }
             Self::ParcelSurfaceBuild => vec![PortKind::ParcelSelection],
-            Self::SurfaceProjectionDensity { .. } | Self::SurfaceProjectionMeanDps { .. } => {
-                vec![PortKind::Streamline, PortKind::Surface]
-            }
             Self::VolumeDisplay { .. } => vec![PortKind::Volume],
             Self::VolumeScalarsDisplay { .. } => vec![PortKind::VolumeScalars],
             Self::SurfaceOverlayStack { layers } => {
@@ -1487,34 +1483,34 @@ impl WorkflowNodeKind {
         }
         match self {
             Self::StreamlineSource { .. }
+            | Self::ParcellationSource { .. }
             | Self::LimitStreamlines { .. }
             | Self::GroupSelect { .. }
             | Self::RandomSubset { .. }
             | Self::SphereQuery { .. }
             | Self::RemoveDuplicates { .. }
             | Self::Merge
+            | Self::SurfaceDepthQuery { .. }
+            | Self::AddGroupsFromParcellation
+            | Self::ParcelSelect { .. }
+            | Self::ParcelROI
+            | Self::ParcelROA
+            | Self::ParcelEnd { .. }
+            | Self::ParcelLimiting
+            | Self::ParcelTerminative
             | Self::ColorByDirection
             | Self::ColorByGroup
             | Self::ColorByDPV { .. }
             | Self::ColorByDPS { .. }
             | Self::UniformColor { .. }
+            | Self::SurfaceProjectionDensity { .. }
+            | Self::SurfaceProjectionMeanDps { .. }
             | Self::StreamlineDisplay { .. }
+            | Self::ParcellationDisplay { .. }
             | Self::SaveStreamlines { .. } => unreachable!("handled by workflow op registry"),
-            Self::SurfaceDepthQuery { .. }
-            | Self::AddGroupsFromParcellation
-            | Self::ParcelROI
-            | Self::ParcelROA
-            | Self::ParcelEnd { .. }
-            | Self::ParcelLimiting
-            | Self::ParcelTerminative => vec![PortKind::Streamline],
             Self::VolumeSource { .. } => vec![PortKind::Volume],
             Self::CiftiSource { .. } => vec![PortKind::Cifti],
             Self::SurfaceSource { .. } => vec![PortKind::Surface],
-            Self::ParcellationSource { .. } => vec![PortKind::Parcellation],
-            Self::ParcelSelect { .. } => vec![PortKind::ParcelSelection],
-            Self::SurfaceProjectionDensity { .. } | Self::SurfaceProjectionMeanDps { .. } => {
-                vec![PortKind::SurfaceScalars]
-            }
             Self::CiftiStructure { structure, .. } => match structure {
                 CiftiStructure::Subcortical => vec![PortKind::VolumeScalars],
                 _ => vec![PortKind::SurfaceScalars],
@@ -1536,7 +1532,6 @@ impl WorkflowNodeKind {
             | Self::VolumeScalarsDisplay { .. }
             | Self::SurfaceDisplay { .. }
             | Self::BoundaryGlyphDisplay { .. }
-            | Self::ParcellationDisplay { .. }
             | Self::BundleSurfaceDisplay { .. }
             | Self::Fixel3DDisplay { .. }
             | Self::Fixel2DDisplay { .. }
