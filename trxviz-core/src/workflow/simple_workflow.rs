@@ -40,10 +40,7 @@ impl WorkflowEditability {
     }
 
     pub fn first_reason(&self) -> Option<&str> {
-        self.read_only_reasons
-            .values()
-            .next()
-            .map(String::as_str)
+        self.read_only_reasons.values().next().map(String::as_str)
     }
 
     pub fn reason_for(&self, asset_id: FileId) -> Option<&str> {
@@ -70,14 +67,11 @@ pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEdi
 
     for asset in &document.assets {
         let result = match asset {
-            WorkflowAssetDocument::Streamlines { id, .. } => match_streamline_asset(
-                *id,
-                &kinds,
-                &outgoing,
-            )
-            .map(|binding| {
-                editability.bindings.streamline.insert(*id, binding);
-            }),
+            WorkflowAssetDocument::Streamlines { id, .. } => {
+                match_streamline_asset(*id, &kinds, &outgoing).map(|binding| {
+                    editability.bindings.streamline.insert(*id, binding);
+                })
+            }
             WorkflowAssetDocument::Volume { id, .. } => match_simple_display_asset(
                 *id,
                 &kinds,
@@ -91,14 +85,11 @@ pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEdi
             WorkflowAssetDocument::Cifti { .. } => {
                 Err("CIFTI workflow branches are only editable in Advanced mode.".to_string())
             }
-            WorkflowAssetDocument::Surface { id, .. } => match_surface_asset(
-                *id,
-                &kinds,
-                &outgoing,
-            )
-            .map(|binding| {
-                editability.bindings.surface.insert(*id, binding);
-            }),
+            WorkflowAssetDocument::Surface { id, .. } => {
+                match_surface_asset(*id, &kinds, &outgoing).map(|binding| {
+                    editability.bindings.surface.insert(*id, binding);
+                })
+            }
             WorkflowAssetDocument::Parcellation { id, .. } => match_simple_display_asset(
                 *id,
                 &kinds,
@@ -211,7 +202,10 @@ fn find_unique_reachable_display(
             }
             if let Some(kind) = kinds.get(&child) {
                 if predicate(kind) {
-                    if outgoing.get(&child).is_some_and(|children| !children.is_empty()) {
+                    if outgoing
+                        .get(&child)
+                        .is_some_and(|children| !children.is_empty())
+                    {
                         return Err(
                             "This project routes a display node into additional workflow nodes, which requires Advanced mode."
                                 .to_string(),
@@ -321,7 +315,9 @@ fn is_parcellation_display(kind: &WorkflowNodeKind) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workflow::{GraphPos, InPort, OutPort, add_default_nodes_for_asset, default_document, make_node};
+    use crate::workflow::{
+        GraphPos, InPort, OutPort, add_default_nodes_for_asset, default_document, make_node,
+    };
     use std::path::PathBuf;
 
     #[test]
