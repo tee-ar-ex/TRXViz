@@ -152,7 +152,7 @@ pub fn evaluate_scene_plan_with_mode(
                         .gpu_data
                         .groups
                         .iter()
-                        .map(|(name, _)| name.clone())
+                        .map(|(name, _members): &(String, Vec<StreamlineIndex>)| name.clone())
                         .collect();
                 }
                 if node_state.summary == node.kind.title() {
@@ -357,7 +357,7 @@ fn evaluate_node(
             let flow = expect_streamline_input(inputs, "Limit Streamlines")?;
             let mut selected = flow.selected_streamlines.as_ref().clone();
             if *randomize {
-                selected.sort_by_key(|index| {
+                selected.sort_by_key(|index: &StreamlineIndex| {
                     let mut hasher = std::collections::hash_map::DefaultHasher::new();
                     seed.hash(&mut hasher);
                     index.hash(&mut hasher);
@@ -373,9 +373,9 @@ fn evaluate_node(
                 .into(),
             ])
         }
-        WorkflowNodeKind::GroupSelect { groups_csv } => {
+        WorkflowNodeKind::GroupSelect { groups } => {
             let flow = expect_streamline_input(inputs, "Group Select")?;
-            match parse_group_filter(groups_csv) {
+            match groups {
                 GroupFilter::All => Ok(vec![WorkflowValue::Streamline(flow).into()]),
                 GroupFilter::None => Ok(vec![
                     WorkflowValue::Streamline(StreamlineFlow {
@@ -397,7 +397,11 @@ fn evaluate_node(
                         .groups
                         .iter()
                         .filter(|(name, _)| labels.contains(name))
-                        .flat_map(|(_, members)| members.iter().copied())
+                        .flat_map(
+                            |(_name, members): &(String, Vec<StreamlineIndex>)| {
+                                members.iter().copied()
+                            },
+                        )
                         .collect();
                     let selected = flow
                         .selected_streamlines
@@ -418,7 +422,7 @@ fn evaluate_node(
         WorkflowNodeKind::RandomSubset { limit, seed } => {
             let flow = expect_streamline_input(inputs, "Random Subset")?;
             let mut selected = flow.selected_streamlines.as_ref().clone();
-            selected.sort_by_key(|index| {
+            selected.sort_by_key(|index: &StreamlineIndex| {
                 let mut hasher = std::collections::hash_map::DefaultHasher::new();
                 seed.hash(&mut hasher);
                 index.hash(&mut hasher);
@@ -537,12 +541,12 @@ fn evaluate_node(
                 .expect("just pushed plan");
             evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
         }
-        WorkflowNodeKind::ParcelSelect { labels_csv } => {
+        WorkflowNodeKind::ParcelSelect { labels } => {
             let source_id = expect_parcellation_input(inputs, "Parcel Select")?;
             let parcellation = parcellation_assets
                 .get(&source_id)
                 .ok_or_else(|| WorkflowError::Evaluation(format!("Missing parcellation {source_id}")))?;
-            let labels = resolve_selected_labels(labels_csv, &parcellation.asset.data);
+            let labels = resolve_selected_labels(labels, &parcellation.asset.data);
             Ok(vec![
                 WorkflowValue::ParcelSelection(ParcelSelection { source_id, labels }).into(),
             ])
@@ -683,7 +687,7 @@ fn evaluate_node(
             let flow = expect_streamline_input(inputs, "Color By DPV")?;
             Ok(vec![
                 WorkflowValue::Streamline(StreamlineFlow {
-                    color_mode: ColorMode::Dpv(field.clone()),
+                    color_mode: ColorMode::Dpv(field.as_str().to_string()),
                     ..flow
                 })
                 .into(),
@@ -693,7 +697,7 @@ fn evaluate_node(
             let flow = expect_streamline_input(inputs, "Color By DPS")?;
             Ok(vec![
                 WorkflowValue::Streamline(StreamlineFlow {
-                    color_mode: ColorMode::Dps(field.clone()),
+                    color_mode: ColorMode::Dps(field.as_str().to_string()),
                     ..flow
                 })
                 .into(),
@@ -754,7 +758,12 @@ fn evaluate_node(
             let flow = expect_streamline_input(inputs, "Map Streamlines to Surface (Mean DPS)")?;
             let surface_id = expect_surface_input(inputs, "Map Streamlines to Surface (Mean DPS)")?;
             let fingerprint =
-                workflow_surface_projection_fingerprint(&flow, surface_id, *depth_mm, Some(field));
+                workflow_surface_projection_fingerprint(
+                    &flow,
+                    surface_id,
+                    *depth_mm,
+                    Some(field.as_str()),
+                );
             let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
             let surface = surface_assets
                 .get(&surface_id)
@@ -986,15 +995,12 @@ fn evaluate_node(
             }
             Ok(Vec::new())
         }
-        WorkflowNodeKind::ParcellationDisplay {
-            labels_csv,
-            opacity,
-        } => {
+        WorkflowNodeKind::ParcellationDisplay { labels, opacity } => {
             let source_id = expect_parcellation_input(inputs, "Parcellation Display")?;
             let parcellation = parcellation_assets
                 .get(&source_id)
                 .ok_or_else(|| WorkflowError::Evaluation(format!("Missing parcellation {source_id}")))?;
-            let labels = resolve_selected_labels(labels_csv, &parcellation.asset.data);
+            let labels = resolve_selected_labels(labels, &parcellation.asset.data);
             scene_plan.parcellation_draws.push(ParcellationDrawPlan {
                 source_id,
                 labels,
@@ -1547,44 +1553,12 @@ fn expect_parcel_selection_input(
     }
 }
 
-fn parse_csv_set(csv: &str) -> BTreeSet<String> {
-    csv.split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .collect()
-}
-
-enum GroupFilter {
-    All,
-    None,
-    Selected(BTreeSet<String>),
-}
-
-fn parse_group_filter(csv: &str) -> GroupFilter {
-    if csv.trim() == "__none__" {
-        GroupFilter::None
-    } else {
-        let labels = parse_csv_set(csv);
-        if labels.is_empty() {
-            GroupFilter::All
-        } else {
-            GroupFilter::Selected(labels)
-        }
-    }
-}
-
-fn parse_label_ids(csv: &str) -> BTreeSet<ParcelId> {
-    csv.split(',')
-        .map(str::trim)
-        .filter_map(|value| value.parse::<u32>().ok().map(ParcelId))
-        .collect()
-}
-
-fn resolve_selected_labels(csv: &str, parcellation: &ParcellationVolume) -> BTreeSet<ParcelId> {
-    let labels = parse_label_ids(csv);
+fn resolve_selected_labels(
+    labels: &ParcelIdSet,
+    parcellation: &ParcellationVolume,
+) -> BTreeSet<ParcelId> {
     if !labels.is_empty() {
-        return labels;
+        return labels.0.clone();
     }
 
     let mut resolved = BTreeSet::new();
@@ -1848,17 +1822,17 @@ mod tests {
 
     #[test]
     fn group_filter_empty_means_all() {
-        assert!(matches!(parse_group_filter(""), GroupFilter::All));
+        assert_eq!(GroupFilter::from_csv(""), GroupFilter::All);
     }
 
     #[test]
     fn group_filter_none_sentinel_means_none() {
-        assert!(matches!(parse_group_filter("__none__"), GroupFilter::None));
+        assert_eq!(GroupFilter::from_csv("__none__"), GroupFilter::None);
     }
 
     #[test]
     fn group_filter_csv_keeps_selected_labels() {
-        match parse_group_filter("CST_left, CST_right") {
+        match GroupFilter::from_csv("CST_left, CST_right") {
             GroupFilter::Selected(labels) => {
                 assert!(labels.contains("CST_left"));
                 assert!(labels.contains("CST_right"));
@@ -2368,7 +2342,14 @@ fn subset_tractogram_from_flow(flow: &StreamlineFlow) -> WorkflowResult<Tractogr
             .map_err(|e| WorkflowError::Other(e.into()))?;
         remap.insert(index, new_index as u32);
     }
-    for (group_idx, (name, members)) in flow.dataset.gpu_data.groups.iter().enumerate() {
+    for (group_idx, (name, members)) in flow
+        .dataset
+        .gpu_data
+        .groups
+        .iter()
+        .enumerate()
+        .map(|(idx, entry): (usize, &(String, Vec<StreamlineIndex>))| (idx, entry))
+    {
         let remapped: Vec<u32> = members
             .iter()
             .filter_map(|member| remap.get(member).copied())

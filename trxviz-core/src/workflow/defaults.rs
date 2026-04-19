@@ -113,7 +113,7 @@ pub fn add_default_nodes_for_asset(
             let group = make_node(
                 document,
                 WorkflowNodeKind::GroupSelect {
-                    groups_csv: String::new(),
+                    groups: GroupFilter::All,
                 },
                 pos,
             );
@@ -294,7 +294,7 @@ pub fn add_default_nodes_for_asset(
             let display = make_node(
                 document,
                 WorkflowNodeKind::ParcellationDisplay {
-                    labels_csv: String::new(),
+                    labels: ParcelIdSet::default(),
                     opacity: 0.9,
                 },
                 pos,

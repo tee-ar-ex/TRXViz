@@ -11,7 +11,8 @@ use trxviz_core::data::loaded_files::{LoadedTrx, StreamlineBacking};
 use trxviz_core::data::trx_data::{ColorMode, RenderStyle, TrxGpuData};
 use trxviz_core::units::{Millimeters, StreamlineIndex};
 use trxviz_core::workflow::{
-    GraphPos, InPort, OutPort, WorkflowEvalMode, WorkflowExecutionCache, WorkflowNodeKind,
+    GraphPos, GroupFilter, InPort, OutPort, WorkflowEvalMode, WorkflowExecutionCache,
+    WorkflowNodeKind,
     default_document, evaluate_scene_plan_with_mode, make_node,
 };
 
@@ -228,7 +229,9 @@ fn group_select_all_passes_through_unchanged() {
     let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
     let sel = make_node(
         &mut doc,
-        WorkflowNodeKind::GroupSelect { groups_csv: "".to_string() },
+        WorkflowNodeKind::GroupSelect {
+            groups: GroupFilter::All,
+        },
         GraphPos::new(200.0, 0.0),
     );
     connect(&mut doc, src, 0, sel, 0);
@@ -256,7 +259,9 @@ fn group_select_none_produces_empty_flow() {
     let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
     let sel = make_node(
         &mut doc,
-        WorkflowNodeKind::GroupSelect { groups_csv: "__none__".to_string() },
+        WorkflowNodeKind::GroupSelect {
+            groups: GroupFilter::None,
+        },
         GraphPos::new(200.0, 0.0),
     );
     connect(&mut doc, src, 0, sel, 0);
@@ -289,7 +294,9 @@ fn group_select_by_label_filters_correctly() {
     let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
     let sel = make_node(
         &mut doc,
-        WorkflowNodeKind::GroupSelect { groups_csv: "GroupA".to_string() },
+        WorkflowNodeKind::GroupSelect {
+            groups: GroupFilter::from_csv("GroupA"),
+        },
         GraphPos::new(200.0, 0.0),
     );
     connect(&mut doc, src, 0, sel, 0);

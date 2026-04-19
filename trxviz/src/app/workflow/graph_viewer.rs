@@ -281,7 +281,8 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     format!("Keep first {limit} streamlines")
                 }
             }
-            WorkflowNodeKind::GroupSelect { groups_csv } => {
+            WorkflowNodeKind::GroupSelect { groups } => {
+                let groups_csv = groups.to_csv();
                 if groups_csv.trim().is_empty() {
                     "All groups".to_string()
                 } else if groups_csv.trim() == "__none__" {
@@ -306,7 +307,8 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     center[0], center[1], center[2]
                 )
             }
-            WorkflowNodeKind::ParcelSelect { labels_csv } => {
+            WorkflowNodeKind::ParcelSelect { labels } => {
+                let labels_csv = labels.to_csv();
                 if labels_csv.trim().is_empty() {
                     "Labels: all nonzero".to_string()
                 } else {
@@ -418,7 +420,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 snarl,
                 pos,
                 WorkflowNodeKind::GroupSelect {
-                    groups_csv: String::new(),
+                    groups: trxviz_core::workflow::GroupFilter::All,
                 },
                 measured_node_sizes,
             );
@@ -476,7 +478,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 snarl,
                 pos,
                 WorkflowNodeKind::ParcelSelect {
-                    labels_csv: String::new(),
+                    labels: trxviz_core::workflow::ParcelIdSet::default(),
                 },
                 measured_node_sizes,
             );
@@ -527,7 +529,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 snarl,
                 pos,
                 WorkflowNodeKind::ParcellationDisplay {
-                    labels_csv: String::new(),
+                    labels: trxviz_core::workflow::ParcelIdSet::default(),
                     opacity: 0.9,
                 },
                 measured_node_sizes,
@@ -554,7 +556,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 snarl,
                 pos,
                 WorkflowNodeKind::ColorByDPV {
-                    field: String::new(),
+                    field: trxviz_core::workflow::DpvFieldName::default(),
                 },
                 measured_node_sizes,
             );
@@ -563,7 +565,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 snarl,
                 pos,
                 WorkflowNodeKind::ColorByDPS {
-                    field: String::new(),
+                    field: trxviz_core::workflow::DpsFieldName::default(),
                 },
                 measured_node_sizes,
             );
@@ -591,7 +593,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 pos,
                 WorkflowNodeKind::SurfaceProjectionMeanDps {
                     depth_mm: trxviz_core::units::Millimeters(2.0),
-                    field: String::new(),
+                    field: trxviz_core::workflow::DpsFieldName::default(),
                 },
                 measured_node_sizes,
             );

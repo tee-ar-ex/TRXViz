@@ -978,7 +978,7 @@ fn execute_workflow_to_completion(
                 &plan.flow,
                 plan.surface_id,
                 plan.depth_mm,
-                plan.dps_field.as_deref(),
+                plan.dps_field.as_ref().map(|field| field.as_str()),
             );
             let record = workflow
                 .execution_cache

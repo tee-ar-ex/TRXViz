@@ -190,7 +190,12 @@ pub fn workflow_boundary_plan_fingerprint(plan: &BoundaryFieldPlan) -> u64 {
 fn hash_flow(flow: &StreamlineFlow, state: &mut impl Hasher) {
     flow.dataset.name.hash(state);
     flow.selected_streamlines.len().hash(state);
-    for index in flow.selected_streamlines.iter().take(128) {
+    for index in flow
+        .selected_streamlines
+        .iter()
+        .take(128)
+        .copied()
+    {
         index.hash(state);
     }
     match &flow.color_mode {

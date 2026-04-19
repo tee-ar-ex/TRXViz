@@ -58,9 +58,14 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
                 dps_storage = subset
                     .dps_data
                     .iter()
-                    .find(|(name, _)| name == field)
-                    .map(|(_, values)| values.clone())
-                    .ok_or_else(|| WorkflowError::Evaluation(format!("DPS field `{field}` is not available")))?;
+                    .find(|(name, _)| name == field.as_str())
+                    .map(|(_name, values): &(String, Vec<f32>)| values.clone())
+                    .ok_or_else(|| {
+                        WorkflowError::Evaluation(format!(
+                            "DPS field `{}` is not available",
+                            field.as_str()
+                        ))
+                    })?;
                 Some(dps_storage.as_slice())
             } else {
                 None
@@ -73,11 +78,11 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
                 plan.depth_mm,
                 dps_values,
             );
-            let scalars = plan
-                .dps_field
-                .as_ref()
-                .map(|_| projected)
-                .unwrap_or(density);
+            let scalars: Vec<f32> = if plan.dps_field.is_some() {
+                projected
+            } else {
+                density
+            };
             let (range_min, range_max) = robust_range(&scalars);
             Ok(WorkflowJobOutput::SurfaceMap(SurfaceScalars {
                 structure: None,
@@ -88,7 +93,8 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
                 metadata: ScalarMetadata {
                     map_name: plan
                         .dps_field
-                        .clone()
+                        .as_ref()
+                        .map(|field| field.as_str().to_string())
                         .unwrap_or_else(|| "Streamline density".to_string()),
                     suggested_range: Some((range_min, range_max)),
                     series_index: None,
@@ -201,7 +207,14 @@ pub fn bundle_surface_component_flows(plan: &BundleSurfacePlan) -> Vec<(String, 
 
     let selected: HashSet<StreamlineIndex> = plan.flow.selected_streamlines.iter().copied().collect();
     let mut components = Vec::new();
-    for (group_name, members) in &plan.flow.dataset.gpu_data.groups {
+    for (group_name, members) in plan
+        .flow
+        .dataset
+        .gpu_data
+        .groups
+        .iter()
+        .map(|entry: &(String, Vec<StreamlineIndex>)| entry)
+    {
         let group_selected: Vec<StreamlineIndex> = members
             .iter()
             .copied()

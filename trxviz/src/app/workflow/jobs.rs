@@ -723,7 +723,7 @@ impl crate::app::TrxVizApp {
                 &plan.flow,
                 plan.surface_id,
                 plan.depth_mm,
-                plan.dps_field.as_deref(),
+                plan.dps_field.as_ref().map(|field| field.as_str()),
             );
             if should_queue_expensive_job(
                 self.workflow.execution_cache.node_runs.get(&plan.node_uuid),

@@ -31,6 +31,137 @@ pub struct WorkflowNode {
     pub label: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum GroupFilter {
+    All,
+    None,
+    Selected(BTreeSet<String>),
+}
+
+impl Default for GroupFilter {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+impl GroupFilter {
+    pub fn from_csv(csv: &str) -> Self {
+        if csv.trim() == "__none__" {
+            return Self::None;
+        }
+        let labels = csv
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<BTreeSet<_>>();
+        if labels.is_empty() {
+            Self::All
+        } else {
+            Self::Selected(labels)
+        }
+    }
+
+    pub fn to_csv(&self) -> String {
+        match self {
+            Self::All => String::new(),
+            Self::None => "__none__".to_string(),
+            Self::Selected(labels) => labels.iter().cloned().collect::<Vec<_>>().join(", "),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct ParcelIdSet(pub BTreeSet<ParcelId>);
+
+impl ParcelIdSet {
+    pub fn from_csv(csv: &str) -> Self {
+        Self(
+            csv.split(',')
+                .map(str::trim)
+                .filter_map(|value| value.parse::<u32>().ok().map(ParcelId))
+                .collect(),
+        )
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn to_csv(&self) -> String {
+        self.0
+            .iter()
+            .map(|label| label.0.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct DpvFieldName(pub String);
+
+impl DpvFieldName {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl AsRef<str> for DpvFieldName {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl From<String> for DpvFieldName {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for DpvFieldName {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct DpsFieldName(pub String);
+
+impl DpsFieldName {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl AsRef<str> for DpsFieldName {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl From<String> for DpsFieldName {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for DpsFieldName {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorkflowNodeKind {
     StreamlineSource {
@@ -58,7 +189,7 @@ pub enum WorkflowNodeKind {
         seed: u64,
     },
     GroupSelect {
-        groups_csv: String,
+        groups: GroupFilter,
     },
     RandomSubset {
         limit: usize,
@@ -77,7 +208,7 @@ pub enum WorkflowNodeKind {
     Merge,
     AddGroupsFromParcellation,
     ParcelSelect {
-        labels_csv: String,
+        labels: ParcelIdSet,
     },
     ParcelROI,
     ParcelROA,
@@ -90,10 +221,10 @@ pub enum WorkflowNodeKind {
     ColorByDirection,
     ColorByGroup,
     ColorByDPV {
-        field: String,
+        field: DpvFieldName,
     },
     ColorByDPS {
-        field: String,
+        field: DpsFieldName,
     },
     UniformColor {
         color: [f32; 4],
@@ -103,7 +234,7 @@ pub enum WorkflowNodeKind {
     },
     SurfaceProjectionMeanDps {
         depth_mm: Millimeters,
-        field: String,
+        field: DpsFieldName,
     },
     SurfaceOverlayStack {
         #[serde(default = "default_surface_overlay_layers")]
@@ -183,7 +314,7 @@ pub enum WorkflowNodeKind {
         min_contacts: u32,
     },
     ParcellationDisplay {
-        labels_csv: String,
+        labels: ParcelIdSet,
         opacity: f32,
     },
     SaveStreamlines {
@@ -956,7 +1087,7 @@ pub struct SurfaceMapPlan {
     pub surface_id: FileId,
     pub surface: Arc<GiftiSurfaceData>,
     pub depth_mm: Millimeters,
-    pub dps_field: Option<String>,
+    pub dps_field: Option<DpsFieldName>,
 }
 
 #[derive(Clone)]

@@ -445,7 +445,7 @@ impl super::super::TrxVizApp {
                         ui.add(egui::DragValue::new(seed).speed(1.0).prefix("Seed "));
                     }
                 }
-                workflow::WorkflowNodeKind::GroupSelect { groups_csv } => {
+                workflow::WorkflowNodeKind::GroupSelect { groups } => {
                     ui.label("Comma-separated group names");
                     let available_groups = self
                         .workflow
@@ -454,7 +454,7 @@ impl super::super::TrxVizApp {
                         .get(&node_uuid)
                         .map(|state| state.available_streamline_groups.as_slice())
                         .unwrap_or(&[]);
-                    show_group_select_editor(ui, groups_csv, available_groups);
+                    show_group_select_editor(ui, groups, available_groups);
                 }
                 workflow::WorkflowNodeKind::RandomSubset { limit, seed } => {
                     ui.add(egui::Slider::new(limit, 1..=1_000_000).text("Limit"));
@@ -475,19 +475,21 @@ impl super::super::TrxVizApp {
                 }
                 workflow::WorkflowNodeKind::SurfaceProjectionMeanDps { depth_mm, field } => {
                     ui.add(egui::DragValue::new(&mut depth_mm.0).speed(0.25).prefix("Depth "));
-                    ui.text_edit_singleline(field);
+                    edit_dps_field(ui, field);
                 }
-                workflow::WorkflowNodeKind::ParcelSelect { labels_csv } => {
+                workflow::WorkflowNodeKind::ParcelSelect { labels } => {
                     ui.label("Comma-separated label IDs");
                     ui.small("Leave empty to use every nonzero parcel label.");
-                    ui.text_edit_multiline(labels_csv);
+                    edit_parcel_id_set(ui, labels);
                 }
                 workflow::WorkflowNodeKind::ParcelEnd { endpoint_count } => {
                     ui.add(egui::Slider::new(endpoint_count, 1..=2).text("Matching endpoints"));
                 }
-                workflow::WorkflowNodeKind::ColorByDPV { field }
-                | workflow::WorkflowNodeKind::ColorByDPS { field } => {
-                    ui.text_edit_singleline(field);
+                workflow::WorkflowNodeKind::ColorByDPV { field } => {
+                    edit_field_name(ui, field);
+                }
+                workflow::WorkflowNodeKind::ColorByDPS { field } => {
+                    edit_field_name(ui, field);
                 }
                 workflow::WorkflowNodeKind::UniformColor { color } => {
                     ui.color_edit_button_rgba_unmultiplied(color);
@@ -884,12 +886,12 @@ impl super::super::TrxVizApp {
                     });
                 }
                 workflow::WorkflowNodeKind::ParcellationDisplay {
-                    labels_csv,
+                    labels,
                     opacity,
                 } => {
                     ui.label("Comma-separated label IDs");
                     ui.small("Leave empty to use every nonzero parcel label.");
-                    ui.text_edit_multiline(labels_csv);
+                    edit_parcel_id_set(ui, labels);
                     ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
                 }
                 workflow::WorkflowNodeKind::SaveStreamlines { output_path } => {
@@ -1257,16 +1259,44 @@ struct OdxSelectorNames {
     dpf_names: Vec<String>,
 }
 
+fn edit_field_name<T>(ui: &mut egui::Ui, field: &mut T)
+where
+    T: From<String> + AsRef<str>,
+{
+    let mut value = field.as_ref().to_string();
+    if ui.text_edit_singleline(&mut value).changed() {
+        *field = T::from(value);
+    }
+}
+
+fn edit_dps_field(ui: &mut egui::Ui, field: &mut workflow::DpsFieldName) {
+    let mut value = field.as_str().to_string();
+    if ui.text_edit_singleline(&mut value).changed() {
+        *field = workflow::DpsFieldName::from(value);
+    }
+}
+
+fn edit_parcel_id_set(ui: &mut egui::Ui, labels: &mut workflow::ParcelIdSet) {
+    let mut csv = labels.to_csv();
+    if ui.text_edit_multiline(&mut csv).changed() {
+        *labels = workflow::ParcelIdSet::from_csv(&csv);
+    }
+}
+
 fn show_group_select_editor(
     ui: &mut egui::Ui,
-    groups_csv: &mut String,
+    groups: &mut workflow::GroupFilter,
     available_groups: &[String],
 ) {
-    let output = egui::TextEdit::singleline(groups_csv)
+    let mut groups_csv = groups.to_csv();
+    let output = egui::TextEdit::singleline(&mut groups_csv)
         .hint_text("Type a group name")
         .desired_width(f32::INFINITY)
         .show(ui);
     let response = output.response.clone();
+    if output.response.changed() {
+        *groups = workflow::GroupFilter::from_csv(&groups_csv);
+    }
 
     if available_groups.is_empty() {
         ui.small("Autocomplete appears when the input streamline data exposes group names.");
@@ -1275,8 +1305,8 @@ fn show_group_select_editor(
 
     ui.small(format!("{} groups available", available_groups.len()));
 
-    let selected = parse_group_csv(groups_csv);
-    let current_fragment = current_group_fragment(groups_csv);
+    let selected = parse_group_csv(&groups_csv);
+    let current_fragment = current_group_fragment(&groups_csv);
     let current_fragment_lower = current_fragment.to_ascii_lowercase();
     let has_current_fragment = !current_fragment.is_empty();
     let suggestion_state_id = response.id.with("group_select_suggestions");
@@ -1317,7 +1347,7 @@ fn show_group_select_editor(
             .show(ui, |ui| {
                 for suggestion in suggestions {
                     if ui.selectable_label(false, &suggestion).clicked() {
-                        replace_group_fragment(groups_csv, &suggestion);
+                        replace_group_fragment(&mut groups_csv, &suggestion);
                         let mut state = output.state.clone();
                         let cursor = egui::text::CCursor::new(groups_csv.chars().count());
                         state
@@ -1333,6 +1363,7 @@ fn show_group_select_editor(
     });
 
     if picked_suggestion {
+        *groups = workflow::GroupFilter::from_csv(&groups_csv);
         ui.ctx()
             .data_mut(|d| d.insert_temp(suggestion_state_id, false));
         return;
@@ -1342,6 +1373,9 @@ fn show_group_select_editor(
     let keep_open = response.has_focus() || (!clicked_elsewhere && has_current_fragment);
     ui.ctx()
         .data_mut(|d| d.insert_temp(suggestion_state_id, keep_open));
+    if output.response.changed() {
+        *groups = workflow::GroupFilter::from_csv(&groups_csv);
+    }
 }
 
 fn parse_group_csv(groups_csv: &str) -> BTreeSet<&str> {
