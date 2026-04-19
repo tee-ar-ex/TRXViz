@@ -8,6 +8,8 @@ mod fingerprint;
 mod graph;
 mod jobs;
 mod layout;
+mod op;
+mod ops;
 mod project_io;
 mod simple_workflow;
 mod types;
@@ -37,3 +39,7 @@ pub use project_io::{
 };
 pub use simple_workflow::*;
 pub use types::*;
+
+pub(crate) use op::{EvalCtx, WorkflowOp};
+pub(crate) use evaluate::{evaluate_derived_streamline_plan, expect_streamline_input};
+pub(crate) use types::{EvaluatedValue, WorkflowValue};

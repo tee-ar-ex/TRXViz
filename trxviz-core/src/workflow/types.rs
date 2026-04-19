@@ -1183,13 +1183,13 @@ pub struct SaveStreamlinePlan {
 }
 
 #[derive(Clone)]
-pub(super) struct ParcelSelection {
+pub(crate) struct ParcelSelection {
     pub source_id: FileId,
     pub labels: BTreeSet<ParcelId>,
 }
 
 #[derive(Clone)]
-pub(super) enum WorkflowValue {
+pub(crate) enum WorkflowValue {
     Streamline(StreamlineFlow),
     Volume(FileId),
     Cifti(FileId),
@@ -1208,7 +1208,7 @@ pub(super) enum WorkflowValue {
 }
 
 #[derive(Clone)]
-pub(super) struct EvaluatedValue {
+pub(crate) struct EvaluatedValue {
     pub value: WorkflowValue,
     pub stale: bool,
 }
@@ -1354,8 +1354,24 @@ impl Default for WorkflowProject {
 
 impl WorkflowNodeKind {
     pub fn title(&self) -> &'static str {
+        if let Some(title) = super::ops::title(self) {
+            return title;
+        }
         match self {
-            Self::StreamlineSource { .. } => "Streamline Source",
+            Self::StreamlineSource { .. }
+            | Self::LimitStreamlines { .. }
+            | Self::GroupSelect { .. }
+            | Self::RandomSubset { .. }
+            | Self::SphereQuery { .. }
+            | Self::RemoveDuplicates { .. }
+            | Self::Merge
+            | Self::ColorByDirection
+            | Self::ColorByGroup
+            | Self::ColorByDPV { .. }
+            | Self::ColorByDPS { .. }
+            | Self::UniformColor { .. }
+            | Self::StreamlineDisplay { .. }
+            | Self::SaveStreamlines { .. } => unreachable!("handled by workflow op registry"),
             Self::VolumeSource { .. } => "Volume Source",
             Self::CiftiSource { .. } => "CIFTI Source",
             Self::SurfaceSource { .. } => "Surface Source",
@@ -1365,13 +1381,7 @@ impl WorkflowNodeKind {
                 CiftiStructure::Subcortical => "CIFTI Subcortex",
             },
             Self::ParcellationSource { .. } => "Parcellation Source",
-            Self::LimitStreamlines { .. } => "Limit Streamlines",
-            Self::GroupSelect { .. } => "Group Select",
-            Self::RandomSubset { .. } => "Random Subset",
-            Self::SphereQuery { .. } => "Sphere Query",
             Self::SurfaceDepthQuery { .. } => "Surface Depth Query",
-            Self::RemoveDuplicates { .. } => "Remove Duplicates",
-            Self::Merge => "Merge",
             Self::AddGroupsFromParcellation => "Add Groups From Parcellation",
             Self::ParcelSelect { .. } => "Parcel Select",
             Self::ParcelROI => "Parcel ROI",
@@ -1380,24 +1390,17 @@ impl WorkflowNodeKind {
             Self::ParcelLimiting => "Parcel Limiting",
             Self::ParcelTerminative => "Parcel Terminative",
             Self::ParcelSurfaceBuild => "Parcel Surface Build",
-            Self::ColorByDirection => "Color By Direction",
-            Self::ColorByGroup => "Color By Group",
-            Self::ColorByDPV { .. } => "Color By DPV",
-            Self::ColorByDPS { .. } => "Color By DPS",
-            Self::UniformColor { .. } => "Uniform Color",
             Self::SurfaceProjectionDensity { .. } => "Map Streamlines to Surface",
             Self::SurfaceProjectionMeanDps { .. } => "Map Streamlines to Surface (Mean DPS)",
             Self::SurfaceOverlayStack { .. } => "Surface Overlay Stack",
             Self::BundleSurfaceBuild { .. } => "Bundle Surface Build",
             Self::BoundaryFieldBuild { .. } => "Boundary Field Build",
-            Self::StreamlineDisplay { .. } => "Streamline Display",
             Self::VolumeDisplay { .. } => "Volume Display",
             Self::VolumeScalarsDisplay { .. } => "Volume Scalars Display",
             Self::SurfaceDisplay { .. } => "Surface Display",
             Self::BundleSurfaceDisplay { .. } => "Bundle Surface Display",
             Self::BoundaryGlyphDisplay { .. } => "Boundary Glyph Display",
             Self::ParcellationDisplay { .. } => "Parcellation Display",
-            Self::SaveStreamlines { .. } => "Save Streamlines",
             Self::OdxSource { .. } => "ODX Source",
             Self::OdxFixelScalarSelect { .. } => "ODX Fixel Scalar Select",
             Self::OdxVolumeSelect { .. } => "ODX Volume Select",
@@ -1409,24 +1412,28 @@ impl WorkflowNodeKind {
     }
 
     pub fn inputs(&self) -> Vec<PortKind> {
+        if let Some(ports) = super::ops::input_ports(self) {
+            return ports.to_vec();
+        }
         match self {
             Self::StreamlineSource { .. }
-            | Self::VolumeSource { .. }
-            | Self::CiftiSource { .. }
-            | Self::SurfaceSource { .. }
-            | Self::ParcellationSource { .. } => Vec::new(),
-            Self::LimitStreamlines { .. }
+            | Self::LimitStreamlines { .. }
             | Self::GroupSelect { .. }
             | Self::RandomSubset { .. }
             | Self::SphereQuery { .. }
             | Self::RemoveDuplicates { .. }
+            | Self::Merge
             | Self::ColorByDirection
             | Self::ColorByGroup
             | Self::ColorByDPV { .. }
             | Self::ColorByDPS { .. }
             | Self::UniformColor { .. }
             | Self::StreamlineDisplay { .. }
-            | Self::SaveStreamlines { .. } => vec![PortKind::Streamline],
+            | Self::SaveStreamlines { .. } => unreachable!("handled by workflow op registry"),
+            Self::VolumeSource { .. }
+            | Self::CiftiSource { .. }
+            | Self::SurfaceSource { .. }
+            | Self::ParcellationSource { .. } => Vec::new(),
             Self::BundleSurfaceBuild { .. } => vec![PortKind::Streamline],
             Self::BoundaryFieldBuild { .. } => vec![PortKind::Streamline],
             Self::BundleSurfaceDisplay { .. } => {
@@ -1438,9 +1445,6 @@ impl WorkflowNodeKind {
                 CiftiStructure::Subcortical => vec![PortKind::Cifti],
                 _ => vec![PortKind::Cifti],
             },
-            Self::Merge => {
-                vec![PortKind::Streamline, PortKind::Streamline]
-            }
             Self::AddGroupsFromParcellation => vec![PortKind::Streamline, PortKind::Parcellation],
             Self::ParcelSelect { .. } | Self::ParcellationDisplay { .. } => {
                 vec![PortKind::Parcellation]
@@ -1478,26 +1482,31 @@ impl WorkflowNodeKind {
     }
 
     pub fn outputs(&self) -> Vec<PortKind> {
+        if let Some(ports) = super::ops::output_ports(self) {
+            return ports.to_vec();
+        }
         match self {
             Self::StreamlineSource { .. }
             | Self::LimitStreamlines { .. }
             | Self::GroupSelect { .. }
             | Self::RandomSubset { .. }
             | Self::SphereQuery { .. }
-            | Self::SurfaceDepthQuery { .. }
             | Self::RemoveDuplicates { .. }
             | Self::Merge
+            | Self::ColorByDirection
+            | Self::ColorByGroup
+            | Self::ColorByDPV { .. }
+            | Self::ColorByDPS { .. }
+            | Self::UniformColor { .. }
+            | Self::StreamlineDisplay { .. }
+            | Self::SaveStreamlines { .. } => unreachable!("handled by workflow op registry"),
+            Self::SurfaceDepthQuery { .. }
             | Self::AddGroupsFromParcellation
             | Self::ParcelROI
             | Self::ParcelROA
             | Self::ParcelEnd { .. }
             | Self::ParcelLimiting
-            | Self::ParcelTerminative
-            | Self::ColorByDirection
-            | Self::ColorByGroup
-            | Self::ColorByDPV { .. }
-            | Self::ColorByDPS { .. }
-            | Self::UniformColor { .. } => vec![PortKind::Streamline],
+            | Self::ParcelTerminative => vec![PortKind::Streamline],
             Self::VolumeSource { .. } => vec![PortKind::Volume],
             Self::CiftiSource { .. } => vec![PortKind::Cifti],
             Self::SurfaceSource { .. } => vec![PortKind::Surface],
@@ -1523,14 +1532,12 @@ impl WorkflowNodeKind {
             Self::OdxVolumeSelect { .. } => vec![PortKind::Volume, PortKind::VolumeScalars],
             Self::ColorByFixelScalars { .. } => vec![PortKind::Fixels],
             Self::ParcelSurfaceBuild
-            | Self::StreamlineDisplay { .. }
             | Self::VolumeDisplay { .. }
             | Self::VolumeScalarsDisplay { .. }
             | Self::SurfaceDisplay { .. }
             | Self::BoundaryGlyphDisplay { .. }
             | Self::ParcellationDisplay { .. }
             | Self::BundleSurfaceDisplay { .. }
-            | Self::SaveStreamlines { .. }
             | Self::Fixel3DDisplay { .. }
             | Self::Fixel2DDisplay { .. }
             | Self::OdfGlyphRenderer { .. } => Vec::new(),

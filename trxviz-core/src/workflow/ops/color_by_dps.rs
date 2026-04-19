@@ -1,0 +1,42 @@
+use crate::data::trx_data::ColorMode;
+
+use super::super::{
+    DpsFieldName, EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_streamline_input,
+};
+
+#[derive(Debug, Clone)]
+pub struct ColorByDpsOp {
+    pub field: DpsFieldName,
+}
+
+impl WorkflowOp for ColorByDpsOp {
+    fn tag(&self) -> &'static str {
+        "color_by_dps"
+    }
+
+    fn title(&self) -> &'static str {
+        "Color By DPS"
+    }
+
+    fn input_ports(&self) -> &'static [PortKind] {
+        &[PortKind::Streamline]
+    }
+
+    fn output_ports(&self) -> &'static [PortKind] {
+        &[PortKind::Streamline]
+    }
+
+    fn evaluate(
+        &self,
+        ctx: &mut EvalCtx<'_, '_>,
+    ) -> crate::error::WorkflowResult<Vec<super::super::EvaluatedValue>> {
+        let flow = expect_streamline_input(ctx.inputs, self.title())?;
+        Ok(vec![
+            WorkflowValue::Streamline(super::super::StreamlineFlow {
+                color_mode: ColorMode::Dps(self.field.as_str().to_string()),
+                ..flow
+            })
+            .into(),
+        ])
+    }
+}

@@ -1,6 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use glam::Vec3;
@@ -17,7 +15,7 @@ use crate::data::loaded_files::{
 };
 use crate::data::odx_data::{FixelField, FixelScalars, OdfField, OdxCatalog};
 use crate::data::parcellation_data::ParcellationVolume;
-use crate::data::trx_data::{ColorMode, RenderStyle, TrxGpuData};
+use crate::data::trx_data::TrxGpuData;
 use crate::renderer::mesh_renderer::SurfaceColormap;
 use crate::scene::LoadedGiftiSurface;
 use crate::units::{Millimeters, ParcelId, StreamlineIndex};
@@ -68,6 +66,7 @@ pub fn evaluate_scene_plan_with_mode(
     mode: WorkflowEvalMode,
 ) -> WorkflowRuntime {
     let mut runtime = WorkflowRuntime::default();
+    debug_assert!(super::ops::validate_registry().is_ok());
     let compiled = compile_graph(document);
     let Ok((order, connections)) = compiled else {
         runtime.graph_error = compiled.err().map(|e| e.to_string());
@@ -251,35 +250,43 @@ fn evaluate_node(
     _mode: WorkflowEvalMode,
     node_state: &mut NodeEvalState,
 ) -> WorkflowResult<Vec<EvaluatedValue>> {
+    let mut op_ctx = EvalCtx {
+        node,
+        inputs,
+        streamline_assets,
+        volume_assets,
+        cifti_assets,
+        surface_assets,
+        parcellation_assets,
+        odx_assets,
+        display_ids,
+        next_draw_id,
+        scene_plan,
+        projection_by_surface,
+        save_targets,
+        execution_cache,
+        node_state,
+    };
+    if let Some(result) = super::ops::try_evaluate(&node.kind, &mut op_ctx) {
+        return result;
+    }
+
     match &node.kind {
-        WorkflowNodeKind::StreamlineSource { source_id } => {
-            let source = streamline_assets
-                .get(source_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing streamline source {source_id}")))?;
-            let dataset = Arc::new(StreamlineDataset {
-                name: source.name.clone(),
-                gpu_data: source.data.clone(),
-                backing: source.backing.clone().ok_or_else(|| {
-                    format!(
-                        "Streamline source {} is missing export backing",
-                        source.name
-                    )
-                })?,
-            });
-            let selected = (0..source.data.nb_streamlines as u32)
-                .map(StreamlineIndex)
-                .collect();
-            Ok(vec![
-                WorkflowValue::Streamline(StreamlineFlow {
-                    dataset,
-                    selected_streamlines: Arc::new(selected),
-                    color_mode: ColorMode::DirectionRgb,
-                    scalar_auto_range: true,
-                    scalar_range_min: 0.0,
-                    scalar_range_max: 1.0,
-                })
-                .into(),
-            ])
+        WorkflowNodeKind::StreamlineSource { .. }
+        | WorkflowNodeKind::LimitStreamlines { .. }
+        | WorkflowNodeKind::GroupSelect { .. }
+        | WorkflowNodeKind::RandomSubset { .. }
+        | WorkflowNodeKind::SphereQuery { .. }
+        | WorkflowNodeKind::RemoveDuplicates { .. }
+        | WorkflowNodeKind::Merge
+        | WorkflowNodeKind::ColorByDirection
+        | WorkflowNodeKind::ColorByGroup
+        | WorkflowNodeKind::ColorByDPV { .. }
+        | WorkflowNodeKind::ColorByDPS { .. }
+        | WorkflowNodeKind::UniformColor { .. }
+        | WorkflowNodeKind::StreamlineDisplay { .. }
+        | WorkflowNodeKind::SaveStreamlines { .. } => {
+            unreachable!("handled by workflow op dispatch")
         }
         WorkflowNodeKind::VolumeSource { source_id } => {
             volume_assets
@@ -349,114 +356,6 @@ fn evaluate_node(
                 .ok_or_else(|| WorkflowError::Evaluation(format!("Missing parcellation source {source_id}")))?;
             Ok(vec![WorkflowValue::Parcellation(*source_id).into()])
         }
-        WorkflowNodeKind::LimitStreamlines {
-            limit,
-            randomize,
-            seed,
-        } => {
-            let flow = expect_streamline_input(inputs, "Limit Streamlines")?;
-            let mut selected = flow.selected_streamlines.as_ref().clone();
-            if *randomize {
-                selected.sort_by_key(|index: &StreamlineIndex| {
-                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                    seed.hash(&mut hasher);
-                    index.hash(&mut hasher);
-                    hasher.finish()
-                });
-            }
-            selected.truncate(*limit);
-            Ok(vec![
-                WorkflowValue::Streamline(StreamlineFlow {
-                    selected_streamlines: Arc::new(selected),
-                    ..flow
-                })
-                .into(),
-            ])
-        }
-        WorkflowNodeKind::GroupSelect { groups } => {
-            let flow = expect_streamline_input(inputs, "Group Select")?;
-            match groups {
-                GroupFilter::All => Ok(vec![WorkflowValue::Streamline(flow).into()]),
-                GroupFilter::None => Ok(vec![
-                    WorkflowValue::Streamline(StreamlineFlow {
-                        selected_streamlines: Arc::new(Vec::new()),
-                        ..flow
-                    })
-                    .into(),
-                ]),
-                GroupFilter::Selected(labels) => {
-                    if flow.dataset.gpu_data.groups.is_empty() {
-                        return Err(WorkflowError::Evaluation(
-                            "Group Select needs streamline input with group memberships, but the input has no groups."
-                                .to_string(),
-                        ));
-                    }
-                    let keep: HashSet<StreamlineIndex> = flow
-                        .dataset
-                        .gpu_data
-                        .groups
-                        .iter()
-                        .filter(|(name, _)| labels.contains(name))
-                        .flat_map(
-                            |(_name, members): &(String, Vec<StreamlineIndex>)| {
-                                members.iter().copied()
-                            },
-                        )
-                        .collect();
-                    let selected = flow
-                        .selected_streamlines
-                        .iter()
-                        .copied()
-                        .filter(|index| keep.contains(index))
-                        .collect();
-                    Ok(vec![
-                        WorkflowValue::Streamline(StreamlineFlow {
-                            selected_streamlines: Arc::new(selected),
-                            ..flow
-                        })
-                        .into(),
-                    ])
-                }
-            }
-        }
-        WorkflowNodeKind::RandomSubset { limit, seed } => {
-            let flow = expect_streamline_input(inputs, "Random Subset")?;
-            let mut selected = flow.selected_streamlines.as_ref().clone();
-            selected.sort_by_key(|index: &StreamlineIndex| {
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                seed.hash(&mut hasher);
-                index.hash(&mut hasher);
-                hasher.finish()
-            });
-            selected.truncate(*limit);
-            Ok(vec![
-                WorkflowValue::Streamline(StreamlineFlow {
-                    selected_streamlines: Arc::new(selected),
-                    ..flow
-                })
-                .into(),
-            ])
-        }
-        WorkflowNodeKind::SphereQuery { center, radius_mm } => {
-            let flow = expect_streamline_input(inputs, "Sphere Query")?;
-            let hits = flow
-                .dataset
-                .gpu_data
-                .query_sphere(Vec3::new(center[0], center[1], center[2]), *radius_mm);
-            let selected = flow
-                .selected_streamlines
-                .iter()
-                .copied()
-                .filter(|index| hits.contains(index))
-                .collect();
-            Ok(vec![
-                WorkflowValue::Streamline(StreamlineFlow {
-                    selected_streamlines: Arc::new(selected),
-                    ..flow
-                })
-                .into(),
-            ])
-        }
         WorkflowNodeKind::SurfaceDepthQuery { depth_mm } => {
             let flow = expect_streamline_input(inputs, "Surface Depth Query")?;
             let surface_id = expect_surface_input(inputs, "Surface Depth Query")?;
@@ -492,54 +391,6 @@ fn evaluate_node(
                 .unwrap_or("Run required")
                 .to_string();
             Ok(Vec::new())
-        }
-        WorkflowNodeKind::RemoveDuplicates { params } => {
-            let flow = expect_streamline_input(inputs, "Remove Duplicates")?;
-            let plan = ReactiveStreamlinePlan {
-                node_uuid: node.uuid,
-                label: node.label.clone(),
-                op: ReactiveStreamlineOp::RemoveDuplicates {
-                    params: params.clone(),
-                },
-                left: flow.clone(),
-                right: flow,
-            };
-            scene_plan.reactive_streamline_plans.push(plan.clone());
-            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
-        }
-        WorkflowNodeKind::Merge => {
-            let left = expect_streamline_input(inputs, node.kind.title())?;
-            let right = match inputs.get(1).cloned().flatten() {
-                Some(value) => match value.value {
-                    WorkflowValue::Streamline(flow) => flow,
-                    _ => {
-                        return Err(WorkflowError::Evaluation(format!(
-                            "{} needs a right streamline input",
-                            node.kind.title()
-                        )));
-                    }
-                },
-                None => {
-                    return Err(WorkflowError::Evaluation(format!(
-                        "{} needs a right streamline input",
-                        node.kind.title()
-                    )));
-                }
-            };
-            let plan = ReactiveStreamlinePlan {
-                node_uuid: node.uuid,
-                label: node.label.clone(),
-                op: ReactiveStreamlineOp::Merge,
-                left,
-                right,
-            };
-            scene_plan.reactive_streamline_plans.push(plan);
-            let plan = scene_plan
-                .reactive_streamline_plans
-                .last()
-                .cloned()
-                .expect("just pushed plan");
-            evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
         }
         WorkflowNodeKind::ParcelSelect { labels } => {
             let source_id = expect_parcellation_input(inputs, "Parcel Select")?;
@@ -663,56 +514,6 @@ fn evaluate_node(
             scene_plan.reactive_streamline_plans.push(plan.clone());
             evaluate_derived_streamline_plan(node, plan, inputs, execution_cache, node_state)
         }
-        WorkflowNodeKind::ColorByDirection => {
-            let flow = expect_streamline_input(inputs, "Color By Direction")?;
-            Ok(vec![
-                WorkflowValue::Streamline(StreamlineFlow {
-                    color_mode: ColorMode::DirectionRgb,
-                    ..flow
-                })
-                .into(),
-            ])
-        }
-        WorkflowNodeKind::ColorByGroup => {
-            let flow = expect_streamline_input(inputs, "Color By Group")?;
-            Ok(vec![
-                WorkflowValue::Streamline(StreamlineFlow {
-                    color_mode: ColorMode::Group,
-                    ..flow
-                })
-                .into(),
-            ])
-        }
-        WorkflowNodeKind::ColorByDPV { field } => {
-            let flow = expect_streamline_input(inputs, "Color By DPV")?;
-            Ok(vec![
-                WorkflowValue::Streamline(StreamlineFlow {
-                    color_mode: ColorMode::Dpv(field.as_str().to_string()),
-                    ..flow
-                })
-                .into(),
-            ])
-        }
-        WorkflowNodeKind::ColorByDPS { field } => {
-            let flow = expect_streamline_input(inputs, "Color By DPS")?;
-            Ok(vec![
-                WorkflowValue::Streamline(StreamlineFlow {
-                    color_mode: ColorMode::Dps(field.as_str().to_string()),
-                    ..flow
-                })
-                .into(),
-            ])
-        }
-        WorkflowNodeKind::UniformColor { color } => {
-            let flow = expect_streamline_input(inputs, "Uniform Color")?;
-            Ok(vec![
-                WorkflowValue::Streamline(StreamlineFlow {
-                    color_mode: ColorMode::Uniform(*color),
-                    ..flow
-                })
-                .into(),
-            ])
-        }
         WorkflowNodeKind::SurfaceProjectionDensity { depth_mm } => {
             let flow = expect_streamline_input(inputs, "Map Streamlines to Surface")?;
             let surface_id = expect_surface_input(inputs, "Map Streamlines to Surface")?;
@@ -798,53 +599,6 @@ fn evaluate_node(
                 .map(|status| status.label())
                 .unwrap_or("Run required")
                 .to_string();
-            Ok(Vec::new())
-        }
-        WorkflowNodeKind::StreamlineDisplay {
-            enabled,
-            render_style,
-            tube_radius_mm,
-            tube_sides,
-            slab_half_width_mm,
-        } => {
-            let flow = expect_streamline_input(inputs, "Streamline Display")?;
-            let runtime = display_ids.entry(node.uuid).or_insert_with(|| {
-                let draw_id = *next_draw_id;
-                *next_draw_id += 1;
-                StreamlineDisplayRuntime {
-                    draw_id,
-                    ..Default::default()
-                }
-            });
-            let plan = StreamlineDrawPlan {
-                node_uuid: node.uuid,
-                draw_id: runtime.draw_id,
-                label: node.label.clone(),
-                visible: *enabled,
-                flow,
-                render_style: *render_style,
-                tube_radius_mm: *tube_radius_mm,
-                tube_sides: *tube_sides,
-                slab_half_width_mm: *slab_half_width_mm,
-            };
-            node_state.summary = if *enabled {
-                "Visible".to_string()
-            } else {
-                "Hidden".to_string()
-            };
-            if *render_style == RenderStyle::Tubes {
-                let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
-                let fingerprint = workflow_streamline_fingerprint(&plan);
-                let record = execution_cache.node_runs.entry(node.uuid).or_default();
-                prime_expensive_record(record, fingerprint);
-                sync_node_state_from_run_record(node_state, record);
-                if upstream_stale && matches!(record.status, WorkflowExecutionStatus::Ready) {
-                    node_state.execution = Some(WorkflowExecutionStatus::Stale);
-                }
-            } else {
-                node_state.execution = None;
-            }
-            scene_plan.streamline_draws.push(plan);
             Ok(Vec::new())
         }
         WorkflowNodeKind::BundleSurfaceBuild {
@@ -1032,21 +786,6 @@ fn evaluate_node(
                 value: WorkflowValue::BoundaryField(plan),
                 stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
             }])
-        }
-        WorkflowNodeKind::SaveStreamlines { output_path } => {
-            let flow = expect_streamline_input(inputs, "Save Streamlines")?;
-            if output_path.trim().is_empty() {
-                return Err(WorkflowError::Evaluation("Save Streamlines needs an output path".to_string()));
-            }
-            save_targets.insert(
-                node.uuid,
-                SaveStreamlinePlan {
-                    node_uuid: node.uuid,
-                    output_path: PathBuf::from(output_path),
-                    flow,
-                },
-            );
-            Ok(Vec::new())
         }
         WorkflowNodeKind::BundleSurfaceDisplay {
             color_mode,
@@ -1426,7 +1165,7 @@ fn volume_scalars_from_nifti_volume(
     }
 }
 
-fn expect_streamline_input(
+pub(crate) fn expect_streamline_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
 ) -> WorkflowResult<StreamlineFlow> {
@@ -1570,7 +1309,7 @@ fn resolve_selected_labels(
     resolved
 }
 
-fn evaluate_derived_streamline_plan(
+pub(crate) fn evaluate_derived_streamline_plan(
     node: &WorkflowNode,
     plan: ReactiveStreamlinePlan,
     inputs: &[Option<EvaluatedValue>],
