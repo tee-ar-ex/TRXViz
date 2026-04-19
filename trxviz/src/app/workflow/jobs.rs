@@ -21,6 +21,8 @@ use trxviz_core::renderer::streamline_renderer::{AllStreamlineResources, Streaml
 use trxviz_core::scene::HeadlessWorkflowState;
 use trxviz_core::scene::direct_streamline_import_warnings;
 
+use crate::app::callbacks::OdxFixelResources;
+
 use super::*;
 
 pub(crate) fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
@@ -70,6 +72,44 @@ fn hash_volume_scalars(
         }
         None => false.hash(hasher),
     }
+}
+
+fn active_fixel_draw_3d(
+    app: &crate::app::TrxVizApp,
+) -> Option<&trxviz_core::workflow::FixelDrawPlan> {
+    app.workflow
+        .runtime
+        .scene_plan
+        .fixel_3d_draws
+        .iter()
+        .find(|plan| plan.visible)
+        .or_else(|| app.workflow.runtime.scene_plan.fixel_3d_draws.first())
+}
+
+fn active_fixel_draw_2d(
+    app: &crate::app::TrxVizApp,
+) -> Option<&trxviz_core::workflow::FixelDrawPlan> {
+    app.workflow
+        .runtime
+        .scene_plan
+        .fixel_2d_draws
+        .iter()
+        .find(|plan| plan.visible)
+        .or_else(|| app.workflow.runtime.scene_plan.fixel_2d_draws.first())
+}
+
+fn fixel_upload_fingerprint(plan: &trxviz_core::workflow::FixelDrawPlan) -> u64 {
+    use trxviz_core::data::odx_data::FixelScalarValues;
+
+    let mut hasher = DefaultHasher::new();
+    plan.field.source_id.hash(&mut hasher);
+    plan.field.colormap_code.hash(&mut hasher);
+    plan.field.scalars.name.hash(&mut hasher);
+    match &plan.field.scalars.values {
+        FixelScalarValues::Rgb(_) => 0u8.hash(&mut hasher),
+        FixelScalarValues::Scalar(_) => 1u8.hash(&mut hasher),
+    }
+    hasher.finish()
 }
 
 fn active_odx_glyph_plan(
@@ -976,6 +1016,15 @@ impl crate::app::TrxVizApp {
             &rs.queue,
         );
         self.update_active_odx_slice_state(&mut renderer.callback_resources, &rs.device, &rs.queue);
+        if renderer
+            .callback_resources
+            .get::<OdxFixelResources>()
+            .is_none()
+        {
+            renderer
+                .callback_resources
+                .insert(OdxFixelResources::new(&rs.device, rs.target_format));
+        }
 
         if let Some(mesh_resources) = renderer.callback_resources.get_mut::<MeshResources>() {
             for draw in &self.workflow.runtime.scene_plan.bundle_draws {
@@ -1047,69 +1096,70 @@ impl crate::app::TrxVizApp {
                 }
             }
         }
-        // Re-upload fixel instances with per-fixel scalars when ColorByFixelScalars
-        // is active (colormap_code != 0 and scalar variant). A stable fingerprint
-        // over (source_id, dpf name, colormap_code) avoids churn.
+        // Keep 3D and 2D fixel resources separate so each view can map a
+        // different scalar field without fighting over a shared instance buffer.
         {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
             use trxviz_core::data::odx_data::FixelScalarValues;
-            use trxviz_core::renderer::fixel_renderer::FixelResources;
 
-            let active = self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_3d_draws
-                .iter()
-                .find(|p| p.visible)
-                .or_else(|| {
-                    self.workflow
-                        .runtime
-                        .scene_plan
-                        .fixel_2d_draws
-                        .iter()
-                        .find(|p| p.visible)
-                })
-                .or_else(|| self.workflow.runtime.scene_plan.fixel_3d_draws.first())
-                .or_else(|| self.workflow.runtime.scene_plan.fixel_2d_draws.first());
-            if let Some(plan) = active {
-                let mut hasher = DefaultHasher::new();
-                plan.field.source_id.hash(&mut hasher);
-                plan.field.colormap_code.hash(&mut hasher);
-                plan.field.scalars.name.hash(&mut hasher);
-                match &plan.field.scalars.values {
-                    FixelScalarValues::Rgb(_) => 0u8.hash(&mut hasher),
-                    FixelScalarValues::Scalar(_) => 1u8.hash(&mut hasher),
-                }
-                let fp = hasher.finish();
-                if fp != self.workflow.uploaded_fixel_fingerprint {
-                    let scalars_vec: Option<Vec<f32>> = match &plan.field.scalars.values {
-                        FixelScalarValues::Scalar(v) if plan.field.colormap_code != 0 => {
-                            Some((**v).clone())
-                        }
-                        _ => None,
-                    };
-                    let instances = plan
-                        .field
-                        .scene
-                        .all_fixels_with_scalars(scalars_vec.as_deref());
-                    if let Some(fr) = renderer.callback_resources.get_mut::<FixelResources>() {
-                        fr.set_fixels(&rs.device, &instances);
-                        self.workflow.uploaded_fixel_fingerprint = fp;
+            if let Some(fr) = renderer.callback_resources.get_mut::<OdxFixelResources>() {
+                if let Some(plan) = active_fixel_draw_3d(self) {
+                    let fp = fixel_upload_fingerprint(plan);
+                    if fp != self.workflow.uploaded_fixel_3d_fingerprint {
+                        let scalars_vec: Option<Vec<f32>> = match &plan.field.scalars.values {
+                            FixelScalarValues::Scalar(v) if plan.field.colormap_code != 0 => {
+                                Some((**v).clone())
+                            }
+                            _ => None,
+                        };
+                        let instances = plan
+                            .field
+                            .scene
+                            .all_fixels_with_scalars(scalars_vec.as_deref());
+                        fr.resources_3d.set_fixels(&rs.device, &instances);
+                        self.workflow.uploaded_fixel_3d_fingerprint = fp;
                     }
-                }
-            } else if let Some(odx) = self.scene.odx_scene.as_ref() {
-                let mut hasher = DefaultHasher::new();
-                (Arc::as_ptr(odx) as usize).hash(&mut hasher);
-                0x0df1_0001_u64.hash(&mut hasher);
-                let fp = hasher.finish();
-                if fp != self.workflow.uploaded_fixel_fingerprint {
-                    let instances = odx.all_fixels();
-                    if let Some(fr) = renderer.callback_resources.get_mut::<FixelResources>() {
-                        fr.set_fixels(&rs.device, &instances);
-                        self.workflow.uploaded_fixel_fingerprint = fp;
+                } else if let Some(odx) = self.scene.odx_scene.as_ref() {
+                    let mut hasher = DefaultHasher::new();
+                    (Arc::as_ptr(odx) as usize).hash(&mut hasher);
+                    0x0df1_0003_u64.hash(&mut hasher);
+                    let fp = hasher.finish();
+                    if fp != self.workflow.uploaded_fixel_3d_fingerprint {
+                        fr.resources_3d.set_fixels(&rs.device, &odx.all_fixels());
+                        self.workflow.uploaded_fixel_3d_fingerprint = fp;
                     }
+                } else if self.workflow.uploaded_fixel_3d_fingerprint != 0 {
+                    fr.resources_3d.clear();
+                    self.workflow.uploaded_fixel_3d_fingerprint = 0;
+                }
+
+                if let Some(plan) = active_fixel_draw_2d(self) {
+                    let fp = fixel_upload_fingerprint(plan);
+                    if fp != self.workflow.uploaded_fixel_2d_fingerprint {
+                        let scalars_vec: Option<Vec<f32>> = match &plan.field.scalars.values {
+                            FixelScalarValues::Scalar(v) if plan.field.colormap_code != 0 => {
+                                Some((**v).clone())
+                            }
+                            _ => None,
+                        };
+                        let instances = plan
+                            .field
+                            .scene
+                            .all_fixels_with_scalars(scalars_vec.as_deref());
+                        fr.resources_2d.set_fixels(&rs.device, &instances);
+                        self.workflow.uploaded_fixel_2d_fingerprint = fp;
+                    }
+                } else if let Some(odx) = self.scene.odx_scene.as_ref() {
+                    let mut hasher = DefaultHasher::new();
+                    (Arc::as_ptr(odx) as usize).hash(&mut hasher);
+                    0x0df1_0002_u64.hash(&mut hasher);
+                    let fp = hasher.finish();
+                    if fp != self.workflow.uploaded_fixel_2d_fingerprint {
+                        fr.resources_2d.set_fixels(&rs.device, &odx.all_fixels());
+                        self.workflow.uploaded_fixel_2d_fingerprint = fp;
+                    }
+                } else if self.workflow.uploaded_fixel_2d_fingerprint != 0 {
+                    fr.resources_2d.clear();
+                    self.workflow.uploaded_fixel_2d_fingerprint = 0;
                 }
             }
         }
@@ -1212,6 +1262,11 @@ impl crate::app::TrxVizApp {
             if let Some(glyph_resources) = renderer.callback_resources.get_mut::<GlyphResources>() {
                 glyph_resources.clear();
             }
+            if let Some(fixel_resources) =
+                renderer.callback_resources.get_mut::<OdxFixelResources>()
+            {
+                fixel_resources.clear();
+            }
         }
 
         self.scene.trx_files.clear();
@@ -1243,7 +1298,8 @@ impl crate::app::TrxVizApp {
         self.workflow.last_resource_sync_revision = 0;
         self.workflow.uploaded_dpv_by_source.clear();
         self.workflow.uploaded_odx_glyph_resource_key = None;
-        self.workflow.uploaded_fixel_fingerprint = 0;
+        self.workflow.uploaded_fixel_3d_fingerprint = 0;
+        self.workflow.uploaded_fixel_2d_fingerprint = 0;
         self.workflow.editor_interaction_active = false;
         self.workflow.last_semantic_edit_at = 0.0;
     }

@@ -41,7 +41,7 @@ use crate::workflow::{
     WorkflowView2DMode, add_default_nodes_for_asset, ensure_node_uuids, evaluate_scene_plan,
     load_workflow_project_from_path, mark_expensive_success, resolve_document_asset_paths,
     run_workflow_job, save_streamline_plan, set_default_odx_fixel_3d_visibility,
-    workflow_boundary_plan_fingerprint,
+    set_default_odx_fixel_dpf, set_default_odx_volume_dpv, workflow_boundary_plan_fingerprint,
     workflow_bundle_display_fingerprint, workflow_bundle_plan_fingerprint,
     workflow_reactive_streamline_fingerprint, workflow_streamline_fingerprint,
     workflow_surface_projection_fingerprint, workflow_surface_query_fingerprint,
@@ -144,9 +144,15 @@ struct HeadlessRenderData {
     odx_visible: bool,
     odx_fixel_3d_visible: bool,
     odx_fixel_2d_visible: bool,
-    fixel_line_width: f32,
+    fixel_3d_line_width: f32,
+    fixel_3d_opacity: f32,
+    fixel_3d_colormap_code: u32,
+    fixel_3d_scalar_range: [f32; 2],
+    fixel_2d_line_width: f32,
     fixel_2d_slab_half_width_mm: f32,
-    fixel_opacity: f32,
+    fixel_2d_opacity: f32,
+    fixel_2d_colormap_code: u32,
+    fixel_2d_scalar_range: [f32; 2],
     odf_glyph_opacity: f32,
     odf_glyph_gloss: f32,
 }
@@ -183,8 +189,33 @@ struct GpuSceneResources {
     slices: AllSliceResources,
     meshes: MeshResources,
     glyphs: GlyphResources,
-    fixels: FixelResources,
+    fixels_3d: FixelResources,
+    fixels_2d: FixelResources,
     bounds: SceneBounds,
+}
+
+fn active_fixel_draw_3d(
+    workflow: &HeadlessWorkflowState,
+) -> Option<&crate::workflow::FixelDrawPlan> {
+    workflow
+        .runtime
+        .scene_plan
+        .fixel_3d_draws
+        .iter()
+        .find(|plan| plan.visible)
+        .or_else(|| workflow.runtime.scene_plan.fixel_3d_draws.first())
+}
+
+fn active_fixel_draw_2d(
+    workflow: &HeadlessWorkflowState,
+) -> Option<&crate::workflow::FixelDrawPlan> {
+    workflow
+        .runtime
+        .scene_plan
+        .fixel_2d_draws
+        .iter()
+        .find(|plan| plan.visible)
+        .or_else(|| workflow.runtime.scene_plan.fixel_2d_draws.first())
 }
 
 #[derive(Clone, Copy)]
@@ -588,6 +619,13 @@ fn load_asset_args_state(
             scene: Arc::clone(&odx_arc),
             visible: true,
         });
+        let dpv_names: Vec<String> = odx_arc.dpv_names().iter().map(|s| s.to_string()).collect();
+        let dpf_names: Vec<String> = odx_arc
+            .dataset()
+            .dpf_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         scene.odx_scene = Some(odx_arc);
         register_asset_default_nodes(
             &mut workflow.document,
@@ -602,6 +640,8 @@ fn load_asset_args_state(
             id,
             show_fixel_3d_by_default,
         );
+        let _ = set_default_odx_fixel_dpf(&mut workflow.document, id, &dpf_names);
+        let _ = set_default_odx_volume_dpv(&mut workflow.document, id, &dpv_names);
     }
 
     if workflow.document.assets.is_empty() && scene.odx_scene.is_none() {
@@ -1305,7 +1345,8 @@ fn build_gpu_resources(
         }
     }
 
-    let mut fixels = FixelResources::new(device, TARGET_FORMAT);
+    let mut fixels_3d = FixelResources::new(device, TARGET_FORMAT);
+    let mut fixels_2d = FixelResources::new(device, TARGET_FORMAT);
 
     // ODX ODF glyphs and fixels — driven by the evaluated workflow plan.
     let axial_slice = scene.slice_indices[2] as u32;
@@ -1474,34 +1515,55 @@ fn build_gpu_resources(
         }
     }
 
-    let fixel_plan = workflow
-        .runtime
-        .scene_plan
-        .fixel_3d_draws
-        .iter()
-        .find(|p| p.visible)
-        .or_else(|| workflow.runtime.scene_plan.fixel_3d_draws.first())
-        .or_else(|| {
-            workflow
-                .runtime
-                .scene_plan
-                .fixel_2d_draws
-                .iter()
-                .find(|p| p.visible)
-        })
-        .or_else(|| workflow.runtime.scene_plan.fixel_2d_draws.first());
-    if let Some(plan) = fixel_plan {
-        let mut fixel_instances = plan.field.scene.fixels_for_slice(2, axial_slice);
-        for inst in &mut fixel_instances {
-            inst.length *= plan.length_scale;
+    {
+        use crate::data::odx_data::FixelScalarValues;
+
+        if let Some(plan) = active_fixel_draw_3d(workflow) {
+            let scalars_vec: Option<Vec<f32>> = match &plan.field.scalars.values {
+                FixelScalarValues::Scalar(values) if plan.colormap_code != 0 => {
+                    Some((**values).clone())
+                }
+                _ => None,
+            };
+            let mut fixel_instances = plan
+                .field
+                .scene
+                .all_fixels_with_scalars(scalars_vec.as_deref());
+            for inst in &mut fixel_instances {
+                inst.length *= plan.length_scale;
+            }
+            if !fixel_instances.is_empty() {
+                fixels_3d.set_fixels(device, &fixel_instances);
+            }
+        } else if let Some(odx) = &scene.odx_scene {
+            let fixel_instances = odx.all_fixels();
+            if !fixel_instances.is_empty() {
+                fixels_3d.set_fixels(device, &fixel_instances);
+            }
         }
-        if !fixel_instances.is_empty() {
-            fixels.set_fixels(device, &fixel_instances);
-        }
-    } else if let Some(odx) = &scene.odx_scene {
-        let fixel_instances = odx.fixels_for_slice(2, axial_slice);
-        if !fixel_instances.is_empty() {
-            fixels.set_fixels(device, &fixel_instances);
+
+        if let Some(plan) = active_fixel_draw_2d(workflow) {
+            let scalars_vec: Option<Vec<f32>> = match &plan.field.scalars.values {
+                FixelScalarValues::Scalar(values) if plan.colormap_code != 0 => {
+                    Some((**values).clone())
+                }
+                _ => None,
+            };
+            let mut fixel_instances = plan
+                .field
+                .scene
+                .all_fixels_with_scalars(scalars_vec.as_deref());
+            for inst in &mut fixel_instances {
+                inst.length *= plan.length_scale;
+            }
+            if !fixel_instances.is_empty() {
+                fixels_2d.set_fixels(device, &fixel_instances);
+            }
+        } else if let Some(odx) = &scene.odx_scene {
+            let fixel_instances = odx.all_fixels();
+            if !fixel_instances.is_empty() {
+                fixels_2d.set_fixels(device, &fixel_instances);
+            }
         }
     }
 
@@ -1516,7 +1578,8 @@ fn build_gpu_resources(
         slices,
         meshes,
         glyphs,
-        fixels,
+        fixels_3d,
+        fixels_2d,
         bounds: SceneBounds {
             min: bounds_min,
             max: bounds_max,
@@ -1632,6 +1695,8 @@ fn build_render_data(
         .or_else(|| workflow.runtime.scene_plan.odf_glyph_draws.first())
         .map(|p| p.visible)
         .unwrap_or(scene.odx_scene.is_some());
+    let fixel_3d_draw = active_fixel_draw_3d(workflow);
+    let fixel_2d_draw = active_fixel_draw_2d(workflow);
 
     HeadlessRenderData {
         any_visible_streamlines: streamline_draws.iter().any(|draw| draw.visible),
@@ -1654,72 +1719,26 @@ fn build_render_data(
             || !workflow.runtime.scene_plan.odf_glyph_draws.is_empty()
             || !workflow.runtime.scene_plan.fixel_3d_draws.is_empty()
             || !workflow.runtime.scene_plan.fixel_2d_draws.is_empty(),
-        odx_fixel_3d_visible: workflow
-            .runtime
-            .scene_plan
-            .fixel_3d_draws
-            .iter()
-            .find(|p| p.visible)
-            .or_else(|| workflow.runtime.scene_plan.fixel_3d_draws.first())
-            .map(|p| p.visible)
-            .unwrap_or(true)
+        odx_fixel_3d_visible: fixel_3d_draw.map(|p| p.visible).unwrap_or(true)
             && !(odx_has_glyph_field && odx_glyphs_active),
-        odx_fixel_2d_visible: workflow
-            .runtime
-            .scene_plan
-            .fixel_2d_draws
-            .iter()
-            .find(|p| p.visible)
-            .or_else(|| workflow.runtime.scene_plan.fixel_2d_draws.first())
+        odx_fixel_2d_visible: fixel_2d_draw
             .map(|p| p.visible)
             .unwrap_or(scene.odx_scene.is_some()),
-        fixel_line_width: workflow
-            .runtime
-            .scene_plan
-            .fixel_3d_draws
-            .iter()
-            .find(|p| p.visible)
-            .or_else(|| workflow.runtime.scene_plan.fixel_3d_draws.first())
-            .map(|p| p.line_width)
-            .or_else(|| {
-                workflow
-                    .runtime
-                    .scene_plan
-                    .fixel_2d_draws
-                    .iter()
-                    .find(|p| p.visible)
-                    .or_else(|| workflow.runtime.scene_plan.fixel_2d_draws.first())
-                    .map(|p| p.line_width)
-            })
-            .unwrap_or(0.006),
-        fixel_2d_slab_half_width_mm: workflow
-            .runtime
-            .scene_plan
-            .fixel_2d_draws
-            .iter()
-            .find(|p| p.visible)
-            .or_else(|| workflow.runtime.scene_plan.fixel_2d_draws.first())
+        fixel_3d_line_width: fixel_3d_draw.map(|p| p.line_width).unwrap_or(0.006),
+        fixel_3d_opacity: fixel_3d_draw.map(|p| p.opacity).unwrap_or(1.0),
+        fixel_3d_colormap_code: fixel_3d_draw.map(|p| p.colormap_code).unwrap_or(0),
+        fixel_3d_scalar_range: fixel_3d_draw
+            .map(|p| [p.scalar_range.0, p.scalar_range.1])
+            .unwrap_or([0.0, 1.0]),
+        fixel_2d_line_width: fixel_2d_draw.map(|p| p.line_width).unwrap_or(0.006),
+        fixel_2d_slab_half_width_mm: fixel_2d_draw
             .map(|p| (p.slab_thickness_mm * 0.5).max(0.0))
             .unwrap_or(1.0),
-        fixel_opacity: workflow
-            .runtime
-            .scene_plan
-            .fixel_3d_draws
-            .iter()
-            .find(|p| p.visible)
-            .or_else(|| workflow.runtime.scene_plan.fixel_3d_draws.first())
-            .map(|p| p.opacity)
-            .or_else(|| {
-                workflow
-                    .runtime
-                    .scene_plan
-                    .fixel_2d_draws
-                    .iter()
-                    .find(|p| p.visible)
-                    .or_else(|| workflow.runtime.scene_plan.fixel_2d_draws.first())
-                    .map(|p| p.opacity)
-            })
-            .unwrap_or(1.0),
+        fixel_2d_opacity: fixel_2d_draw.map(|p| p.opacity).unwrap_or(1.0),
+        fixel_2d_colormap_code: fixel_2d_draw.map(|p| p.colormap_code).unwrap_or(0),
+        fixel_2d_scalar_range: fixel_2d_draw
+            .map(|p| [p.scalar_range.0, p.scalar_range.1])
+            .unwrap_or([0.0, 1.0]),
         odf_glyph_opacity: workflow
             .runtime
             .scene_plan
@@ -2071,7 +2090,7 @@ fn render_scene3d_to_png(
         );
     }
     if render_data.odx_visible && render_data.odx_fixel_3d_visible {
-        resources.fixels.update_uniforms(
+        resources.fixels_3d.update_uniforms(
             queue,
             0,
             view_proj,
@@ -2080,12 +2099,21 @@ fn render_scene3d_to_png(
             glam::Vec3::ZERO, // slab_center
             0.0,              // slab_half_width = 0 → disabled
             1,
-            render_data.fixel_line_width,
-            render_data.fixel_opacity,
+            render_data.fixel_3d_line_width,
+            render_data.fixel_3d_opacity,
             lighting,
             render_3d,
             fog_near,
             fog_far,
+        );
+        resources.fixels_3d.update_colormap(
+            queue,
+            0,
+            render_data.fixel_3d_colormap_code,
+            (
+                render_data.fixel_3d_scalar_range[0],
+                render_data.fixel_3d_scalar_range[1],
+            ),
         );
     }
 
@@ -2218,7 +2246,7 @@ fn render_scene3d_to_png(
             resources.glyphs.paint(render_pass, 0, false);
         }
         if render_data.odx_visible && render_data.odx_fixel_3d_visible {
-            resources.fixels.paint(render_pass, 0, false);
+            resources.fixels_3d.paint(render_pass, 0, false);
         }
     }
 
@@ -2355,7 +2383,7 @@ fn render_scene2d_to_png(
             );
         }
         if render_data.odx_visible && render_data.odx_fixel_2d_visible {
-            resources.fixels.update_uniforms(
+            resources.fixels_2d.update_uniforms(
                 queue,
                 bind_group_index,
                 view_proj,
@@ -2364,12 +2392,21 @@ fn render_scene2d_to_png(
                 slab_center,
                 render_data.fixel_2d_slab_half_width_mm,
                 1,
-                render_data.fixel_line_width,
-                render_data.fixel_opacity,
+                render_data.fixel_2d_line_width,
+                render_data.fixel_2d_opacity,
                 lighting,
                 &neutral_render,
                 0.0,
                 1.0,
+            );
+            resources.fixels_2d.update_colormap(
+                queue,
+                bind_group_index,
+                render_data.fixel_2d_colormap_code,
+                (
+                    render_data.fixel_2d_scalar_range[0],
+                    render_data.fixel_2d_scalar_range[1],
+                ),
             );
         }
     }
@@ -2472,7 +2509,9 @@ fn render_scene2d_to_png(
                 resources.glyphs.paint(render_pass, bind_group_index, true);
             }
             if render_data.odx_visible && render_data.odx_fixel_2d_visible {
-                resources.fixels.paint(render_pass, bind_group_index, true);
+                resources
+                    .fixels_2d
+                    .paint(render_pass, bind_group_index, true);
             }
         }
     }
@@ -3924,4 +3963,113 @@ fn camera_node_transform(eye: Vec3, target: Vec3, up: Vec3) -> glam::Mat4 {
         (-forward).extend(0.0),
         eye.extend(1.0),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::data::odx_data::{FixelField, FixelScalars};
+    use odx_rs::OdxBuilder;
+
+    fn make_test_fixel_scene() -> Arc<OdxScene> {
+        let full = odx_rs::formats::dsistudio_odf8::full_vertices_ras().to_vec();
+        let faces = odx_rs::formats::dsistudio_odf8::faces().to_vec();
+        let mut builder = OdxBuilder::new(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            [1, 1, 1],
+            vec![1u8],
+        );
+        builder.set_sphere(full, faces);
+        builder.push_voxel_peaks(&[[1.0, 0.0, 0.0]]);
+        Arc::new(OdxScene::from_dataset(builder.finalize().unwrap()).unwrap())
+    }
+
+    fn make_test_fixel_draw(
+        scene: &Arc<OdxScene>,
+        node_uuid: WorkflowNodeUuid,
+        line_width: f32,
+        opacity: f32,
+        slab_thickness_mm: f32,
+        visible: bool,
+        colormap_code: u32,
+        scalar_range: (f32, f32),
+    ) -> crate::workflow::FixelDrawPlan {
+        crate::workflow::FixelDrawPlan {
+            node_uuid,
+            field: FixelField {
+                source_id: 17,
+                scene: scene.clone(),
+                scalars: FixelScalars::from_scalar(17, "qa".into(), vec![scalar_range.0]),
+                colormap_code,
+                scalar_range,
+            },
+            line_width,
+            length_scale: 1.0,
+            opacity,
+            offset_from_slice: 0.0,
+            slab_thickness_mm,
+            visible,
+            colormap_code,
+            scalar_range,
+        }
+    }
+
+    #[test]
+    fn build_render_data_keeps_2d_and_3d_fixel_styles_independent() {
+        let odx_scene = make_test_fixel_scene();
+        let mut scene = HeadlessScene {
+            odx_scene: Some(odx_scene.clone()),
+            ..Default::default()
+        };
+        scene.slice_visible = [true, true, true];
+
+        let mut workflow = HeadlessWorkflowState::default();
+        workflow
+            .runtime
+            .scene_plan
+            .fixel_3d_draws
+            .push(make_test_fixel_draw(
+                &odx_scene,
+                WorkflowNodeUuid(101),
+                0.125,
+                0.4,
+                8.0,
+                true,
+                3,
+                (10.0, 20.0),
+            ));
+        workflow
+            .runtime
+            .scene_plan
+            .fixel_2d_draws
+            .push(make_test_fixel_draw(
+                &odx_scene,
+                WorkflowNodeUuid(202),
+                0.5,
+                0.9,
+                14.0,
+                true,
+                4,
+                (30.0, 40.0),
+            ));
+
+        let render_data = build_render_data(&scene, &workflow, HeadlessView::View3D);
+
+        assert_eq!(render_data.fixel_3d_line_width, 0.125);
+        assert_eq!(render_data.fixel_3d_opacity, 0.4);
+        assert_eq!(render_data.fixel_3d_colormap_code, 3);
+        assert_eq!(render_data.fixel_3d_scalar_range, [10.0, 20.0]);
+
+        assert_eq!(render_data.fixel_2d_line_width, 0.5);
+        assert_eq!(render_data.fixel_2d_opacity, 0.9);
+        assert_eq!(render_data.fixel_2d_colormap_code, 4);
+        assert_eq!(render_data.fixel_2d_scalar_range, [30.0, 40.0]);
+        assert_eq!(render_data.fixel_2d_slab_half_width_mm, 7.0);
+    }
 }

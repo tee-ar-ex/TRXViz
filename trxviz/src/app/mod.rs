@@ -8,8 +8,8 @@ mod workflow;
 use std::path::PathBuf;
 
 use state::{
-    ImportDialogState, MergeStreamlinesDialogState, PendingFileLoad, SceneState, UiMode,
-    ViewportState, WorkerMessage, WorkerReceiver, WorkerSender, WorkflowState,
+    ImportDialogState, MergeStreamlinesDialogState, PendingFileLoad, ReferenceAffineDialogState,
+    SceneState, UiMode, ViewportState, WorkerMessage, WorkerReceiver, WorkerSender, WorkflowState,
 };
 use trxviz_core::renderer::slice_renderer::{AllSliceResources, SliceAxis};
 use workflow::workflow_job_kind_title;
@@ -27,6 +27,7 @@ pub struct TrxVizApp {
     pub(crate) next_job_id: u64,
     pub(crate) pending_file_loads: Vec<PendingFileLoad>,
     pub(crate) import_dialog: ImportDialogState,
+    pub(crate) reference_affine_dialog: ReferenceAffineDialogState,
     pub(crate) merge_streamlines_dialog: MergeStreamlinesDialogState,
     /// Slice-local ODX glyph amplitude normalization used by the shader LUT path.
     pub(crate) odx_amp_norm: f32,
@@ -184,11 +185,19 @@ impl TrxVizApp {
                     self.pending_file_loads.retain(|job| job.job_id != job_id);
                     match result {
                         Ok(scene) => {
+                            self.reference_affine_dialog.close();
                             if let Some(rs) = frame.wgpu_render_state() {
                                 self.apply_loaded_odx(path, scene, rs);
                             }
                         }
-                        Err(err) => self.error_msg = Some(format!("Failed to load ODX: {err}")),
+                        Err(err) => {
+                            if file_loading::needs_reference_affine_recovery(&path, &err) {
+                                self.reference_affine_dialog.open_for_source(path);
+                                self.error_msg = None;
+                            } else {
+                                self.error_msg = Some(format!("Failed to load ODX: {err}"));
+                            }
+                        }
                     }
                 }
             }
@@ -282,7 +291,7 @@ impl TrxVizApp {
             helpers::DroppedPathKind::OpenCifti => self.begin_load_cifti(path),
             helpers::DroppedPathKind::OpenParcellation => self.begin_load_parcellation(path),
             helpers::DroppedPathKind::OpenGifti => self.begin_load_gifti_surface(path),
-            helpers::DroppedPathKind::OpenOdx => self.begin_load_odx(path),
+            helpers::DroppedPathKind::OpenOdx => self.begin_load_odx(path, None),
             helpers::DroppedPathKind::Unsupported => {
                 self.error_msg = Some(format!(
                     "Unknown or unsupported file type: {}",
@@ -311,6 +320,7 @@ impl TrxVizApp {
             next_job_id: 1,
             pending_file_loads: Vec::new(),
             import_dialog: ImportDialogState::default(),
+            reference_affine_dialog: ReferenceAffineDialogState::default(),
             merge_streamlines_dialog: MergeStreamlinesDialogState::default(),
             odx_amp_norm: 1.0,
         };
@@ -500,6 +510,28 @@ impl eframe::App for TrxVizApp {
                 } else {
                     self.import_dialog.error_msg =
                         Some("Choose a supported foreign streamline file to import.".to_string());
+                }
+            }
+        }
+        if self.ui_mode == UiMode::Advanced || self.reference_affine_dialog.open {
+            let dialog_action = ui::reference_affine_dialog::show_reference_affine_dialog(
+                ctx,
+                &mut self.reference_affine_dialog,
+            );
+            if dialog_action.retry_requested {
+                if let Some(source_path) = self.reference_affine_dialog.source_path.clone() {
+                    if let Some(reference_path) =
+                        self.reference_affine_dialog.reference_path.clone()
+                    {
+                        self.begin_load_odx(source_path, Some(reference_path));
+                        self.reference_affine_dialog.error_msg = None;
+                    } else {
+                        self.reference_affine_dialog.error_msg =
+                            Some("Choose a NIfTI reference image before retrying.".to_string());
+                    }
+                } else {
+                    self.reference_affine_dialog.error_msg =
+                        Some("Choose a DSI Studio file to retry.".to_string());
                 }
             }
         }

@@ -19,6 +19,25 @@ fn glyph_colormap_code(cm: trxviz_core::workflow::GlyphColormap) -> u32 {
     }
 }
 
+pub(in crate::app) struct OdxFixelResources {
+    pub(in crate::app) resources_3d: FixelResources,
+    pub(in crate::app) resources_2d: FixelResources,
+}
+
+impl OdxFixelResources {
+    pub(in crate::app) fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
+        Self {
+            resources_3d: FixelResources::new(device, target_format),
+            resources_2d: FixelResources::new(device, target_format),
+        }
+    }
+
+    pub(in crate::app) fn clear(&mut self) {
+        self.resources_3d.clear();
+        self.resources_2d.clear();
+    }
+}
+
 // ── Paint Callbacks ──
 
 #[derive(Clone)]
@@ -223,8 +242,8 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
             }
         }
         if self.show_odx_fixels && self.odx_fixel_visible {
-            if let Some(fr) = callback_resources.get_mut::<FixelResources>() {
-                fr.update_uniforms(
+            if let Some(fr) = callback_resources.get_mut::<OdxFixelResources>() {
+                fr.resources_3d.update_uniforms(
                     queue,
                     0,
                     self.view_proj,
@@ -240,8 +259,9 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                     self.fog_near,
                     self.fog_far,
                 );
-                fr.update_length_mul(queue, 0, self.odx_fixel_length_scale);
-                fr.update_colormap(
+                fr.resources_3d
+                    .update_length_mul(queue, 0, self.odx_fixel_length_scale);
+                fr.resources_3d.update_colormap(
                     queue,
                     0,
                     self.odx_fixel_colormap_code,
@@ -372,8 +392,8 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
             }
         }
         if self.show_odx_fixels && self.odx_fixel_visible {
-            if let Some(fr) = callback_resources.get::<FixelResources>() {
-                fr.paint(render_pass, 0, false);
+            if let Some(fr) = callback_resources.get::<OdxFixelResources>() {
+                fr.resources_3d.paint(render_pass, 0, false);
             }
         }
     }
@@ -522,8 +542,8 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
             }
         }
         if self.show_odx_fixels && self.odx_fixel_visible {
-            if let Some(fr) = callback_resources.get_mut::<FixelResources>() {
-                fr.update_uniforms(
+            if let Some(fr) = callback_resources.get_mut::<OdxFixelResources>() {
+                fr.resources_2d.update_uniforms(
                     queue,
                     self.bind_group_index,
                     self.view_proj,
@@ -544,8 +564,12 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                     0.0,
                     1.0,
                 );
-                fr.update_length_mul(queue, self.bind_group_index, self.odx_fixel_length_scale);
-                fr.update_colormap(
+                fr.resources_2d.update_length_mul(
+                    queue,
+                    self.bind_group_index,
+                    self.odx_fixel_length_scale,
+                );
+                fr.resources_2d.update_colormap(
                     queue,
                     self.bind_group_index,
                     self.odx_fixel_colormap_code,
@@ -621,8 +645,9 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
             }
         }
         if self.show_odx_fixels && self.odx_fixel_visible {
-            if let Some(fr) = callback_resources.get::<FixelResources>() {
-                fr.paint(render_pass, self.bind_group_index, true);
+            if let Some(fr) = callback_resources.get::<OdxFixelResources>() {
+                fr.resources_2d
+                    .paint(render_pass, self.bind_group_index, true);
             }
         }
     }

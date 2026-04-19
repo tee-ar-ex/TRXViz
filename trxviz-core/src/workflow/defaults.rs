@@ -341,26 +341,8 @@ pub fn add_default_nodes_for_asset(
                 },
                 offset(pos, 520.0, 140.0),
             );
-            document.graph.connect(
-                OutPort {
-                    node: source,
-                    output: 0,
-                },
-                InPort {
-                    node: fixel_3d,
-                    input: 0,
-                },
-            );
-            document.graph.connect(
-                OutPort {
-                    node: source,
-                    output: 0,
-                },
-                InPort {
-                    node: fixel_2d,
-                    input: 0,
-                },
-            );
+            connect_chain(document, source, fixel_3d);
+            connect_chain(document, source, fixel_2d);
             document.graph.connect(
                 OutPort {
                     node: source,
@@ -442,6 +424,189 @@ pub fn set_default_odx_fixel_3d_visibility(
     changed
 }
 
+const ODX_PREFERRED_DPF_NAMES: &[&str] = &["amplitude", "afd", "fd", "qa"];
+const ODX_PREFERRED_DPV_NAMES: &[&str] = &["anisotropic_power", "gfa", "dti_fa", "fd", "afd", "qa"];
+
+fn choose_default_odx_dpf_name(dpf_names: &[String]) -> Option<String> {
+    if dpf_names.is_empty() {
+        return None;
+    }
+    for preferred in ODX_PREFERRED_DPF_NAMES {
+        if dpf_names.iter().any(|name| name == preferred) {
+            return Some((*preferred).to_string());
+        }
+    }
+    let mut sorted = dpf_names.to_vec();
+    sorted.sort();
+    sorted.into_iter().next()
+}
+
+fn choose_default_odx_dpv_name(dpv_names: &[String]) -> Option<String> {
+    if dpv_names.is_empty() {
+        return None;
+    }
+    for preferred in ODX_PREFERRED_DPV_NAMES {
+        if dpv_names.iter().any(|name| name == preferred) {
+            return Some((*preferred).to_string());
+        }
+    }
+    let mut sorted = dpv_names.to_vec();
+    sorted.sort();
+    sorted.into_iter().next()
+}
+
+pub fn set_default_odx_volume_dpv(
+    document: &mut WorkflowDocument,
+    asset_id: FileId,
+    dpv_names: &[String],
+) -> bool {
+    let Some(default_name) = choose_default_odx_dpv_name(dpv_names) else {
+        return false;
+    };
+
+    let source_nodes: Vec<_> = document
+        .graph
+        .nodes()
+        .filter_map(|(uuid, node)| match node.kind {
+            WorkflowNodeKind::OdxSource { source_id } if source_id == asset_id => Some(uuid),
+            _ => None,
+        })
+        .collect();
+
+    let targets: Vec<_> = document
+        .graph
+        .wires()
+        .filter(|wire| source_nodes.contains(&wire.from.node) && wire.from.output == 2)
+        .map(|wire| wire.to.node)
+        .collect();
+
+    let mut changed = false;
+    for uuid in targets {
+        let Some(node) = document.graph.get_mut(uuid) else {
+            continue;
+        };
+        let WorkflowNodeKind::OdxVolumeSelect { dpv_name } = &mut node.kind else {
+            continue;
+        };
+        if dpv_name.is_empty() {
+            *dpv_name = default_name.clone();
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+pub fn set_default_odx_fixel_dpf(
+    document: &mut WorkflowDocument,
+    asset_id: FileId,
+    dpf_names: &[String],
+) -> bool {
+    let Some(default_name) = choose_default_odx_dpf_name(dpf_names) else {
+        return false;
+    };
+
+    let Some(source_uuid) = document
+        .graph
+        .nodes()
+        .find_map(|(uuid, node)| match node.kind {
+            WorkflowNodeKind::OdxSource { source_id } if source_id == asset_id => Some(uuid),
+            _ => None,
+        })
+    else {
+        return false;
+    };
+
+    let mut changed = false;
+    changed |=
+        ensure_default_odx_fixel_scalar_branch(document, source_uuid, default_name.clone(), true);
+    changed |= ensure_default_odx_fixel_scalar_branch(document, source_uuid, default_name, false);
+    changed
+}
+
+fn ensure_default_odx_fixel_scalar_branch(
+    document: &mut WorkflowDocument,
+    source_uuid: WorkflowNodeUuid,
+    dpf_name: String,
+    is_3d: bool,
+) -> bool {
+    let display_uuid = document.graph.wires().find_map(|wire| {
+        if wire.from.node != source_uuid || wire.from.output != 0 || wire.to.input != 0 {
+            return None;
+        }
+        match document.graph.get(wire.to.node).map(|node| &node.kind) {
+            Some(WorkflowNodeKind::Fixel3DDisplay { .. }) if is_3d => Some(wire.to.node),
+            Some(WorkflowNodeKind::Fixel2DDisplay { .. }) if !is_3d => Some(wire.to.node),
+            _ => None,
+        }
+    });
+    let Some(display_uuid) = display_uuid else {
+        return false;
+    };
+
+    let source_pos = document.graph.pos(source_uuid).unwrap_or(GraphPos::ZERO);
+    let display_pos = document.graph.pos(display_uuid).unwrap_or(source_pos);
+    let selector_pos = GraphPos::new(source_pos.x + 240.0, display_pos.y - 40.0);
+    let color_pos = GraphPos::new(source_pos.x + 500.0, display_pos.y - 20.0);
+    let selector_uuid = make_node(
+        document,
+        WorkflowNodeKind::OdxFixelScalarSelect {
+            dpf_name: dpf_name.clone(),
+        },
+        selector_pos,
+    );
+    let color_uuid = make_node(
+        document,
+        WorkflowNodeKind::ColorByFixelScalars {
+            colormap: default_fixel_colormap(),
+            range: None,
+            length_scale_by_scalar: false,
+        },
+        color_pos,
+    );
+    document.graph.connect(
+        OutPort {
+            node: source_uuid,
+            output: 2,
+        },
+        InPort {
+            node: selector_uuid,
+            input: 0,
+        },
+    );
+    document.graph.connect(
+        OutPort {
+            node: source_uuid,
+            output: 0,
+        },
+        InPort {
+            node: color_uuid,
+            input: 0,
+        },
+    );
+    document.graph.connect(
+        OutPort {
+            node: selector_uuid,
+            output: 0,
+        },
+        InPort {
+            node: color_uuid,
+            input: 1,
+        },
+    );
+    document.graph.connect(
+        OutPort {
+            node: color_uuid,
+            output: 0,
+        },
+        InPort {
+            node: display_uuid,
+            input: 0,
+        },
+    );
+    true
+}
+
 fn guess_non_anatomical_surface(path: &Path) -> bool {
     let file_name = match path.file_name() {
         Some(name) => name.to_string_lossy(),
@@ -459,7 +624,10 @@ fn non_anatomical_surface_regex() -> &'static Regex {
 
 #[cfg(test)]
 mod tests {
-    use super::{guess_non_anatomical_surface, set_default_odx_fixel_3d_visibility};
+    use super::{
+        choose_default_odx_dpf_name, choose_default_odx_dpv_name, guess_non_anatomical_surface,
+        set_default_odx_fixel_3d_visibility, set_default_odx_fixel_dpf, set_default_odx_volume_dpv,
+    };
     use crate::workflow::{
         GraphPos, WorkflowAssetDocument, WorkflowNodeKind, add_default_nodes_for_asset,
         default_document,
@@ -518,14 +686,194 @@ mod tests {
         assert_eq!(odx_fixel_3d_visibility(&document, 9), Some(true));
     }
 
+    #[test]
+    fn chooses_preferred_odx_dpv_name() {
+        let selected = choose_default_odx_dpv_name(&[
+            "qa".to_string(),
+            "afd".to_string(),
+            "anisotropic_power".to_string(),
+        ]);
+        assert_eq!(selected.as_deref(), Some("anisotropic_power"));
+    }
+
+    #[test]
+    fn chooses_lexicographic_odx_dpv_name_when_no_preferred_exists() {
+        let selected = choose_default_odx_dpv_name(&[
+            "zeta".to_string(),
+            "beta".to_string(),
+            "alpha".to_string(),
+        ]);
+        assert_eq!(selected.as_deref(), Some("alpha"));
+    }
+
+    #[test]
+    fn chooses_preferred_odx_dpf_name() {
+        let selected = choose_default_odx_dpf_name(&[
+            "qa".to_string(),
+            "afd".to_string(),
+            "amplitude".to_string(),
+        ]);
+        assert_eq!(selected.as_deref(), Some("amplitude"));
+    }
+
+    #[test]
+    fn falls_back_to_lexicographic_odx_dpf_name() {
+        let selected = choose_default_odx_dpf_name(&["zeta".to_string(), "alpha".to_string()]);
+        assert_eq!(selected.as_deref(), Some("alpha"));
+    }
+
+    #[test]
+    fn inserts_default_odx_scalar_branches_when_dpf_available() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Odx {
+            id: 10,
+            path: PathBuf::from("subject.odx"),
+        };
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+
+        let changed = set_default_odx_fixel_dpf(
+            &mut document,
+            10,
+            &["qa".to_string(), "amplitude".to_string()],
+        );
+
+        assert!(changed);
+        let selector_names: Vec<_> = document
+            .graph
+            .nodes()
+            .filter_map(|(_, node)| match &node.kind {
+                WorkflowNodeKind::OdxFixelScalarSelect { dpf_name } => Some(dpf_name.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            selector_names,
+            vec!["amplitude".to_string(), "amplitude".to_string()]
+        );
+        assert_eq!(
+            document
+                .graph
+                .nodes()
+                .filter(|(_, node)| matches!(
+                    node.kind,
+                    WorkflowNodeKind::ColorByFixelScalars { .. }
+                ))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn leaves_default_odx_directional_branches_when_no_dpf_available() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Odx {
+            id: 15,
+            path: PathBuf::from("subject.odx"),
+        };
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+
+        let changed = set_default_odx_fixel_dpf(&mut document, 15, &[]);
+
+        assert!(!changed);
+        assert_eq!(
+            document
+                .graph
+                .nodes()
+                .filter(|(_, node)| matches!(
+                    node.kind,
+                    WorkflowNodeKind::OdxFixelScalarSelect { .. }
+                ))
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn sets_default_odx_volume_dpv_from_preference_list() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Odx {
+            id: 11,
+            path: PathBuf::from("subject.odx"),
+        };
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+
+        let changed = set_default_odx_volume_dpv(
+            &mut document,
+            11,
+            &["fd".to_string(), "qa".to_string(), "gfa".to_string()],
+        );
+
+        assert!(changed);
+        assert_eq!(odx_volume_dpv_name(&document, 11).as_deref(), Some("gfa"));
+    }
+
+    #[test]
+    fn falls_back_to_lexicographic_odx_volume_dpv() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Odx {
+            id: 12,
+            path: PathBuf::from("subject.odx"),
+        };
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+
+        let changed = set_default_odx_volume_dpv(
+            &mut document,
+            12,
+            &["zeta".to_string(), "alpha".to_string(), "beta".to_string()],
+        );
+
+        assert!(changed);
+        assert_eq!(odx_volume_dpv_name(&document, 12).as_deref(), Some("alpha"));
+    }
+
+    #[test]
+    fn preserves_existing_odx_volume_dpv_selection() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Odx {
+            id: 13,
+            path: PathBuf::from("subject.odx"),
+        };
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        let changed = set_default_odx_volume_dpv(&mut document, 13, &["qa".to_string()]);
+        assert!(changed);
+        assert_eq!(odx_volume_dpv_name(&document, 13).as_deref(), Some("qa"));
+
+        let changed = set_default_odx_volume_dpv(
+            &mut document,
+            13,
+            &["anisotropic_power".to_string(), "qa".to_string()],
+        );
+
+        assert!(!changed);
+        assert_eq!(odx_volume_dpv_name(&document, 13).as_deref(), Some("qa"));
+    }
+
+    #[test]
+    fn leaves_odx_volume_dpv_empty_when_no_dpvs_available() {
+        let mut document = default_document();
+        let asset = WorkflowAssetDocument::Odx {
+            id: 14,
+            path: PathBuf::from("subject.odx"),
+        };
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+
+        let changed = set_default_odx_volume_dpv(&mut document, 14, &[]);
+
+        assert!(!changed);
+        assert_eq!(odx_volume_dpv_name(&document, 14).as_deref(), Some(""));
+    }
+
     fn odx_fixel_3d_visibility(
         document: &crate::workflow::WorkflowDocument,
         asset_id: crate::data::loaded_files::FileId,
     ) -> Option<bool> {
-        let source = document.graph.nodes().find_map(|(uuid, node)| match node.kind {
-            WorkflowNodeKind::OdxSource { source_id } if source_id == asset_id => Some(uuid),
-            _ => None,
-        })?;
+        let source = document
+            .graph
+            .nodes()
+            .find_map(|(uuid, node)| match node.kind {
+                WorkflowNodeKind::OdxSource { source_id } if source_id == asset_id => Some(uuid),
+                _ => None,
+            })?;
 
         document
             .graph
@@ -534,6 +882,29 @@ mod tests {
             .and_then(|wire| document.graph.get(wire.to.node))
             .and_then(|node| match &node.kind {
                 WorkflowNodeKind::Fixel3DDisplay { visible, .. } => Some(*visible),
+                _ => None,
+            })
+    }
+
+    fn odx_volume_dpv_name(
+        document: &crate::workflow::WorkflowDocument,
+        asset_id: crate::data::loaded_files::FileId,
+    ) -> Option<String> {
+        let source = document
+            .graph
+            .nodes()
+            .find_map(|(uuid, node)| match node.kind {
+                WorkflowNodeKind::OdxSource { source_id } if source_id == asset_id => Some(uuid),
+                _ => None,
+            })?;
+
+        document
+            .graph
+            .wires()
+            .find(|wire| wire.from.node == source && wire.from.output == 2)
+            .and_then(|wire| document.graph.get(wire.to.node))
+            .and_then(|node| match &node.kind {
+                WorkflowNodeKind::OdxVolumeSelect { dpv_name } => Some(dpv_name.clone()),
                 _ => None,
             })
     }

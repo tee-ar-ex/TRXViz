@@ -466,6 +466,31 @@ impl OdxScene {
         )
     }
 
+    /// Return `(normal, center)` for the slice plane at the given voxel index.
+    ///
+    /// `axis_index`: 0 = axial (k-slices), 1 = coronal (j-slices), 2 = sagittal (i-slices).
+    pub fn slice_plane(&self, axis_index: usize, slice_index: usize) -> (glam::Vec3, glam::Vec3) {
+        let voxel_to_ras = self.voxel_to_ras();
+        let col = match axis_index {
+            0 => voxel_to_ras.col(2), // k-column
+            1 => voxel_to_ras.col(1), // j-column
+            _ => voxel_to_ras.col(0), // i-column
+        };
+        let normal = glam::Vec3::new(col.x, col.y, col.z).normalize();
+
+        let dims = self.dimensions();
+        let ci = dims[0] as f32 / 2.0;
+        let cj = dims[1] as f32 / 2.0;
+        let ck = dims[2] as f32 / 2.0;
+        let si = slice_index as f32;
+        let center_voxel = match axis_index {
+            0 => glam::Vec3::new(ci, cj, si),
+            1 => glam::Vec3::new(ci, si, ck),
+            _ => glam::Vec3::new(si, cj, ck),
+        };
+        (normal, voxel_to_ras.transform_point3(center_voxel))
+    }
+
     /// Extract glyph instances and amplitudes for a single slice.
     ///
     /// `axis`: 0=i (sagittal), 1=j (coronal), 2=k (axial).
@@ -1084,7 +1109,10 @@ mod tests {
         let actual = reconstruct_odf_slice(&scene, metadata.as_ref(), 1);
         assert_eq!(actual, expected);
         assert_eq!(metadata.amp_norm, slice_amp_norm(&expected));
-        assert_eq!(metadata.instances.len(), scene.glyph_instances_for_slice(2, 0).len());
+        assert_eq!(
+            metadata.instances.len(),
+            scene.glyph_instances_for_slice(2, 0).len()
+        );
     }
 
     #[test]
@@ -1151,6 +1179,31 @@ mod tests {
         assert_eq!(scene.glyph_source_kind(), None);
     }
 
+    #[test]
+    fn slice_plane_uses_oblique_odx_affine() {
+        let full = dsistudio_odf8::full_vertices_ras().to_vec();
+        let faces = dsistudio_odf8::faces().to_vec();
+        let affine = [
+            [2.0, 0.0, 0.5, 10.0],
+            [0.0, 3.0, 1.0, 20.0],
+            [0.0, 0.0, 4.0, 30.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let mut builder = OdxBuilder::new(affine, [4, 6, 8], vec![1u8; 4 * 6 * 8]);
+        builder.set_sphere(full, faces);
+        for _ in 0..(4 * 6 * 8) {
+            builder.push_voxel_peaks(&[]);
+        }
+        let scene = OdxScene::from_dataset(builder.finalize().unwrap()).unwrap();
+
+        let (normal, center) = scene.slice_plane(0, 5);
+        let expected_normal = glam::Vec3::new(0.5, 1.0, 4.0).normalize();
+        let expected_center = glam::Vec3::new(16.5, 34.0, 50.0);
+
+        assert!((normal - expected_normal).length() < 1e-6);
+        assert!((center - expected_center).length() < 1e-6);
+    }
+
     fn reconstruct_odf_slice(
         scene: &OdxScene,
         metadata: &OdfSliceMetadata,
@@ -1162,8 +1215,7 @@ mod tests {
         let mut out = vec![0.0f32; metadata.instances.len() * full_bins];
         for chunk in &metadata.chunk_worklists {
             for work_item in &chunk.work_items {
-                let compact_idx =
-                    chunk.chunk_index * rows_per_chunk + work_item.local_row as usize;
+                let compact_idx = chunk.chunk_index * rows_per_chunk + work_item.local_row as usize;
                 let row = view.row(compact_idx);
                 let dst = &mut out[(work_item.output_row as usize * full_bins)
                     ..((work_item.output_row as usize + 1) * full_bins)];

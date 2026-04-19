@@ -373,22 +373,14 @@ impl super::super::TrxVizApp {
             return;
         };
 
-        // Snapshot the loaded ODX's DPV/DPF name lists so the inspector can render
-        // a dropdown while the workflow graph is borrowed mutably below.
-        let (odx_dpv_names, odx_dpf_names): (Vec<String>, Vec<String>) =
-            match self.scene.odx_scene.as_ref() {
-                Some(scene) => {
-                    let dpv = scene.dpv_names().iter().map(|s| s.to_string()).collect();
-                    let dpf = scene
-                        .dataset()
-                        .dpf_names()
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect();
-                    (dpv, dpf)
-                }
-                None => (Vec::new(), Vec::new()),
-            };
+        // Snapshot any ODX names for the selected node before taking a mutable graph borrow.
+        let odx_selector_names = match &original_node.kind {
+            workflow::WorkflowNodeKind::OdxFixelScalarSelect { .. }
+            | workflow::WorkflowNodeKind::OdxVolumeSelect { .. } => {
+                self.resolve_odx_selector_names(node_uuid)
+            }
+            _ => None,
+        };
 
         let mut save_now = false;
         let node_changed = {
@@ -1012,12 +1004,16 @@ impl super::super::TrxVizApp {
                     egui::ComboBox::from_id_salt(format!("dpf_select_{}", node_uuid.0))
                         .selected_text(label)
                         .show_ui(ui, |ui| {
-                            if odx_dpf_names.is_empty() {
-                                ui.small("No DPFs available — load an ODX file first.");
-                            } else {
-                                for name in &odx_dpf_names {
-                                    ui.selectable_value(dpf_name, name.clone(), name);
+                            if let Some(odx_names) = odx_selector_names.as_ref() {
+                                if odx_names.dpf_names.is_empty() {
+                                    ui.small("This ODX asset has no scalar DPFs.");
+                                } else {
+                                    for name in &odx_names.dpf_names {
+                                        ui.selectable_value(dpf_name, name.clone(), name);
+                                    }
                                 }
+                            } else {
+                                ui.small("Connect this node to an ODX Source catalog output.");
                             }
                         });
                 }
@@ -1031,12 +1027,16 @@ impl super::super::TrxVizApp {
                     egui::ComboBox::from_id_salt(format!("dpv_select_{}", node_uuid.0))
                         .selected_text(label)
                         .show_ui(ui, |ui| {
-                            if odx_dpv_names.is_empty() {
-                                ui.small("No DPVs available — load an ODX file first.");
-                            } else {
-                                for name in &odx_dpv_names {
-                                    ui.selectable_value(dpv_name, name.clone(), name);
+                            if let Some(odx_names) = odx_selector_names.as_ref() {
+                                if odx_names.dpv_names.is_empty() {
+                                    ui.small("This ODX asset has no scalar DPVs.");
+                                } else {
+                                    for name in &odx_names.dpv_names {
+                                        ui.selectable_value(dpv_name, name.clone(), name);
+                                    }
                                 }
+                            } else {
+                                ui.small("Connect this node to an ODX Source catalog output.");
                             }
                         });
                 }
@@ -1130,9 +1130,55 @@ impl super::super::TrxVizApp {
         }
     }
 
+    fn resolve_odx_selector_names(
+        &self,
+        node_uuid: workflow::WorkflowNodeUuid,
+    ) -> Option<OdxSelectorNames> {
+        let source_id = self.workflow.document.graph.wires().find_map(|wire| {
+            if wire.to.node != node_uuid || wire.to.input != 0 {
+                return None;
+            }
+            match self
+                .workflow
+                .document
+                .graph
+                .get(wire.from.node)
+                .map(|node| &node.kind)
+            {
+                Some(workflow::WorkflowNodeKind::OdxSource { source_id }) => Some(*source_id),
+                _ => None,
+            }
+        })?;
+        let loaded = self
+            .scene
+            .odx_files
+            .iter()
+            .find(|asset| asset.id == source_id)?;
+        Some(OdxSelectorNames {
+            dpv_names: loaded
+                .scene
+                .dpv_names()
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
+            dpf_names: loaded
+                .scene
+                .dataset()
+                .dpf_names()
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
+        })
+    }
+
     fn show_preview_pane(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.show_embedded_preview(ui);
     }
+}
+
+struct OdxSelectorNames {
+    dpv_names: Vec<String>,
+    dpf_names: Vec<String>,
 }
 
 fn show_group_select_editor(

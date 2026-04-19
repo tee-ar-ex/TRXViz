@@ -18,10 +18,11 @@ use trxviz_core::data::parcellation_data::{ParcellationVolume, guess_label_table
 use trxviz_core::data::trx_data::TrxGpuData;
 use trxviz_core::renderer::background_renderer::BackgroundResources;
 use trxviz_core::renderer::camera::{OrbitCamera, OrthoSliceCamera};
-use trxviz_core::renderer::fixel_renderer::FixelResources;
 use trxviz_core::renderer::glyph_renderer::GlyphResources;
 use trxviz_core::renderer::mesh_renderer::{MeshResources, SurfaceColormap};
 use trxviz_core::renderer::slice_renderer::{AllSliceResources, SliceAxis, SliceResources};
+
+use crate::app::callbacks::OdxFixelResources;
 
 use super::state::{
     ImportDialogState, LoadedGiftiSurface, LoadedParcellationSource, LoadedStreamlineSource,
@@ -675,7 +676,7 @@ impl super::TrxVizApp {
         self.status_msg = None;
     }
 
-    pub(super) fn begin_load_odx(&mut self, path: PathBuf) {
+    pub(super) fn begin_load_odx(&mut self, path: PathBuf, reference_affine_path: Option<PathBuf>) {
         let job_id = self.next_job_id;
         self.next_job_id += 1;
         let tx = self.worker_tx.clone();
@@ -686,7 +687,7 @@ impl super::TrxVizApp {
         self.pending_file_loads
             .push(super::state::PendingFileLoad { job_id, label });
         std::thread::spawn(move || {
-            let result = load_odx_any_format(&path);
+            let result = load_odx_any_format(&path, reference_affine_path.as_deref());
             let _ = tx.send(WorkerMessage::OdxLoaded {
                 job_id,
                 path,
@@ -702,7 +703,8 @@ impl super::TrxVizApp {
         rs: &egui_wgpu::RenderState,
     ) {
         self.workflow.uploaded_odx_glyph_resource_key = None;
-        self.workflow.uploaded_fixel_fingerprint = 0;
+        self.workflow.uploaded_fixel_3d_fingerprint = 0;
+        self.workflow.uploaded_fixel_2d_fingerprint = 0;
 
         let is_first = self.scene.trx_files.is_empty()
             && self.scene.nifti_files.is_empty()
@@ -780,12 +782,15 @@ impl super::TrxVizApp {
                 self.viewport.slice_world_offsets[0] = w.z;
             }
         }
-        if scene.glyph_source_kind()
-            == Some(trxviz_core::data::odx_data::OdxGlyphSourceKind::Odf)
+        if scene.glyph_source_kind() == Some(trxviz_core::data::odx_data::OdxGlyphSourceKind::Odf)
             && let Some(rows_per_chunk) = scene
                 .odf_rows_per_chunk(rs.device.limits().max_storage_buffer_binding_size as usize)
         {
-            scene.prewarm_odf_slice_metadata(2, self.viewport.slice_indices[0] as u32, rows_per_chunk);
+            scene.prewarm_odf_slice_metadata(
+                2,
+                self.viewport.slice_indices[0] as u32,
+                rows_per_chunk,
+            );
         }
         // Upload ALL fixels — the 2D slice views slab-clip in the shader so only
         // the fixels on the current slice are visible, no CPU re-upload needed.
@@ -805,15 +810,16 @@ impl super::TrxVizApp {
             }
             if renderer
                 .callback_resources
-                .get::<FixelResources>()
+                .get::<OdxFixelResources>()
                 .is_none()
             {
                 renderer
                     .callback_resources
-                    .insert(FixelResources::new(&rs.device, rs.target_format));
+                    .insert(OdxFixelResources::new(&rs.device, rs.target_format));
             }
-            if let Some(fr) = renderer.callback_resources.get_mut::<FixelResources>() {
-                fr.set_fixels(&rs.device, &fixel_instances);
+            if let Some(fr) = renderer.callback_resources.get_mut::<OdxFixelResources>() {
+                fr.resources_3d.set_fixels(&rs.device, &fixel_instances);
+                fr.resources_2d.set_fixels(&rs.device, &fixel_instances);
             }
         }
 
@@ -846,12 +852,24 @@ impl super::TrxVizApp {
                 visible: true,
             });
         let show_fixel_3d_by_default = scene.glyph_source_kind().is_none();
+        let dpf_names: Vec<String> = scene
+            .dataset()
+            .dpf_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let dpv_names: Vec<String> = scene.dpv_names().iter().map(|s| s.to_string()).collect();
         self.register_workflow_asset(WorkflowAssetDocument::Odx { id, path: _path }, true, None);
-        if workflow::set_default_odx_fixel_3d_visibility(
+        let mut workflow_changed = workflow::set_default_odx_fixel_3d_visibility(
             &mut self.workflow.document,
             id,
             show_fixel_3d_by_default,
-        ) {
+        );
+        workflow_changed |=
+            workflow::set_default_odx_fixel_dpf(&mut self.workflow.document, id, &dpf_names);
+        workflow_changed |=
+            workflow::set_default_odx_volume_dpv(&mut self.workflow.document, id, &dpv_names);
+        if workflow_changed {
             self.rebuild_workflow_editor_from_document();
         }
 
@@ -925,7 +943,24 @@ impl super::TrxVizApp {
     }
 }
 
-fn load_odx_any_format(path: &Path) -> Result<OdxScene, String> {
+pub(super) fn needs_reference_affine_recovery(path: &Path, err: &str) -> bool {
+    is_dsistudio_odx_input(path)
+        && err.contains("DSI Studio file has no spatial affine ('trans' field)")
+}
+
+fn is_dsistudio_odx_input(path: &Path) -> bool {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    file_name.ends_with(".fib.gz") || file_name.ends_with(".fz")
+}
+
+fn load_odx_any_format(
+    path: &Path,
+    reference_affine_path: Option<&Path>,
+) -> Result<OdxScene, String> {
     use odx_rs::cli_support::{LoadDatasetOptions, load_dataset};
 
     // Try native ODX format first (cheapest — memory-mapped).
@@ -937,7 +972,7 @@ fn load_odx_any_format(path: &Path) -> Result<OdxScene, String> {
     let options = LoadDatasetOptions {
         sh_path: None,
         fixel_dir: None,
-        reference_affine: None,
+        reference_affine: reference_affine_path,
     };
     let (dataset, _format) = load_dataset(path, options).map_err(|e| e.to_string())?;
     OdxScene::from_dataset(dataset).map_err(|e| e.to_string())
@@ -1000,4 +1035,34 @@ fn create_merged_streamline_source(
     merged.save(output_path).map_err(|err| err.to_string())?;
     let loaded = AnyTrxFile::load(output_path).map_err(|err| err.to_string())?;
     super::TrxVizApp::loaded_streamline_source_from_any(loaded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::needs_reference_affine_recovery;
+    use std::path::Path;
+
+    #[test]
+    fn missing_trans_error_for_fibgz_requests_recovery() {
+        assert!(needs_reference_affine_recovery(
+            Path::new("sample.fib.gz"),
+            "DSI Studio file has no spatial affine ('trans' field). Convert it first"
+        ));
+    }
+
+    #[test]
+    fn unrelated_error_does_not_request_recovery() {
+        assert!(!needs_reference_affine_recovery(
+            Path::new("sample.fib.gz"),
+            "some other load error"
+        ));
+    }
+
+    #[test]
+    fn non_dsistudio_path_does_not_request_recovery() {
+        assert!(!needs_reference_affine_recovery(
+            Path::new("sample.odx"),
+            "DSI Studio file has no spatial affine ('trans' field)"
+        ));
+    }
 }
