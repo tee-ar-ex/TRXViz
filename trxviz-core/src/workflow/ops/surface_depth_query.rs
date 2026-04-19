@@ -37,7 +37,11 @@ impl WorkflowOp for SurfaceDepthQueryOp {
         let surface = ctx.surface_assets.get(&surface_id).ok_or_else(|| {
             crate::error::WorkflowError::Evaluation(format!("Missing surface {surface_id}"))
         })?;
-        let record = ctx.execution_cache.node_runs.entry(ctx.node.uuid).or_default();
+        let record = ctx
+            .execution_cache
+            .node_runs
+            .entry(ctx.node.uuid)
+            .or_default();
         prime_expensive_record(record, fingerprint);
         ctx.scene_plan.surface_query_plans.push(SurfaceQueryPlan {
             node_uuid: ctx.node.uuid,
@@ -48,7 +52,9 @@ impl WorkflowOp for SurfaceDepthQueryOp {
         });
 
         sync_node_state_from_run_record(ctx.node_state, record);
-        if let Some(CachedSurfaceQuery { flow }) = ctx.execution_cache.surface_query_cache.get(&ctx.node.uuid) {
+        if let Some(CachedSurfaceQuery { flow }) =
+            ctx.execution_cache.surface_query_cache.get(&ctx.node.uuid)
+        {
             ctx.node_state.summary = format!("{} streamlines", flow.selected_streamlines.len());
             return Ok(vec![super::super::EvaluatedValue {
                 value: WorkflowValue::Streamline(flow.clone()),

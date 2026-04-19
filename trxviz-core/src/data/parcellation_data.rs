@@ -96,11 +96,7 @@ impl ParcellationVolume {
         self.label_at(i, j, k)
     }
 
-    pub fn streamline_hits_labels(
-        &self,
-        points: &[[f32; 3]],
-        labels: &BTreeSet<ParcelId>,
-    ) -> bool {
+    pub fn streamline_hits_labels(&self, points: &[[f32; 3]], labels: &BTreeSet<ParcelId>) -> bool {
         if labels.is_empty() {
             return false;
         }

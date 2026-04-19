@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 
-use super::super::{
-    EvalCtx, PortKind, SaveStreamlinePlan, WorkflowOp, expect_streamline_input,
-};
+use super::super::{EvalCtx, PortKind, SaveStreamlinePlan, WorkflowOp, expect_streamline_input};
 
 #[derive(Debug, Clone)]
 pub struct SaveStreamlinesOp {

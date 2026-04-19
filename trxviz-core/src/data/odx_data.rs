@@ -235,7 +235,8 @@ impl OdxScene {
 
         let (vertices, indices) = build_full_icosphere_mesh(detail);
         let ncoeffs = self.sh_source.as_ref()?.ncoeffs;
-        let sample_plan = mrtrix_sh::RowSamplePlan::for_sh_rows_nonnegative(&vertices, ncoeffs).ok()?;
+        let sample_plan =
+            mrtrix_sh::RowSamplePlan::for_sh_rows_nonnegative(&vertices, ncoeffs).ok()?;
         let mesh = Arc::new(ShRenderMesh {
             vertices,
             indices,
@@ -478,7 +479,8 @@ impl OdxScene {
     }
 
     pub fn sh_source_dir_count(&self, detail: u32) -> Option<usize> {
-        self.sh_render_mesh(detail).map(|mesh| mesh.source_dir_count())
+        self.sh_render_mesh(detail)
+            .map(|mesh| mesh.source_dir_count())
     }
 
     pub fn sh_render_row_width(&self, detail: u32) -> Option<usize> {
@@ -591,7 +593,12 @@ impl OdxScene {
             OdxGlyphSourceKind::Odf => {
                 let source = self.odf_source.as_ref().expect("ODF source should exist");
                 debug_assert_eq!(
-                    source.ncols * if source.sample_domain.is_hemisphere() { 2 } else { 1 },
+                    source.ncols
+                        * if source.sample_domain.is_hemisphere() {
+                            2
+                        } else {
+                            1
+                        },
                     nv
                 );
                 let odf_view = self
@@ -1070,7 +1077,8 @@ fn resolve_odf_source(dataset: &OdxDataset, warnings: &mut Vec<String>) -> Optio
             OdfSampleDomain::FullSphere => vertices.len(),
         };
         if ncols == expected_cols {
-            let render_indices: Vec<u32> = faces.iter().flat_map(|face| face.iter().copied()).collect();
+            let render_indices: Vec<u32> =
+                faces.iter().flat_map(|face| face.iter().copied()).collect();
             return Some(OdfGlyphSource {
                 name: "amplitudes".into(),
                 sample_domain: header_domain.unwrap_or(OdfSampleDomain::FullSphere),
@@ -1082,7 +1090,9 @@ fn resolve_odf_source(dataset: &OdxDataset, warnings: &mut Vec<String>) -> Optio
     }
 
     let fallback_domain = match header_domain {
-        Some(OdfSampleDomain::Hemisphere) if ncols == dsistudio_odf8::hemisphere_vertices_ras().len() => {
+        Some(OdfSampleDomain::Hemisphere)
+            if ncols == dsistudio_odf8::hemisphere_vertices_ras().len() =>
+        {
             Some(OdfSampleDomain::Hemisphere)
         }
         Some(OdfSampleDomain::FullSphere) if ncols == dsistudio_odf8::full_vertices_ras().len() => {
@@ -1456,8 +1466,7 @@ mod tests {
             .row(0)
             .to_vec();
         let expected =
-            mrtrix_sh::sample_rows_nonnegative(&coeffs, 1, mesh.vertices(), coeffs.len())
-                .unwrap();
+            mrtrix_sh::sample_rows_nonnegative(&coeffs, 1, mesh.vertices(), coeffs.len()).unwrap();
         assert_eq!(slice.instances.len(), 1);
         assert_eq!(slice.amplitudes, expected);
     }
@@ -1560,7 +1569,8 @@ mod tests {
 
     #[test]
     fn built_in_odf8_supports_hemisphere_without_explicit_sphere() {
-        let scene = OdxScene::from_dataset(build_test_dataset_with_odf_width(321, None, false)).unwrap();
+        let scene =
+            OdxScene::from_dataset(build_test_dataset_with_odf_width(321, None, false)).unwrap();
         assert_eq!(scene.glyph_source_kind(), Some(OdxGlyphSourceKind::Odf));
         assert!(scene.glyph_source_is_hemisphere());
         assert_eq!(scene.odf_render_row_width(), Some(642));
@@ -1568,7 +1578,8 @@ mod tests {
 
     #[test]
     fn built_in_odf8_supports_full_sphere_without_explicit_sphere() {
-        let scene = OdxScene::from_dataset(build_test_dataset_with_odf_width(642, None, false)).unwrap();
+        let scene =
+            OdxScene::from_dataset(build_test_dataset_with_odf_width(642, None, false)).unwrap();
         assert_eq!(scene.glyph_source_kind(), Some(OdxGlyphSourceKind::Odf));
         assert!(!scene.glyph_source_is_hemisphere());
         assert_eq!(scene.odf_render_row_width(), Some(642));
@@ -1576,9 +1587,12 @@ mod tests {
 
     #[test]
     fn conflicting_odf_domain_disables_odf_glyphs() {
-        let scene =
-            OdxScene::from_dataset(build_test_dataset_with_odf_width(642, Some("hemisphere"), false))
-                .unwrap();
+        let scene = OdxScene::from_dataset(build_test_dataset_with_odf_width(
+            642,
+            Some("hemisphere"),
+            false,
+        ))
+        .unwrap();
         assert_eq!(scene.glyph_source_kind(), None);
         assert!(
             scene
@@ -1605,12 +1619,7 @@ mod tests {
         let limit = row_width_4 * std::mem::size_of::<f32>();
         assert_eq!(scene.clamp_sh_detail_for_slice(2, 0, 5, limit), 4);
         assert_eq!(
-            scene.clamp_sh_detail_for_slice(
-                2,
-                0,
-                5,
-                row_width_5 * std::mem::size_of::<f32>()
-            ),
+            scene.clamp_sh_detail_for_slice(2, 0, 5, row_width_5 * std::mem::size_of::<f32>()),
             5
         );
     }

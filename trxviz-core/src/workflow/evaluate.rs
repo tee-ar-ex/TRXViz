@@ -9,7 +9,9 @@ use trx_rs::{
     ConversionOptions, DType, DataArray, Tractogram, remove_duplicates_tractogram, write_tractogram,
 };
 
-use crate::data::cifti::{CiftiStructure, ScalarKind, ScalarMetadata, SurfaceScalars, VolumeScalars};
+use crate::data::cifti::{
+    CiftiStructure, ScalarKind, ScalarMetadata, SurfaceScalars, VolumeScalars,
+};
 use crate::data::loaded_files::{
     FileId, LoadedCifti, LoadedNifti, LoadedOdx, LoadedTrx, StreamlineBacking,
 };
@@ -18,11 +20,9 @@ use crate::data::parcellation_data::ParcellationVolume;
 use crate::data::trx_data::TrxGpuData;
 use crate::renderer::mesh_renderer::SurfaceColormap;
 use crate::scene::LoadedGiftiSurface;
-use crate::units::{Millimeters, ParcelId, StreamlineIndex};
+use crate::units::{ParcelId, StreamlineIndex};
 
-use super::jobs::{
-    mark_expensive_success, prime_expensive_record, sync_node_state_from_run_record,
-};
+use super::jobs::{prime_expensive_record, sync_node_state_from_run_record};
 use super::*;
 
 pub fn evaluate_scene_plan(
@@ -221,8 +221,8 @@ fn compile_graph(
         connections.insert((wire.to.node, wire.to.input), wire.from);
     }
 
-    let ordered =
-        toposort(&graph, None).map_err(|_| WorkflowError::Evaluation("Workflow graph contains a cycle".to_string()))?;
+    let ordered = toposort(&graph, None)
+        .map_err(|_| WorkflowError::Evaluation("Workflow graph contains a cycle".to_string()))?;
     let order = ordered
         .into_iter()
         .filter_map(|idx| graph.node_weight(idx).copied())
@@ -267,559 +267,10 @@ fn evaluate_node(
         execution_cache,
         node_state,
     };
-    if let Some(result) = super::ops::try_evaluate(&node.kind, &mut op_ctx) {
-        return result;
-    }
-
-    match &node.kind {
-        WorkflowNodeKind::StreamlineSource { .. }
-        | WorkflowNodeKind::ParcellationSource { .. }
-        | WorkflowNodeKind::LimitStreamlines { .. }
-        | WorkflowNodeKind::GroupSelect { .. }
-        | WorkflowNodeKind::RandomSubset { .. }
-        | WorkflowNodeKind::SphereQuery { .. }
-        | WorkflowNodeKind::SurfaceDepthQuery { .. }
-        | WorkflowNodeKind::RemoveDuplicates { .. }
-        | WorkflowNodeKind::Merge
-        | WorkflowNodeKind::AddGroupsFromParcellation
-        | WorkflowNodeKind::ParcelSelect { .. }
-        | WorkflowNodeKind::ParcelROI
-        | WorkflowNodeKind::ParcelROA
-        | WorkflowNodeKind::ParcelEnd { .. }
-        | WorkflowNodeKind::ParcelLimiting
-        | WorkflowNodeKind::ParcelTerminative
-        | WorkflowNodeKind::ColorByDirection
-        | WorkflowNodeKind::ColorByGroup
-        | WorkflowNodeKind::ColorByDPV { .. }
-        | WorkflowNodeKind::ColorByDPS { .. }
-        | WorkflowNodeKind::UniformColor { .. }
-        | WorkflowNodeKind::SurfaceProjectionDensity { .. }
-        | WorkflowNodeKind::SurfaceProjectionMeanDps { .. }
-        | WorkflowNodeKind::StreamlineDisplay { .. }
-        | WorkflowNodeKind::ParcellationDisplay { .. }
-        | WorkflowNodeKind::SaveStreamlines { .. } => {
-            unreachable!("handled by workflow op dispatch")
-        }
-        WorkflowNodeKind::VolumeSource { source_id } => {
-            volume_assets
-                .get(source_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing volume source {source_id}")))?;
-            Ok(vec![WorkflowValue::Volume(*source_id).into()])
-        }
-        WorkflowNodeKind::CiftiSource { source_id } => {
-            cifti_assets
-                .get(source_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing CIFTI source {source_id}")))?;
-            Ok(vec![WorkflowValue::Cifti(*source_id).into()])
-        }
-        WorkflowNodeKind::SurfaceSource { source_id } => {
-            surface_assets
-                .get(source_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing surface source {source_id}")))?;
-            Ok(vec![WorkflowValue::Surface(*source_id).into()])
-        }
-        WorkflowNodeKind::CiftiStructure {
-            structure,
-            map_index,
-        } => {
-            let cifti_id = expect_cifti_input(inputs, "CIFTI Structure")?;
-            let cifti = cifti_assets
-                .get(&cifti_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing CIFTI asset {cifti_id}")))?;
-            match structure {
-                CiftiStructure::CortexLeft => cifti
-                    .data
-                    .left_scalars
-                    .get(*map_index)
-                    .cloned()
-                    .flatten()
-                    .map(|value| WorkflowValue::SurfaceScalars(value).into())
-                    .ok_or_else(|| {
-                        WorkflowError::Evaluation(format!("CIFTI left cortex map {} is unavailable", map_index + 1))
-                    })
-                    .map(|v: EvaluatedValue| vec![v]),
-                CiftiStructure::CortexRight => cifti
-                    .data
-                    .right_scalars
-                    .get(*map_index)
-                    .cloned()
-                    .flatten()
-                    .map(|value| WorkflowValue::SurfaceScalars(value).into())
-                    .ok_or_else(|| {
-                        WorkflowError::Evaluation(format!("CIFTI right cortex map {} is unavailable", map_index + 1))
-                    })
-                    .map(|v: EvaluatedValue| vec![v]),
-                CiftiStructure::Subcortical => cifti
-                    .data
-                    .subcortical_scalars
-                    .get(*map_index)
-                    .cloned()
-                    .flatten()
-                    .map(|value| WorkflowValue::VolumeScalars(value).into())
-                    .ok_or_else(|| {
-                        WorkflowError::Evaluation(format!("CIFTI subcortical map {} is unavailable", map_index + 1))
-                    })
-                    .map(|v: EvaluatedValue| vec![v]),
-            }
-        }
-        WorkflowNodeKind::BundleSurfaceBuild {
-            per_group,
-            build_mode,
-            voxel_size_mm,
-            threshold,
-            smooth_sigma,
-            min_component_volume_mm3,
-            tube_radius_mm,
-            tube_sides,
-            opacity,
-        } => {
-            let flow = expect_streamline_input(inputs, "Bundle Surface Build")?;
-            let bundle = BundleSurfacePlan {
-                build_node_uuid: node.uuid,
-                label: node.label.clone(),
-                flow,
-                per_group: *per_group,
-                build_mode: *build_mode,
-                voxel_size_mm: *voxel_size_mm,
-                threshold: *threshold,
-                smooth_sigma: *smooth_sigma,
-                min_component_volume_mm3: *min_component_volume_mm3,
-                tube_radius_mm: *tube_radius_mm,
-                tube_sides: *tube_sides,
-                opacity: *opacity,
-            };
-            let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
-            let fingerprint = workflow_bundle_plan_fingerprint(&bundle);
-            let record = execution_cache.node_runs.entry(node.uuid).or_default();
-            prime_expensive_record(record, fingerprint);
-            sync_node_state_from_run_record(node_state, record);
-            scene_plan.bundle_surface_plans.push(bundle.clone());
-            Ok(vec![EvaluatedValue {
-                value: WorkflowValue::BundleSurface(bundle),
-                stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
-            }])
-        }
-        WorkflowNodeKind::VolumeDisplay {
-            colormap,
-            opacity,
-            window_center,
-            window_width,
-        } => {
-            let source_id = expect_volume_input(inputs, "Volume Display")?;
-            if volume_assets.get(&source_id).is_none() && odx_assets.get(&source_id).is_none() {
-                return Err(WorkflowError::Evaluation(format!("Missing volume {source_id}")));
-            }
-            scene_plan.volume_draws.push(VolumeDrawPlan {
-                source_id,
-                colormap: *colormap,
-                opacity: *opacity,
-                window_center: *window_center,
-                window_width: *window_width,
-            });
-            Ok(Vec::new())
-        }
-        WorkflowNodeKind::VolumeScalarsDisplay { colormap, opacity } => {
-            let scalars = expect_volume_scalars_input(inputs, "Volume Scalars Display")?;
-            scene_plan.volume_scalar_draws.push(VolumeScalarDrawPlan {
-                dims: scalars.dims,
-                voxel_to_ras: scalars.voxel_to_ras.to_cols_array_2d(),
-                colormap: *colormap,
-                opacity: *opacity,
-            });
-            Ok(Vec::new())
-        }
-        WorkflowNodeKind::SurfaceOverlayStack { layers } => {
-            let surface_id = expect_surface_input(inputs, "Surface Overlay Stack")?;
-            let surface = surface_assets
-                .get(&surface_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing surface {surface_id}")))?;
-            let upstream_stale = inputs.iter().flatten().any(|v| v.stale);
-            let fingerprint =
-                workflow_surface_overlay_fingerprint(surface_id, layers, upstream_stale);
-            let appearance = compose_surface_appearance(surface_id, surface, layers, &inputs[1..])?;
-            let record = execution_cache.node_runs.entry(node.uuid).or_default();
-            let active_layers = layers.iter().filter(|l| l.enabled).count();
-            mark_expensive_success(
-                record,
-                fingerprint,
-                format!("{active_layers} active layer(s)"),
-            );
-            sync_node_state_from_run_record(node_state, record);
-            Ok(vec![EvaluatedValue {
-                value: WorkflowValue::SurfaceAppearance(appearance),
-                stale: upstream_stale,
-            }])
-        }
-        WorkflowNodeKind::SurfaceDisplay {
-            color,
-            opacity,
-            outline_color,
-            outline_thickness,
-            show_projection_map,
-            map_opacity,
-            map_threshold,
-            gloss,
-            projection_colormap,
-            range_min,
-            range_max,
-            space,
-        } => {
-            let appearance = expect_surface_appearance_input(inputs, "Surface Display")?;
-            let source_id = appearance.source_id;
-            let _surface = surface_assets
-                .get(&source_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing surface {source_id}")))?;
-            let projection = None::<SurfaceScalars>;
-            let projection_enabled = *show_projection_map || projection.is_some();
-            let final_range = projection
-                .as_ref()
-                .and_then(|p| p.metadata.suggested_range)
-                .unwrap_or((*range_min, *range_max));
-            let projection_scalars = projection.as_ref().map(|value| value.values.clone());
-            projection_by_surface.extend(projection.as_ref().cloned().into_iter().filter_map(
-                |projection| {
-                    projection
-                        .source_surface_id
-                        .map(|surface_id| (surface_id, projection))
-                },
-            ));
-            let draw = SurfaceDrawPlan {
-                node_uuid: node.uuid,
-                source_id,
-                structure: appearance.structure,
-                color: *color,
-                opacity: *opacity,
-                outline_color: *outline_color,
-                outline_thickness: *outline_thickness,
-                show_projection_map: projection_enabled,
-                map_opacity: *map_opacity,
-                map_threshold: *map_threshold,
-                gloss: *gloss,
-                projection_colormap: *projection_colormap,
-                range_min: final_range.0,
-                range_max: final_range.1,
-                projection_scalars,
-                vertex_rgba: appearance.vertex_rgba,
-                space: *space,
-                model_matrix: surface_display_model_matrix(_surface, appearance.structure, *space)
-                    .to_cols_array_2d(),
-            };
-            match space {
-                SurfaceDisplaySpace::Anatomical => scene_plan.surface_draws.push(draw),
-                SurfaceDisplaySpace::Stage => scene_plan.stage_surface_draws.push(draw),
-            }
-            Ok(Vec::new())
-        }
-        WorkflowNodeKind::BoundaryFieldBuild {
-            voxel_size_mm,
-            sphere_lod,
-            normalization,
-        } => {
-            let flow = expect_streamline_input(inputs, "Boundary Field Build")?;
-            let plan = BoundaryFieldPlan {
-                build_node_uuid: node.uuid,
-                label: node.label.clone(),
-                flow,
-                voxel_size_mm: *voxel_size_mm,
-                sphere_lod: *sphere_lod,
-                normalization: *normalization,
-            };
-            let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
-            let fingerprint = workflow_boundary_plan_fingerprint(&plan);
-            let record = execution_cache.node_runs.entry(node.uuid).or_default();
-            prime_expensive_record(record, fingerprint);
-            sync_node_state_from_run_record(node_state, record);
-            scene_plan.boundary_field_plans.push(plan.clone());
-            Ok(vec![EvaluatedValue {
-                value: WorkflowValue::BoundaryField(plan),
-                stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
-            }])
-        }
-        WorkflowNodeKind::BundleSurfaceDisplay {
-            color_mode,
-            outline_thickness,
-        } => {
-            let (bundle, stale) = expect_bundle_surface_input(inputs, "Bundle Surface Display")?;
-            let boundary_field = inputs
-                .get(1)
-                .and_then(|value| value.as_ref())
-                .map(|value| expect_boundary_field_input(Some(value), "Bundle Surface Display"))
-                .transpose()?;
-            let runtime = display_ids.entry(node.uuid).or_insert_with(|| {
-                let draw_id = *next_draw_id;
-                *next_draw_id += 1;
-                StreamlineDisplayRuntime {
-                    draw_id,
-                    ..Default::default()
-                }
-            });
-            let resolved_color_mode =
-                if matches!(bundle.build_mode, BundleSurfaceBuildMode::Streamtubes) {
-                    BundleSurfaceColorMode::SourceColors
-                } else {
-                    *color_mode
-                };
-            let draw = BundleDrawPlan {
-                node_uuid: node.uuid,
-                build_node_uuid: bundle.build_node_uuid,
-                boundary_field_node_uuid: boundary_field
-                    .as_ref()
-                    .map(|(plan, _)| plan.build_node_uuid),
-                draw_id: runtime.draw_id,
-                label: bundle.label,
-                flow: bundle.flow,
-                per_group: bundle.per_group,
-                color_mode: resolved_color_mode,
-                build_mode: bundle.build_mode,
-                voxel_size_mm: bundle.voxel_size_mm,
-                threshold: bundle.threshold,
-                smooth_sigma: bundle.smooth_sigma,
-                min_component_volume_mm3: bundle.min_component_volume_mm3,
-                tube_radius_mm: bundle.tube_radius_mm,
-                tube_sides: bundle.tube_sides,
-                opacity: bundle.opacity,
-                outline_thickness: *outline_thickness,
-            };
-            let boundary_revision = draw.boundary_field_node_uuid.and_then(|uuid| {
-                execution_cache
-                    .boundary_field_cache
-                    .get(&uuid)
-                    .map(|cache| cache.fingerprint)
-            });
-            let display_fingerprint = workflow_bundle_display_fingerprint(&draw, boundary_revision);
-            let record = execution_cache.node_runs.entry(node.uuid).or_default();
-            prime_expensive_record(record, display_fingerprint);
-            sync_node_state_from_run_record(node_state, record);
-            let boundary_stale = boundary_field.as_ref().is_some_and(|(_, stale)| *stale);
-            node_state.summary = if stale || boundary_stale {
-                format!(
-                    "Displaying stale bundle surface ({})",
-                    resolved_color_mode.label()
-                )
-            } else {
-                format!(
-                    "Displaying bundle surface ({})",
-                    resolved_color_mode.label()
-                )
-            };
-            scene_plan.bundle_draws.push(draw);
-            Ok(Vec::new())
-        }
-        WorkflowNodeKind::BoundaryGlyphDisplay {
-            enabled,
-            scale,
-            density_3d_step,
-            slice_density_step,
-            color_mode,
-            min_contacts,
-        } => {
-            let (plan, stale) = expect_boundary_field_input(
-                inputs.first().and_then(|value| value.as_ref()),
-                "Boundary Glyph Display",
-            )?;
-            let draw = BoundaryGlyphDrawPlan {
-                node_uuid: node.uuid,
-                build_node_uuid: plan.build_node_uuid,
-                label: node.label.clone(),
-                visible: *enabled,
-                scale: *scale,
-                density_3d_step: *density_3d_step,
-                slice_density_step: *slice_density_step,
-                color_mode: *color_mode,
-                min_contacts: *min_contacts,
-            };
-            node_state.execution = None;
-            node_state.summary = if !enabled {
-                "Boundary field hidden".to_string()
-            } else if stale {
-                "Displaying stale boundary field".to_string()
-            } else {
-                "Displaying boundary field".to_string()
-            };
-            scene_plan.boundary_glyph_draws.push(draw);
-            Ok(Vec::new())
-        }
-        WorkflowNodeKind::ParcelSurfaceBuild => {
-            let parcel_selection = expect_parcel_selection_input(inputs, "Parcel Surface Build")?;
-            scene_plan.parcellation_draws.push(ParcellationDrawPlan {
-                source_id: parcel_selection.source_id,
-                labels: parcel_selection.labels,
-                opacity: 0.9,
-            });
-            Ok(Vec::new())
-        }
-        WorkflowNodeKind::OdxSource { source_id } => {
-            let asset = odx_assets
-                .get(source_id)
-                .ok_or_else(|| WorkflowError::Evaluation(format!("Missing ODX asset {source_id}")))?;
-            let scene = asset.scene.clone();
-            let dirs = scene.directions().to_vec();
-            let default_scalars = FixelScalars::from_directions(*source_id, &dirs);
-            let field = FixelField {
-                source_id: *source_id,
-                scene: scene.clone(),
-                scalars: default_scalars.clone(),
-                colormap_code: 0,
-                scalar_range: (0.0, 1.0),
-            };
-            let odf = OdfField {
-                source_id: *source_id,
-                scene: scene.clone(),
-            };
-            let catalog = OdxCatalog::from_scene(*source_id, scene);
-            Ok(vec![
-                WorkflowValue::Fixels(field).into(),
-                WorkflowValue::OdfField(odf).into(),
-                WorkflowValue::OdxCatalog(catalog).into(),
-                WorkflowValue::FixelScalars(default_scalars).into(),
-            ])
-        }
-        WorkflowNodeKind::OdxVolumeSelect { dpv_name } => {
-            let catalog = expect_odx_catalog_input(inputs, "ODX Volume Select")?;
-            if dpv_name.is_empty() {
-                return Err(WorkflowError::Evaluation("ODX Volume Select needs a DPV name".to_string()));
-            }
-            let volume = catalog
-                .materialize_dpv(dpv_name)
-                .map_err(|e| WorkflowError::Evaluation(format!("Failed to materialize DPV '{dpv_name}': {e}")))?;
-            let volume_scalars =
-                volume_scalars_from_nifti_volume(&volume, dpv_name.clone(), catalog.source_id);
-            // Stash the materialized volume in the execution cache so headless can pick it up.
-            execution_cache.odx_dpv_materializations.insert(
-                node.uuid,
-                crate::workflow::types::OdxDpvMaterialization {
-                    source_id: catalog.source_id,
-                    dpv_name: dpv_name.clone(),
-                    volume: Arc::new(volume),
-                },
-            );
-            Ok(vec![
-                WorkflowValue::Volume(catalog.source_id).into(),
-                WorkflowValue::VolumeScalars(volume_scalars).into(),
-            ])
-        }
-        WorkflowNodeKind::OdxFixelScalarSelect { dpf_name } => {
-            let catalog = expect_odx_catalog_input(inputs, "ODX Fixel Scalar Select")?;
-            if dpf_name.is_empty() {
-                return Err(WorkflowError::Evaluation("ODX Fixel Scalar Select needs a DPF name".to_string()));
-            }
-            let values = catalog
-                .scene
-                .scalar_dpf_f32(dpf_name)
-                .map_err(|e| WorkflowError::Evaluation(format!("Failed to load DPF '{dpf_name}': {e}")))?;
-            let scalars = FixelScalars::from_scalar(catalog.source_id, dpf_name.clone(), values);
-            Ok(vec![WorkflowValue::FixelScalars(scalars).into()])
-        }
-        WorkflowNodeKind::ColorByFixelScalars {
-            colormap,
-            range,
-            length_scale_by_scalar: _,
-        } => {
-            let mut field = expect_fixels_input(inputs, "Color By Fixel Scalars")?;
-            let scalars = expect_fixel_scalars_input(inputs, "Color By Fixel Scalars")?;
-            if scalars.fixel_count != field.scalars.fixel_count {
-                return Err(WorkflowError::Evaluation(format!(
-                    "Fixel count mismatch: scalars have {} fixels, field has {}",
-                    scalars.fixel_count, field.scalars.fixel_count
-                )));
-            }
-            field.colormap_code = match colormap {
-                SurfaceColormap::BlueWhiteRed => 5,
-                SurfaceColormap::Viridis => 3,
-                SurfaceColormap::Inferno => 4,
-            };
-            field.scalar_range = range.unwrap_or(scalars.range);
-            field.scalars = scalars.clone();
-            Ok(vec![
-                WorkflowValue::Fixels(field).into(),
-                WorkflowValue::FixelScalars(scalars).into(),
-            ])
-        }
-        WorkflowNodeKind::Fixel3DDisplay {
-            line_width,
-            length_scale,
-            opacity,
-            offset_from_slice,
-            visible,
-        } => {
-            let field = expect_fixels_input(inputs, "Fixel 3D Display")?;
-            let colormap_code = field.colormap_code;
-            let scalar_range = field.scalar_range;
-            scene_plan.fixel_3d_draws.push(FixelDrawPlan {
-                node_uuid: node.uuid,
-                field,
-                line_width: *line_width,
-                length_scale: *length_scale,
-                opacity: *opacity,
-                offset_from_slice: *offset_from_slice,
-                slab_thickness_mm: Millimeters(0.0),
-                visible: *visible,
-                colormap_code,
-                scalar_range,
-            });
-            Ok(Vec::new())
-        }
-        WorkflowNodeKind::Fixel2DDisplay {
-            line_width,
-            opacity,
-            slab_thickness_mm,
-            length_scale,
-            visible,
-        } => {
-            let field = expect_fixels_input(inputs, "Fixel 2D Display")?;
-            let colormap_code = field.colormap_code;
-            let scalar_range = field.scalar_range;
-            scene_plan.fixel_2d_draws.push(FixelDrawPlan {
-                node_uuid: node.uuid,
-                field,
-                line_width: *line_width,
-                length_scale: *length_scale,
-                opacity: *opacity,
-                offset_from_slice: 0.0,
-                slab_thickness_mm: *slab_thickness_mm,
-                visible: *visible,
-                colormap_code,
-                scalar_range,
-            });
-            Ok(Vec::new())
-        }
-        WorkflowNodeKind::OdfGlyphRenderer {
-            scale,
-            opacity,
-            offset_from_slice,
-            gloss,
-            vertex_colormap,
-            slice_axis,
-            opacity_gate,
-            size_gate,
-            detail,
-            visible,
-        } => {
-            let field = expect_odf_field_input(inputs, "ODF Glyph Renderer")?;
-            let opacity_scalars = optional_volume_scalars_input(inputs, 1);
-            let size_scalars = optional_volume_scalars_input(inputs, 2);
-            scene_plan.odf_glyph_draws.push(OdfGlyphDrawPlan {
-                node_uuid: node.uuid,
-                field,
-                scale: *scale,
-                opacity: *opacity,
-                offset_from_slice: *offset_from_slice,
-                gloss: *gloss,
-                vertex_colormap: *vertex_colormap,
-                slice_axis: *slice_axis,
-                opacity_gate: *opacity_gate,
-                size_gate: *size_gate,
-                detail: *detail,
-                opacity_scalars,
-                size_scalars,
-                visible: *visible,
-            });
-            Ok(Vec::new())
-        }
-    }
+    super::ops::evaluate(&node.kind, &mut op_ctx)
 }
 
-fn expect_fixels_input(
+pub(crate) fn expect_fixels_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
 ) -> WorkflowResult<FixelField> {
@@ -828,10 +279,12 @@ fn expect_fixels_input(
             return Ok(field.clone());
         }
     }
-    Err(WorkflowError::Evaluation(format!("{label} needs a Fixels input")))
+    Err(WorkflowError::Evaluation(format!(
+        "{label} needs a Fixels input"
+    )))
 }
 
-fn expect_fixel_scalars_input(
+pub(crate) fn expect_fixel_scalars_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
 ) -> WorkflowResult<FixelScalars> {
@@ -840,10 +293,12 @@ fn expect_fixel_scalars_input(
             return Ok(s.clone());
         }
     }
-    Err(WorkflowError::Evaluation(format!("{label} needs a FixelScalars input")))
+    Err(WorkflowError::Evaluation(format!(
+        "{label} needs a FixelScalars input"
+    )))
 }
 
-fn expect_odf_field_input(
+pub(crate) fn expect_odf_field_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
 ) -> WorkflowResult<OdfField> {
@@ -852,10 +307,12 @@ fn expect_odf_field_input(
             return Ok(f.clone());
         }
     }
-    Err(WorkflowError::Evaluation(format!("{label} needs an OdfField input")))
+    Err(WorkflowError::Evaluation(format!(
+        "{label} needs an OdfField input"
+    )))
 }
 
-fn expect_odx_catalog_input(
+pub(crate) fn expect_odx_catalog_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
 ) -> WorkflowResult<OdxCatalog> {
@@ -864,10 +321,12 @@ fn expect_odx_catalog_input(
             return Ok(c.clone());
         }
     }
-    Err(WorkflowError::Evaluation(format!("{label} needs an OdxCatalog input")))
+    Err(WorkflowError::Evaluation(format!(
+        "{label} needs an OdxCatalog input"
+    )))
 }
 
-fn optional_volume_scalars_input(
+pub(crate) fn optional_volume_scalars_input(
     inputs: &[Option<EvaluatedValue>],
     index: usize,
 ) -> Option<VolumeScalars> {
@@ -880,7 +339,7 @@ fn optional_volume_scalars_input(
     }
 }
 
-fn volume_scalars_from_nifti_volume(
+pub(crate) fn volume_scalars_from_nifti_volume(
     volume: &crate::data::nifti_data::NiftiVolume,
     map_name: String,
     _source_id: FileId,
@@ -922,7 +381,9 @@ pub(crate) fn expect_streamline_input(
             value: WorkflowValue::Streamline(flow),
             ..
         }) => Ok(flow),
-        _ => Err(WorkflowError::Evaluation(format!("{label} needs a streamline input"))),
+        _ => Err(WorkflowError::Evaluation(format!(
+            "{label} needs a streamline input"
+        ))),
     }
 }
 
@@ -943,17 +404,22 @@ pub(crate) fn expect_surface_input(
         .ok_or_else(|| WorkflowError::Evaluation(format!("{label} needs a surface input")))
 }
 
-fn expect_cifti_input(inputs: &[Option<EvaluatedValue>], label: &str) -> WorkflowResult<FileId> {
+pub(crate) fn expect_cifti_input(
+    inputs: &[Option<EvaluatedValue>],
+    label: &str,
+) -> WorkflowResult<FileId> {
     match inputs.first().cloned().flatten() {
         Some(EvaluatedValue {
             value: WorkflowValue::Cifti(source_id),
             ..
         }) => Ok(source_id),
-        _ => Err(WorkflowError::Evaluation(format!("{label} needs a CIFTI input"))),
+        _ => Err(WorkflowError::Evaluation(format!(
+            "{label} needs a CIFTI input"
+        ))),
     }
 }
 
-fn expect_bundle_surface_input(
+pub(crate) fn expect_bundle_surface_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
 ) -> WorkflowResult<(BundleSurfacePlan, bool)> {
@@ -962,12 +428,16 @@ fn expect_bundle_surface_input(
             value: WorkflowValue::BundleSurface(bundle),
             stale,
         }) => Ok((bundle, stale)),
-        Some(_) => Err(WorkflowError::Evaluation(format!("{label} needs a bundle surface input"))),
-        None => Err(WorkflowError::Evaluation(format!("{label} is missing an input"))),
+        Some(_) => Err(WorkflowError::Evaluation(format!(
+            "{label} needs a bundle surface input"
+        ))),
+        None => Err(WorkflowError::Evaluation(format!(
+            "{label} is missing an input"
+        ))),
     }
 }
 
-fn expect_volume_scalars_input(
+pub(crate) fn expect_volume_scalars_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
 ) -> WorkflowResult<VolumeScalars> {
@@ -976,11 +446,13 @@ fn expect_volume_scalars_input(
             value: WorkflowValue::VolumeScalars(value),
             ..
         }) => Ok(value),
-        _ => Err(WorkflowError::Evaluation(format!("{label} needs volume scalars"))),
+        _ => Err(WorkflowError::Evaluation(format!(
+            "{label} needs volume scalars"
+        ))),
     }
 }
 
-fn expect_surface_appearance_input(
+pub(crate) fn expect_surface_appearance_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
 ) -> WorkflowResult<SurfaceAppearance> {
@@ -989,11 +461,13 @@ fn expect_surface_appearance_input(
             value: WorkflowValue::SurfaceAppearance(value),
             ..
         }) => Ok(value),
-        _ => Err(WorkflowError::Evaluation(format!("{label} needs a surface appearance input"))),
+        _ => Err(WorkflowError::Evaluation(format!(
+            "{label} needs a surface appearance input"
+        ))),
     }
 }
 
-fn expect_boundary_field_input(
+pub(crate) fn expect_boundary_field_input(
     input: Option<&EvaluatedValue>,
     label: &str,
 ) -> WorkflowResult<(BoundaryFieldPlan, bool)> {
@@ -1002,18 +476,27 @@ fn expect_boundary_field_input(
             value: WorkflowValue::BoundaryField(plan),
             stale,
         }) => Ok((plan.clone(), *stale)),
-        Some(_) => Err(WorkflowError::Evaluation(format!("{label} needs a boundary field input"))),
-        None => Err(WorkflowError::Evaluation(format!("{label} is missing an input"))),
+        Some(_) => Err(WorkflowError::Evaluation(format!(
+            "{label} needs a boundary field input"
+        ))),
+        None => Err(WorkflowError::Evaluation(format!(
+            "{label} is missing an input"
+        ))),
     }
 }
 
-fn expect_volume_input(inputs: &[Option<EvaluatedValue>], label: &str) -> WorkflowResult<FileId> {
+pub(crate) fn expect_volume_input(
+    inputs: &[Option<EvaluatedValue>],
+    label: &str,
+) -> WorkflowResult<FileId> {
     match inputs.first().cloned().flatten() {
         Some(EvaluatedValue {
             value: WorkflowValue::Volume(source_id),
             ..
         }) => Ok(source_id),
-        _ => Err(WorkflowError::Evaluation(format!("{label} needs a volume input"))),
+        _ => Err(WorkflowError::Evaluation(format!(
+            "{label} needs a volume input"
+        ))),
     }
 }
 
@@ -1026,7 +509,9 @@ pub(crate) fn expect_parcellation_input(
             value: WorkflowValue::Parcellation(source_id),
             ..
         }) => Ok(source_id),
-        _ => Err(WorkflowError::Evaluation(format!("{label} needs a parcellation input"))),
+        _ => Err(WorkflowError::Evaluation(format!(
+            "{label} needs a parcellation input"
+        ))),
     }
 }
 
@@ -1039,7 +524,9 @@ pub(crate) fn expect_parcel_selection_input(
             value: WorkflowValue::ParcelSelection(selection),
             ..
         }) => Ok(selection),
-        _ => Err(WorkflowError::Evaluation(format!("{label} needs a parcel selection input"))),
+        _ => Err(WorkflowError::Evaluation(format!(
+            "{label} needs a parcel selection input"
+        ))),
     }
 }
 
@@ -1088,7 +575,7 @@ pub(crate) fn evaluate_derived_streamline_plan(
     Ok(Vec::new())
 }
 
-fn compose_surface_appearance(
+pub(crate) fn compose_surface_appearance(
     surface_id: FileId,
     surface: &LoadedGiftiSurface,
     layers: &[SurfaceOverlayLayerConfig],
@@ -1136,7 +623,7 @@ fn compose_surface_appearance(
     })
 }
 
-fn surface_display_model_matrix(
+pub(crate) fn surface_display_model_matrix(
     surface: &LoadedGiftiSurface,
     structure: Option<CiftiStructure>,
     space: SurfaceDisplaySpace,
@@ -1309,6 +796,7 @@ mod tests {
     use super::*;
     use crate::data::gifti_data::GiftiSurfaceData;
     use crate::data::loaded_files::{LoadedTrx, StreamlineBacking};
+    use crate::units::Millimeters;
 
     #[test]
     fn group_filter_empty_means_all() {
@@ -1590,10 +1078,8 @@ pub(crate) fn add_groups_from_parcellation_from_label(
 
     for (new_index, &streamline_index) in flow.selected_streamlines.iter().enumerate() {
         let mut labels_hit = BTreeSet::new();
-        for point in streamline_points(
-            flow.dataset.gpu_data.as_ref(),
-            streamline_index.0 as usize,
-        ) {
+        for point in streamline_points(flow.dataset.gpu_data.as_ref(), streamline_index.0 as usize)
+        {
             if let Some(label) = parcellation.sample_label_world(Vec3::from(*point)) {
                 if label.0 != 0 {
                     labels_hit.insert(label);
@@ -1653,10 +1139,7 @@ fn crop_flow_to_parcels(
 ) -> WorkflowResult<Tractogram> {
     let mut tractogram = Tractogram::new();
     for &streamline_index in flow.selected_streamlines.iter() {
-        let points = streamline_points(
-            flow.dataset.gpu_data.as_ref(),
-            streamline_index.0 as usize,
-        );
+        let points = streamline_points(flow.dataset.gpu_data.as_ref(), streamline_index.0 as usize);
         let segments = if keep_inside {
             parcellation.crop_streamline_inside(points, labels)
         } else {
@@ -1701,8 +1184,8 @@ pub(crate) fn materialize_reactive_streamline_flow(
         }
         ReactiveStreamlineOp::RemoveDuplicates { params } => {
             let tractogram = subset_tractogram_from_flow(&plan.left)?;
-            let deduped =
-                remove_duplicates_tractogram(&tractogram, params).map_err(|e| WorkflowError::Other(e.into()))?;
+            let deduped = remove_duplicates_tractogram(&tractogram, params)
+                .map_err(|e| WorkflowError::Other(e.into()))?;
             streamline_flow_from_tractogram(plan.label.clone(), &plan.left, deduped)
         }
         ReactiveStreamlineOp::ParcelROI {
@@ -1715,10 +1198,8 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 .iter()
                 .copied()
                 .filter(|index| {
-                    let points = streamline_points(
-                        plan.left.dataset.gpu_data.as_ref(),
-                        index.0 as usize,
-                    );
+                    let points =
+                        streamline_points(plan.left.dataset.gpu_data.as_ref(), index.0 as usize);
                     parcellation.streamline_hits_labels(points, labels)
                 })
                 .collect();
@@ -1737,10 +1218,8 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 .iter()
                 .copied()
                 .filter(|index| {
-                    let points = streamline_points(
-                        plan.left.dataset.gpu_data.as_ref(),
-                        index.0 as usize,
-                    );
+                    let points =
+                        streamline_points(plan.left.dataset.gpu_data.as_ref(), index.0 as usize);
                     parcellation.streamline_avoids_labels(points, labels)
                 })
                 .collect();
@@ -1760,10 +1239,8 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 .iter()
                 .copied()
                 .filter(|index| {
-                    let points = streamline_points(
-                        plan.left.dataset.gpu_data.as_ref(),
-                        index.0 as usize,
-                    );
+                    let points =
+                        streamline_points(plan.left.dataset.gpu_data.as_ref(), index.0 as usize);
                     parcellation.streamline_end_hits_labels(points, labels, *endpoint_count)
                 })
                 .collect();
@@ -1797,8 +1274,7 @@ fn streamline_flow_from_tractogram(
     source_flow: &StreamlineFlow,
     tractogram: Tractogram,
 ) -> WorkflowResult<StreamlineFlow> {
-    let gpu_data =
-        Arc::new(TrxGpuData::from_tractogram(&tractogram)?);
+    let gpu_data = Arc::new(TrxGpuData::from_tractogram(&tractogram)?);
     let selected = (0..gpu_data.nb_streamlines as u32)
         .map(StreamlineIndex)
         .collect();
@@ -1887,7 +1363,9 @@ pub fn save_streamline_plan(plan: &SaveStreamlinePlan) -> WorkflowResult<()> {
             .is_some_and(|ext| ext.eq_ignore_ascii_case("trx"))
     {
         if let StreamlineBacking::Native(any) = &plan.flow.dataset.backing {
-            return any.save(&plan.output_path).map_err(|e| WorkflowError::Other(e.into()));
+            return any
+                .save(&plan.output_path)
+                .map_err(|e| WorkflowError::Other(e.into()));
         }
     }
 

@@ -1354,189 +1354,25 @@ impl Default for WorkflowProject {
 
 impl WorkflowNodeKind {
     pub fn title(&self) -> &'static str {
-        if let Some(title) = super::ops::title(self) {
-            return title;
-        }
-        match self {
-            Self::StreamlineSource { .. }
-            | Self::ParcellationSource { .. }
-            | Self::LimitStreamlines { .. }
-            | Self::GroupSelect { .. }
-            | Self::RandomSubset { .. }
-            | Self::SphereQuery { .. }
-            | Self::SurfaceDepthQuery { .. }
-            | Self::RemoveDuplicates { .. }
-            | Self::Merge
-            | Self::AddGroupsFromParcellation
-            | Self::ParcelSelect { .. }
-            | Self::ParcelROI
-            | Self::ParcelROA
-            | Self::ParcelEnd { .. }
-            | Self::ParcelLimiting
-            | Self::ParcelTerminative
-            | Self::ColorByDirection
-            | Self::ColorByGroup
-            | Self::ColorByDPV { .. }
-            | Self::ColorByDPS { .. }
-            | Self::UniformColor { .. }
-            | Self::SurfaceProjectionDensity { .. }
-            | Self::SurfaceProjectionMeanDps { .. }
-            | Self::StreamlineDisplay { .. }
-            | Self::ParcellationDisplay { .. }
-            | Self::SaveStreamlines { .. } => unreachable!("handled by workflow op registry"),
-            Self::VolumeSource { .. } => "Volume Source",
-            Self::CiftiSource { .. } => "CIFTI Source",
-            Self::SurfaceSource { .. } => "Surface Source",
-            Self::CiftiStructure { structure, .. } => match structure {
-                CiftiStructure::CortexLeft => "CIFTI Left Cortex",
-                CiftiStructure::CortexRight => "CIFTI Right Cortex",
-                CiftiStructure::Subcortical => "CIFTI Subcortex",
-            },
-            Self::ParcelSurfaceBuild => "Parcel Surface Build",
-            Self::SurfaceOverlayStack { .. } => "Surface Overlay Stack",
-            Self::BundleSurfaceBuild { .. } => "Bundle Surface Build",
-            Self::BoundaryFieldBuild { .. } => "Boundary Field Build",
-            Self::VolumeDisplay { .. } => "Volume Display",
-            Self::VolumeScalarsDisplay { .. } => "Volume Scalars Display",
-            Self::SurfaceDisplay { .. } => "Surface Display",
-            Self::BundleSurfaceDisplay { .. } => "Bundle Surface Display",
-            Self::BoundaryGlyphDisplay { .. } => "Boundary Glyph Display",
-            Self::OdxSource { .. } => "ODX Source",
-            Self::OdxFixelScalarSelect { .. } => "ODX Fixel Scalar Select",
-            Self::OdxVolumeSelect { .. } => "ODX Volume Select",
-            Self::ColorByFixelScalars { .. } => "Color By Fixel Scalars",
-            Self::Fixel3DDisplay { .. } => "Fixel 3D Display",
-            Self::Fixel2DDisplay { .. } => "Fixel 2D Display",
-            Self::OdfGlyphRenderer { .. } => "ODF Glyph Renderer",
-        }
+        super::ops::title(self)
     }
 
     pub fn inputs(&self) -> Vec<PortKind> {
-        if let Some(ports) = super::ops::input_ports(self) {
-            return ports.to_vec();
-        }
         match self {
-            Self::StreamlineSource { .. }
-            | Self::ParcellationSource { .. }
-            | Self::LimitStreamlines { .. }
-            | Self::GroupSelect { .. }
-            | Self::RandomSubset { .. }
-            | Self::SphereQuery { .. }
-            | Self::SurfaceDepthQuery { .. }
-            | Self::RemoveDuplicates { .. }
-            | Self::Merge
-            | Self::AddGroupsFromParcellation
-            | Self::ParcelSelect { .. }
-            | Self::ParcelROI
-            | Self::ParcelROA
-            | Self::ParcelEnd { .. }
-            | Self::ParcelLimiting
-            | Self::ParcelTerminative
-            | Self::ColorByDirection
-            | Self::ColorByGroup
-            | Self::ColorByDPV { .. }
-            | Self::ColorByDPS { .. }
-            | Self::UniformColor { .. }
-            | Self::SurfaceProjectionDensity { .. }
-            | Self::SurfaceProjectionMeanDps { .. }
-            | Self::StreamlineDisplay { .. }
-            | Self::ParcellationDisplay { .. }
-            | Self::SaveStreamlines { .. } => unreachable!("handled by workflow op registry"),
-            Self::VolumeSource { .. } | Self::CiftiSource { .. } | Self::SurfaceSource { .. } => {
-                Vec::new()
-            }
-            Self::BundleSurfaceBuild { .. } => vec![PortKind::Streamline],
-            Self::BoundaryFieldBuild { .. } => vec![PortKind::Streamline],
-            Self::BundleSurfaceDisplay { .. } => {
-                vec![PortKind::BundleSurface, PortKind::BoundaryField]
-            }
-            Self::BoundaryGlyphDisplay { .. } => vec![PortKind::BoundaryField],
-            Self::CiftiStructure { structure, .. } => match structure {
-                CiftiStructure::Subcortical => vec![PortKind::Cifti],
-                _ => vec![PortKind::Cifti],
-            },
-            Self::ParcelSurfaceBuild => vec![PortKind::ParcelSelection],
-            Self::VolumeDisplay { .. } => vec![PortKind::Volume],
-            Self::VolumeScalarsDisplay { .. } => vec![PortKind::VolumeScalars],
             Self::SurfaceOverlayStack { layers } => {
-                let mut ports = vec![PortKind::Surface];
-                ports.extend(std::iter::repeat_n(PortKind::SurfaceScalars, layers.len()));
+                let mut ports = Vec::with_capacity(layers.len() + 1);
+                ports.push(PortKind::Surface);
+                ports.extend(std::iter::repeat(PortKind::SurfaceScalars).take(layers.len()));
                 ports
             }
-            Self::SurfaceDisplay { .. } => vec![PortKind::SurfaceAppearance],
-            Self::OdxSource { .. } => Vec::new(),
-            Self::OdxFixelScalarSelect { .. } => vec![PortKind::OdxCatalog],
-            Self::OdxVolumeSelect { .. } => vec![PortKind::OdxCatalog],
-            Self::ColorByFixelScalars { .. } => vec![PortKind::Fixels, PortKind::FixelScalars],
-            Self::Fixel3DDisplay { .. } | Self::Fixel2DDisplay { .. } => vec![PortKind::Fixels],
-            Self::OdfGlyphRenderer { .. } => vec![
-                PortKind::OdfField,
-                PortKind::VolumeScalars,
-                PortKind::VolumeScalars,
-            ],
+            _ => super::ops::input_ports(self)
+                .expect("handled by workflow op registry")
+                .to_vec(),
         }
     }
 
     pub fn outputs(&self) -> Vec<PortKind> {
-        if let Some(ports) = super::ops::output_ports(self) {
-            return ports.to_vec();
-        }
-        match self {
-            Self::StreamlineSource { .. }
-            | Self::ParcellationSource { .. }
-            | Self::LimitStreamlines { .. }
-            | Self::GroupSelect { .. }
-            | Self::RandomSubset { .. }
-            | Self::SphereQuery { .. }
-            | Self::RemoveDuplicates { .. }
-            | Self::Merge
-            | Self::SurfaceDepthQuery { .. }
-            | Self::AddGroupsFromParcellation
-            | Self::ParcelSelect { .. }
-            | Self::ParcelROI
-            | Self::ParcelROA
-            | Self::ParcelEnd { .. }
-            | Self::ParcelLimiting
-            | Self::ParcelTerminative
-            | Self::ColorByDirection
-            | Self::ColorByGroup
-            | Self::ColorByDPV { .. }
-            | Self::ColorByDPS { .. }
-            | Self::UniformColor { .. }
-            | Self::SurfaceProjectionDensity { .. }
-            | Self::SurfaceProjectionMeanDps { .. }
-            | Self::StreamlineDisplay { .. }
-            | Self::ParcellationDisplay { .. }
-            | Self::SaveStreamlines { .. } => unreachable!("handled by workflow op registry"),
-            Self::VolumeSource { .. } => vec![PortKind::Volume],
-            Self::CiftiSource { .. } => vec![PortKind::Cifti],
-            Self::SurfaceSource { .. } => vec![PortKind::Surface],
-            Self::CiftiStructure { structure, .. } => match structure {
-                CiftiStructure::Subcortical => vec![PortKind::VolumeScalars],
-                _ => vec![PortKind::SurfaceScalars],
-            },
-            Self::SurfaceOverlayStack { .. } => vec![PortKind::SurfaceAppearance],
-            Self::BundleSurfaceBuild { .. } => vec![PortKind::BundleSurface],
-            Self::BoundaryFieldBuild { .. } => vec![PortKind::BoundaryField],
-            Self::OdxSource { .. } => vec![
-                PortKind::Fixels,
-                PortKind::OdfField,
-                PortKind::OdxCatalog,
-                PortKind::FixelScalars,
-            ],
-            Self::OdxFixelScalarSelect { .. } => vec![PortKind::FixelScalars],
-            Self::OdxVolumeSelect { .. } => vec![PortKind::Volume, PortKind::VolumeScalars],
-            Self::ColorByFixelScalars { .. } => vec![PortKind::Fixels],
-            Self::ParcelSurfaceBuild
-            | Self::VolumeDisplay { .. }
-            | Self::VolumeScalarsDisplay { .. }
-            | Self::SurfaceDisplay { .. }
-            | Self::BoundaryGlyphDisplay { .. }
-            | Self::BundleSurfaceDisplay { .. }
-            | Self::Fixel3DDisplay { .. }
-            | Self::Fixel2DDisplay { .. }
-            | Self::OdfGlyphRenderer { .. } => Vec::new(),
-        }
+        super::ops::output_ports(self).to_vec()
     }
 }
 
@@ -1566,7 +1402,7 @@ mod tests {
     use super::{
         PortKind, WorkflowCamera3D, WorkflowDocument, WorkflowNodeKind, WorkflowOrthoSliceCamera,
         WorkflowProject, WorkflowSliceView3D, WorkflowSliceViewKind, WorkflowSliceViewUi,
-        WorkflowView2DMode,
+        WorkflowView2DMode, default_surface_overlay_layers,
     };
     use crate::lighting::{SceneLightingPreset, WorkflowBackground3D, WorkflowRender3D};
 
@@ -1624,6 +1460,22 @@ mod tests {
             }
             .outputs(),
             vec![PortKind::Volume, PortKind::VolumeScalars]
+        );
+    }
+
+    #[test]
+    fn surface_overlay_stack_inputs_include_surface_and_layer_scalars() {
+        let layers = default_surface_overlay_layers();
+        let inputs = WorkflowNodeKind::SurfaceOverlayStack {
+            layers: layers.clone(),
+        }
+        .inputs();
+        assert_eq!(inputs.len(), layers.len() + 1);
+        assert_eq!(inputs.first(), Some(&PortKind::Surface));
+        assert!(
+            inputs[1..]
+                .iter()
+                .all(|port| *port == PortKind::SurfaceScalars)
         );
     }
 

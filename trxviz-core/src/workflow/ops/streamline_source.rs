@@ -4,7 +4,9 @@ use crate::data::loaded_files::FileId;
 use crate::data::trx_data::ColorMode;
 use crate::units::StreamlineIndex;
 
-use super::super::{EvalCtx, PortKind, StreamlineDataset, StreamlineFlow, WorkflowOp, WorkflowValue};
+use super::super::{
+    EvalCtx, PortKind, StreamlineDataset, StreamlineFlow, WorkflowOp, WorkflowValue,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct StreamlineSourceOp {

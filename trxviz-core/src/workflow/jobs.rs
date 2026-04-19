@@ -205,7 +205,8 @@ pub fn bundle_surface_component_flows(plan: &BundleSurfacePlan) -> Vec<(String, 
         return vec![(plan.label.clone(), plan.flow.clone())];
     }
 
-    let selected: HashSet<StreamlineIndex> = plan.flow.selected_streamlines.iter().copied().collect();
+    let selected: HashSet<StreamlineIndex> =
+        plan.flow.selected_streamlines.iter().copied().collect();
     let mut components = Vec::new();
     for (group_name, members) in plan
         .flow

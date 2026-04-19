@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use glam::Vec3;
 
-use super::super::{
-    EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_streamline_input,
-};
+use super::super::{EvalCtx, PortKind, WorkflowOp, WorkflowValue, expect_streamline_input};
 use crate::units::Millimeters;
 
 #[derive(Debug, Clone, Copy)]

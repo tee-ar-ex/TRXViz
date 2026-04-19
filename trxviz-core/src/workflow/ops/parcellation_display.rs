@@ -35,11 +35,13 @@ impl WorkflowOp for ParcellationDisplayOp {
             crate::error::WorkflowError::Evaluation(format!("Missing parcellation {source_id}"))
         })?;
         let labels = resolve_selected_labels(&self.labels, &parcellation.asset.data);
-        ctx.scene_plan.parcellation_draws.push(ParcellationDrawPlan {
-            source_id,
-            labels,
-            opacity: self.opacity,
-        });
+        ctx.scene_plan
+            .parcellation_draws
+            .push(ParcellationDrawPlan {
+                source_id,
+                labels,
+                opacity: self.opacity,
+            });
         Ok(Vec::new())
     }
 }

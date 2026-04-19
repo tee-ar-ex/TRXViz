@@ -65,7 +65,11 @@ impl WorkflowOp for StreamlineDisplayOp {
         if self.render_style == RenderStyle::Tubes {
             let upstream_stale = ctx.upstream_stale();
             let fingerprint = workflow_streamline_fingerprint(&plan);
-            let record = ctx.execution_cache.node_runs.entry(ctx.node.uuid).or_default();
+            let record = ctx
+                .execution_cache
+                .node_runs
+                .entry(ctx.node.uuid)
+                .or_default();
             prime_expensive_record(record, fingerprint);
             sync_node_state_from_run_record(ctx.node_state, record);
             if upstream_stale && matches!(record.status, WorkflowExecutionStatus::Ready) {

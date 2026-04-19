@@ -940,20 +940,16 @@ impl GlyphResources {
                 ncoeffs: stored.ncoeffs,
                 slice_count: slice_chunk.len() as u32,
             };
-            let params_buffer = device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("odx_sh_compute_params_chunk"),
-                    contents: bytemuck::bytes_of(&next),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                },
-            );
-            let slice_buffer = device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("odx_sh_slice_indices"),
-                    contents: bytemuck::cast_slice(slice_chunk),
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                },
-            );
+            let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("odx_sh_compute_params_chunk"),
+                contents: bytemuck::bytes_of(&next),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let slice_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("odx_sh_slice_indices"),
+                contents: bytemuck::cast_slice(slice_chunk),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("odx_sh_compute_bg_chunk"),
                 layout: &self.odx_sh_bind_group_layout,

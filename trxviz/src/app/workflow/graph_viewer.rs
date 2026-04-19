@@ -250,7 +250,11 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
     ) -> impl egui_snarl::ui::SnarlPin + 'static {
         let port = snarl[pin.id.node].kind.outputs()[pin.id.output];
         ui.horizontal(|ui| {
-            ui.label(output_port_label(&snarl[pin.id.node].kind, pin.id.output, port));
+            ui.label(output_port_label(
+                &snarl[pin.id.node].kind,
+                pin.id.output,
+                port,
+            ));
             // Reserve space so the pin circle doesn't overlap the trailing label glyphs.
             ui.add_space(10.0);
         });

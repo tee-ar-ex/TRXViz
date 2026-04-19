@@ -83,9 +83,9 @@ pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEdi
             .map(|binding| {
                 editability.bindings.volume.insert(*id, binding);
             }),
-            WorkflowAssetDocument::Cifti { .. } => {
-                Err(WorkflowError::Evaluation("CIFTI workflow branches are only editable in Advanced mode.".to_string()))
-            }
+            WorkflowAssetDocument::Cifti { .. } => Err(WorkflowError::Evaluation(
+                "CIFTI workflow branches are only editable in Advanced mode.".to_string(),
+            )),
             WorkflowAssetDocument::Surface { id, .. } => {
                 match_surface_asset(*id, &kinds, &outgoing).map(|binding| {
                     editability.bindings.surface.insert(*id, binding);
@@ -101,9 +101,9 @@ pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEdi
             .map(|binding| {
                 editability.bindings.parcellation.insert(*id, binding);
             }),
-            WorkflowAssetDocument::Odx { .. } => {
-                Err(WorkflowError::Evaluation("ODX workflow branches are only editable in Advanced mode.".to_string()))
-            }
+            WorkflowAssetDocument::Odx { .. } => Err(WorkflowError::Evaluation(
+                "ODX workflow branches are only editable in Advanced mode.".to_string(),
+            )),
         };
 
         if let Err(reason) = result {
@@ -127,7 +127,11 @@ fn match_streamline_asset(
             WorkflowNodeKind::StreamlineSource { source_id } if *source_id == asset_id
         )
     })
-    .ok_or_else(|| WorkflowError::Evaluation(format!("Streamline asset {asset_id} is missing its source node.")))?;
+    .ok_or_else(|| {
+        WorkflowError::Evaluation(format!(
+            "Streamline asset {asset_id} is missing its source node."
+        ))
+    })?;
     let display = find_unique_reachable_display(source, kinds, outgoing, |kind| {
         matches!(kind, WorkflowNodeKind::StreamlineDisplay { .. })
     })?;
@@ -142,8 +146,9 @@ fn match_simple_display_asset(
     is_source: impl Fn(&WorkflowNodeKind, FileId) -> bool,
     is_display: impl Fn(&WorkflowNodeKind) -> bool,
 ) -> WorkflowResult<SimpleDisplayBinding> {
-    let source = find_single_node(kinds, |kind| is_source(kind, asset_id))
-        .ok_or_else(|| WorkflowError::Evaluation(format!("Asset {asset_id} is missing its source node.")))?;
+    let source = find_single_node(kinds, |kind| is_source(kind, asset_id)).ok_or_else(|| {
+        WorkflowError::Evaluation(format!("Asset {asset_id} is missing its source node."))
+    })?;
     let display = find_unique_reachable_display(source, kinds, outgoing, is_display)?;
 
     Ok(SimpleDisplayBinding { display })
@@ -154,8 +159,10 @@ fn match_surface_asset(
     kinds: &HashMap<WorkflowNodeUuid, &WorkflowNodeKind>,
     outgoing: &HashMap<WorkflowNodeUuid, Vec<WorkflowNodeUuid>>,
 ) -> WorkflowResult<SimpleSurfaceBinding> {
-    let source = find_single_node(kinds, |kind| is_surface_source(kind, asset_id))
-        .ok_or_else(|| WorkflowError::Evaluation(format!("Asset {asset_id} is missing its source node.")))?;
+    let source =
+        find_single_node(kinds, |kind| is_surface_source(kind, asset_id)).ok_or_else(|| {
+            WorkflowError::Evaluation(format!("Asset {asset_id} is missing its source node."))
+        })?;
     let display = find_unique_reachable_display(source, kinds, outgoing, is_surface_display)?;
     let overlay_stack = find_unique_reachable_optional_node(source, kinds, outgoing, |kind| {
         matches!(kind, WorkflowNodeKind::SurfaceOverlayStack { .. })

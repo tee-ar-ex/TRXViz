@@ -547,7 +547,11 @@ impl ViewportState {
             return false;
         };
 
-        let voxel = field.grid.voxel_size_mm.max(trxviz_core::units::Millimeters(0.5)).0;
+        let voxel = field
+            .grid
+            .voxel_size_mm
+            .max(trxviz_core::units::Millimeters(0.5))
+            .0;
         let dims = field.grid.dims;
         let min_pos = match axis_index {
             0 => field.grid.origin_ras.z + 0.5 * voxel,

@@ -1,5 +1,5 @@
 use super::super::{
-    EvalCtx, ParcelSelection, ParcelIdSet, PortKind, WorkflowOp, WorkflowValue,
+    EvalCtx, ParcelIdSet, ParcelSelection, PortKind, WorkflowOp, WorkflowValue,
     expect_parcellation_input, resolve_selected_labels,
 };
 

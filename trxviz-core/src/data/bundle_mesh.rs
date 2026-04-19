@@ -1015,14 +1015,8 @@ mod tests {
         ];
         let offsets = vec![0, 3, 6];
 
-        let mesh = build_streamtube_bundle_mesh(
-            &positions,
-            &colors,
-            &offsets,
-            Millimeters(0.2),
-            6,
-        )
-        .unwrap();
+        let mesh = build_streamtube_bundle_mesh(&positions, &colors, &offsets, Millimeters(0.2), 6)
+            .unwrap();
 
         assert!(!mesh.indices.is_empty());
         assert!(

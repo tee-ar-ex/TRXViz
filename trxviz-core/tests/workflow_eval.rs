@@ -12,8 +12,7 @@ use trxviz_core::data::trx_data::{ColorMode, RenderStyle, TrxGpuData};
 use trxviz_core::units::{Millimeters, StreamlineIndex};
 use trxviz_core::workflow::{
     GraphPos, GroupFilter, InPort, OutPort, WorkflowEvalMode, WorkflowExecutionCache,
-    WorkflowNodeKind,
-    default_document, evaluate_scene_plan_with_mode, make_node,
+    WorkflowNodeKind, default_document, evaluate_scene_plan_with_mode, make_node,
 };
 
 // ---------------------------------------------------------------------------
@@ -38,9 +37,8 @@ fn tractogram_with_n_streamlines(n: usize) -> Tractogram {
 }
 
 fn loaded_trx(id: usize, tractogram: Tractogram) -> LoadedTrx {
-    let gpu_data = Arc::new(
-        TrxGpuData::from_tractogram(&tractogram).expect("gpu data from tractogram"),
-    );
+    let gpu_data =
+        Arc::new(TrxGpuData::from_tractogram(&tractogram).expect("gpu data from tractogram"));
     LoadedTrx {
         id,
         name: format!("asset_{id}"),
@@ -78,8 +76,14 @@ fn connect(
     to_input: usize,
 ) {
     doc.graph.connect(
-        OutPort { node: from, output: from_output },
-        InPort { node: to, input: to_input },
+        OutPort {
+            node: from,
+            output: from_output,
+        },
+        InPort {
+            node: to,
+            input: to_input,
+        },
     );
 }
 
@@ -90,7 +94,11 @@ fn connect(
 #[test]
 fn streamline_source_missing_asset_records_error() {
     let mut doc = default_document();
-    let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 99 }, GraphPos::new(0.0, 0.0));
+    let src = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 99 },
+        GraphPos::new(0.0, 0.0),
+    );
 
     let runtime = eval(&doc, &[]);
 
@@ -102,7 +110,11 @@ fn streamline_source_missing_asset_records_error() {
 fn streamline_source_present_asset_has_no_error() {
     let trx = loaded_trx(0, two_point_tractogram());
     let mut doc = default_document();
-    let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
+    let src = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 0 },
+        GraphPos::new(0.0, 0.0),
+    );
 
     let runtime = eval(&doc, &[trx]);
 
@@ -118,10 +130,18 @@ fn streamline_source_present_asset_has_no_error() {
 fn limit_streamlines_reduces_count() {
     let trx = loaded_trx(0, tractogram_with_n_streamlines(10));
     let mut doc = default_document();
-    let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
+    let src = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 0 },
+        GraphPos::new(0.0, 0.0),
+    );
     let limit = make_node(
         &mut doc,
-        WorkflowNodeKind::LimitStreamlines { limit: 3, randomize: false, seed: 0 },
+        WorkflowNodeKind::LimitStreamlines {
+            limit: 3,
+            randomize: false,
+            seed: 0,
+        },
         GraphPos::new(200.0, 0.0),
     );
     connect(&mut doc, src, 0, limit, 0);
@@ -149,10 +169,18 @@ fn limit_streamlines_reduces_count() {
 fn limit_streamlines_zero_produces_empty_selection() {
     let trx = loaded_trx(0, tractogram_with_n_streamlines(5));
     let mut doc = default_document();
-    let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
+    let src = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 0 },
+        GraphPos::new(0.0, 0.0),
+    );
     let limit = make_node(
         &mut doc,
-        WorkflowNodeKind::LimitStreamlines { limit: 0, randomize: false, seed: 0 },
+        WorkflowNodeKind::LimitStreamlines {
+            limit: 0,
+            randomize: false,
+            seed: 0,
+        },
         GraphPos::new(200.0, 0.0),
     );
     connect(&mut doc, src, 0, limit, 0);
@@ -170,7 +198,13 @@ fn limit_streamlines_zero_produces_empty_selection() {
     connect(&mut doc, limit, 0, display, 0);
 
     let runtime = eval(&doc, &[trx]);
-    assert_eq!(runtime.scene_plan.streamline_draws[0].flow.selected_streamlines.len(), 0);
+    assert_eq!(
+        runtime.scene_plan.streamline_draws[0]
+            .flow
+            .selected_streamlines
+            .len(),
+        0
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +219,11 @@ fn random_subset_is_deterministic_for_same_seed() {
 
     let build_doc = || {
         let mut doc = default_document();
-        let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
+        let src = make_node(
+            &mut doc,
+            WorkflowNodeKind::StreamlineSource { source_id: 0 },
+            GraphPos::new(0.0, 0.0),
+        );
         let subset = make_node(
             &mut doc,
             WorkflowNodeKind::RandomSubset { limit: 5, seed: 42 },
@@ -212,8 +250,12 @@ fn random_subset_is_deterministic_for_same_seed() {
     let runtime_a = eval(&doc_a, &[trx_a]);
     let runtime_b = eval(&doc_b, &[trx_b]);
 
-    let sel_a = &runtime_a.scene_plan.streamline_draws[0].flow.selected_streamlines;
-    let sel_b = &runtime_b.scene_plan.streamline_draws[0].flow.selected_streamlines;
+    let sel_a = &runtime_a.scene_plan.streamline_draws[0]
+        .flow
+        .selected_streamlines;
+    let sel_b = &runtime_b.scene_plan.streamline_draws[0]
+        .flow
+        .selected_streamlines;
     assert_eq!(sel_a.len(), 5);
     assert_eq!(sel_a, sel_b, "same seed must produce same subset");
 }
@@ -226,7 +268,11 @@ fn random_subset_is_deterministic_for_same_seed() {
 fn group_select_all_passes_through_unchanged() {
     let trx = loaded_trx(0, tractogram_with_n_streamlines(4));
     let mut doc = default_document();
-    let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
+    let src = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 0 },
+        GraphPos::new(0.0, 0.0),
+    );
     let sel = make_node(
         &mut doc,
         WorkflowNodeKind::GroupSelect {
@@ -249,14 +295,24 @@ fn group_select_all_passes_through_unchanged() {
     connect(&mut doc, sel, 0, display, 0);
 
     let runtime = eval(&doc, &[trx]);
-    assert_eq!(runtime.scene_plan.streamline_draws[0].flow.selected_streamlines.len(), 4);
+    assert_eq!(
+        runtime.scene_plan.streamline_draws[0]
+            .flow
+            .selected_streamlines
+            .len(),
+        4
+    );
 }
 
 #[test]
 fn group_select_none_produces_empty_flow() {
     let trx = loaded_trx(0, tractogram_with_n_streamlines(4));
     let mut doc = default_document();
-    let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
+    let src = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 0 },
+        GraphPos::new(0.0, 0.0),
+    );
     let sel = make_node(
         &mut doc,
         WorkflowNodeKind::GroupSelect {
@@ -279,7 +335,13 @@ fn group_select_none_produces_empty_flow() {
     connect(&mut doc, sel, 0, display, 0);
 
     let runtime = eval(&doc, &[trx]);
-    assert_eq!(runtime.scene_plan.streamline_draws[0].flow.selected_streamlines.len(), 0);
+    assert_eq!(
+        runtime.scene_plan.streamline_draws[0]
+            .flow
+            .selected_streamlines
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -291,7 +353,11 @@ fn group_select_by_label_filters_correctly() {
     let trx = loaded_trx(0, tractogram);
 
     let mut doc = default_document();
-    let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
+    let src = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 0 },
+        GraphPos::new(0.0, 0.0),
+    );
     let sel = make_node(
         &mut doc,
         WorkflowNodeKind::GroupSelect {
@@ -314,7 +380,9 @@ fn group_select_by_label_filters_correctly() {
     connect(&mut doc, sel, 0, display, 0);
 
     let runtime = eval(&doc, &[trx]);
-    let selected = &runtime.scene_plan.streamline_draws[0].flow.selected_streamlines;
+    let selected = &runtime.scene_plan.streamline_draws[0]
+        .flow
+        .selected_streamlines;
     assert_eq!(selected.len(), 2);
     assert!(selected.contains(&StreamlineIndex(0)));
     assert!(selected.contains(&StreamlineIndex(1)));
@@ -328,8 +396,16 @@ fn group_select_by_label_filters_correctly() {
 fn color_by_direction_sets_direction_mode() {
     let trx = loaded_trx(0, two_point_tractogram());
     let mut doc = default_document();
-    let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
-    let color = make_node(&mut doc, WorkflowNodeKind::ColorByDirection, GraphPos::new(200.0, 0.0));
+    let src = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 0 },
+        GraphPos::new(0.0, 0.0),
+    );
+    let color = make_node(
+        &mut doc,
+        WorkflowNodeKind::ColorByDirection,
+        GraphPos::new(200.0, 0.0),
+    );
     connect(&mut doc, src, 0, color, 0);
     let display = make_node(
         &mut doc,
@@ -355,8 +431,16 @@ fn color_by_direction_sets_direction_mode() {
 fn color_by_group_sets_group_mode() {
     let trx = loaded_trx(0, two_point_tractogram());
     let mut doc = default_document();
-    let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
-    let color = make_node(&mut doc, WorkflowNodeKind::ColorByGroup, GraphPos::new(200.0, 0.0));
+    let src = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 0 },
+        GraphPos::new(0.0, 0.0),
+    );
+    let color = make_node(
+        &mut doc,
+        WorkflowNodeKind::ColorByGroup,
+        GraphPos::new(200.0, 0.0),
+    );
     connect(&mut doc, src, 0, color, 0);
     let display = make_node(
         &mut doc,
@@ -383,8 +467,16 @@ fn uniform_color_sets_uniform_mode() {
     let red = [1.0_f32, 0.0, 0.0, 1.0];
     let trx = loaded_trx(0, two_point_tractogram());
     let mut doc = default_document();
-    let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
-    let color = make_node(&mut doc, WorkflowNodeKind::UniformColor { color: red }, GraphPos::new(200.0, 0.0));
+    let src = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 0 },
+        GraphPos::new(0.0, 0.0),
+    );
+    let color = make_node(
+        &mut doc,
+        WorkflowNodeKind::UniformColor { color: red },
+        GraphPos::new(200.0, 0.0),
+    );
     connect(&mut doc, src, 0, color, 0);
     let display = make_node(
         &mut doc,
@@ -414,7 +506,11 @@ fn uniform_color_sets_uniform_mode() {
 fn streamline_display_adds_entry_to_scene_plan() {
     let trx = loaded_trx(0, two_point_tractogram());
     let mut doc = default_document();
-    let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
+    let src = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 0 },
+        GraphPos::new(0.0, 0.0),
+    );
     let display = make_node(
         &mut doc,
         WorkflowNodeKind::StreamlineDisplay {
@@ -437,7 +533,11 @@ fn streamline_display_adds_entry_to_scene_plan() {
 fn hidden_streamline_display_still_adds_entry_but_visible_false() {
     let trx = loaded_trx(0, two_point_tractogram());
     let mut doc = default_document();
-    let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
+    let src = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 0 },
+        GraphPos::new(0.0, 0.0),
+    );
     let display = make_node(
         &mut doc,
         WorkflowNodeKind::StreamlineDisplay {
@@ -465,9 +565,21 @@ fn merge_queues_one_reactive_plan() {
     let trx_a = loaded_trx(0, two_point_tractogram());
     let trx_b = loaded_trx(1, two_point_tractogram());
     let mut doc = default_document();
-    let src_a = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
-    let src_b = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 1 }, GraphPos::new(0.0, 200.0));
-    let merge = make_node(&mut doc, WorkflowNodeKind::Merge, GraphPos::new(200.0, 100.0));
+    let src_a = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 0 },
+        GraphPos::new(0.0, 0.0),
+    );
+    let src_b = make_node(
+        &mut doc,
+        WorkflowNodeKind::StreamlineSource { source_id: 1 },
+        GraphPos::new(0.0, 200.0),
+    );
+    let merge = make_node(
+        &mut doc,
+        WorkflowNodeKind::Merge,
+        GraphPos::new(200.0, 100.0),
+    );
     connect(&mut doc, src_a, 0, merge, 0);
     connect(&mut doc, src_b, 0, merge, 1);
 
@@ -482,7 +594,11 @@ fn merge_queues_one_reactive_plan() {
 #[test]
 fn disconnected_color_node_records_error() {
     let mut doc = default_document();
-    let _color = make_node(&mut doc, WorkflowNodeKind::ColorByDirection, GraphPos::new(0.0, 0.0));
+    let _color = make_node(
+        &mut doc,
+        WorkflowNodeKind::ColorByDirection,
+        GraphPos::new(0.0, 0.0),
+    );
 
     let runtime = eval(&doc, &[]);
     let any_error = runtime.node_state.values().any(|s| s.error.is_some());
@@ -492,13 +608,24 @@ fn disconnected_color_node_records_error() {
 #[test]
 fn cycle_in_graph_sets_graph_error() {
     let mut doc = default_document();
-    let a = make_node(&mut doc, WorkflowNodeKind::ColorByDirection, GraphPos::new(0.0, 0.0));
-    let b = make_node(&mut doc, WorkflowNodeKind::ColorByGroup, GraphPos::new(200.0, 0.0));
+    let a = make_node(
+        &mut doc,
+        WorkflowNodeKind::ColorByDirection,
+        GraphPos::new(0.0, 0.0),
+    );
+    let b = make_node(
+        &mut doc,
+        WorkflowNodeKind::ColorByGroup,
+        GraphPos::new(200.0, 0.0),
+    );
     connect(&mut doc, a, 0, b, 0);
     connect(&mut doc, b, 0, a, 0);
 
     let runtime = eval(&doc, &[]);
-    assert!(runtime.graph_error.is_some(), "cyclic graph must set graph_error");
+    assert!(
+        runtime.graph_error.is_some(),
+        "cyclic graph must set graph_error"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -510,7 +637,11 @@ fn cycle_in_graph_sets_graph_error() {
 fn bench_recolor_100k_streamlines() {
     let build_doc = |color_kind: WorkflowNodeKind| {
         let mut doc = default_document();
-        let src = make_node(&mut doc, WorkflowNodeKind::StreamlineSource { source_id: 0 }, GraphPos::new(0.0, 0.0));
+        let src = make_node(
+            &mut doc,
+            WorkflowNodeKind::StreamlineSource { source_id: 0 },
+            GraphPos::new(0.0, 0.0),
+        );
         let color = make_node(&mut doc, color_kind, GraphPos::new(200.0, 0.0));
         connect(&mut doc, src, 0, color, 0);
         let display = make_node(
@@ -537,7 +668,13 @@ fn bench_recolor_100k_streamlines() {
         let start = std::time::Instant::now();
         let runtime = eval(&doc, &assets);
         let elapsed = start.elapsed();
-        assert_eq!(runtime.scene_plan.streamline_draws[0].flow.selected_streamlines.len(), 100_000);
+        assert_eq!(
+            runtime.scene_plan.streamline_draws[0]
+                .flow
+                .selected_streamlines
+                .len(),
+            100_000
+        );
         println!("recolor 100k: {elapsed:?}");
     }
 }

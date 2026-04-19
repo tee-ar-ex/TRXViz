@@ -467,14 +467,26 @@ impl super::super::TrxVizApp {
                         ui.add(egui::DragValue::new(&mut center[1]).speed(0.5).prefix("Y "));
                         ui.add(egui::DragValue::new(&mut center[2]).speed(0.5).prefix("Z "));
                     });
-                    ui.add(egui::DragValue::new(&mut radius_mm.0).speed(0.5).prefix("Radius "));
+                    ui.add(
+                        egui::DragValue::new(&mut radius_mm.0)
+                            .speed(0.5)
+                            .prefix("Radius "),
+                    );
                 }
                 workflow::WorkflowNodeKind::SurfaceDepthQuery { depth_mm }
                 | workflow::WorkflowNodeKind::SurfaceProjectionDensity { depth_mm } => {
-                    ui.add(egui::DragValue::new(&mut depth_mm.0).speed(0.25).prefix("Depth "));
+                    ui.add(
+                        egui::DragValue::new(&mut depth_mm.0)
+                            .speed(0.25)
+                            .prefix("Depth "),
+                    );
                 }
                 workflow::WorkflowNodeKind::SurfaceProjectionMeanDps { depth_mm, field } => {
-                    ui.add(egui::DragValue::new(&mut depth_mm.0).speed(0.25).prefix("Depth "));
+                    ui.add(
+                        egui::DragValue::new(&mut depth_mm.0)
+                            .speed(0.25)
+                            .prefix("Depth "),
+                    );
                     edit_dps_field(ui, field);
                 }
                 workflow::WorkflowNodeKind::ParcelSelect { labels } => {
@@ -885,10 +897,7 @@ impl super::super::TrxVizApp {
                         );
                     });
                 }
-                workflow::WorkflowNodeKind::ParcellationDisplay {
-                    labels,
-                    opacity,
-                } => {
+                workflow::WorkflowNodeKind::ParcellationDisplay { labels, opacity } => {
                     ui.label("Comma-separated label IDs");
                     ui.small("Leave empty to use every nonzero parcel label.");
                     edit_parcel_id_set(ui, labels);
@@ -1288,7 +1297,11 @@ fn show_group_select_editor(
     groups: &mut workflow::GroupFilter,
     available_groups: &[String],
 ) {
-    let mut groups_csv = groups.to_csv();
+    let buffer_id = ui.id().with("group_select_buffer");
+    let mut groups_csv = ui
+        .ctx()
+        .data(|d| d.get_temp::<String>(buffer_id))
+        .unwrap_or_else(|| groups.to_csv());
     let output = egui::TextEdit::singleline(&mut groups_csv)
         .hint_text("Type a group name")
         .desired_width(f32::INFINITY)
@@ -1299,6 +1312,7 @@ fn show_group_select_editor(
     }
 
     if available_groups.is_empty() {
+        sync_group_select_buffer(ui.ctx(), buffer_id, &groups_csv, response.has_focus());
         ui.small("Autocomplete appears when the input streamline data exposes group names.");
         return;
     }
@@ -1332,6 +1346,7 @@ fn show_group_select_editor(
 
     if suggestions.is_empty() {
         ui.ctx().data_mut(|d| d.remove::<bool>(suggestion_state_id));
+        sync_group_select_buffer(ui.ctx(), buffer_id, &groups_csv, response.has_focus());
         return;
     }
 
@@ -1364,6 +1379,7 @@ fn show_group_select_editor(
 
     if picked_suggestion {
         *groups = workflow::GroupFilter::from_csv(&groups_csv);
+        sync_group_select_buffer(ui.ctx(), buffer_id, &groups_csv, true);
         ui.ctx()
             .data_mut(|d| d.insert_temp(suggestion_state_id, false));
         return;
@@ -1373,8 +1389,19 @@ fn show_group_select_editor(
     let keep_open = response.has_focus() || (!clicked_elsewhere && has_current_fragment);
     ui.ctx()
         .data_mut(|d| d.insert_temp(suggestion_state_id, keep_open));
-    if output.response.changed() {
-        *groups = workflow::GroupFilter::from_csv(&groups_csv);
+    sync_group_select_buffer(ui.ctx(), buffer_id, &groups_csv, response.has_focus());
+}
+
+fn sync_group_select_buffer(
+    ctx: &egui::Context,
+    buffer_id: egui::Id,
+    groups_csv: &str,
+    keep_buffer: bool,
+) {
+    if keep_buffer {
+        ctx.data_mut(|d| d.insert_temp(buffer_id, groups_csv.to_owned()));
+    } else {
+        ctx.data_mut(|d| d.remove::<String>(buffer_id));
     }
 }
 

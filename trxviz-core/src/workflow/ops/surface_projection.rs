@@ -34,7 +34,11 @@ fn evaluate_projection(
     let surface = ctx.surface_assets.get(&surface_id).ok_or_else(|| {
         crate::error::WorkflowError::Evaluation(format!("Missing surface {surface_id}"))
     })?;
-    let record = ctx.execution_cache.node_runs.entry(ctx.node.uuid).or_default();
+    let record = ctx
+        .execution_cache
+        .node_runs
+        .entry(ctx.node.uuid)
+        .or_default();
     prime_expensive_record(record, fingerprint);
     ctx.scene_plan.surface_map_plans.push(SurfaceMapPlan {
         node_uuid: ctx.node.uuid,
@@ -46,8 +50,10 @@ fn evaluate_projection(
     });
 
     sync_node_state_from_run_record(ctx.node_state, record);
-    if let Some(CachedSurfaceStreamlineMap { map }) =
-        ctx.execution_cache.surface_streamline_map_cache.get(&ctx.node.uuid)
+    if let Some(CachedSurfaceStreamlineMap { map }) = ctx
+        .execution_cache
+        .surface_streamline_map_cache
+        .get(&ctx.node.uuid)
     {
         if let Some(source_surface_id) = map.source_surface_id {
             ctx.projection_by_surface
