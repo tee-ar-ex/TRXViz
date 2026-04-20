@@ -248,7 +248,7 @@ pub(super) fn render_scene2d_to_png(
                     .find(|(id, _)| *id == volume.file_id)
                 {
                     render_pass.set_pipeline(&slice.pipeline);
-                    render_pass.set_bind_group(0, &slice.bind_groups[bind_group_index], &[]);
+                    render_pass.set_bind_group(0, slice.bind_group(bind_group_index), &[]);
                     render_pass.set_index_buffer(
                         slice.quad_index_buffer.slice(..),
                         wgpu::IndexFormat::Uint16,
@@ -271,7 +271,7 @@ pub(super) fn render_scene2d_to_png(
                         .find(|(id, _)| *id == streamline.file_id)
                     {
                         render_pass.set_pipeline(&resource.slice_pipeline);
-                        render_pass.set_bind_group(0, &resource.bind_groups[bind_group_index], &[]);
+                        render_pass.set_bind_group(0, resource.bind_group(bind_group_index), &[]);
                         render_pass.set_vertex_buffer(0, resource.position_buffer.slice(..));
                         render_pass.set_vertex_buffer(1, resource.color_buffer.slice(..));
                         render_pass.set_vertex_buffer(2, resource.tangent_buffer.slice(..));

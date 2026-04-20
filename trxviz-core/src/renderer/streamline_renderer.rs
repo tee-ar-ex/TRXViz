@@ -2,6 +2,7 @@ use wgpu::util::DeviceExt;
 
 use crate::data::trx_data::{TrxGpuData, TubeMeshVertex};
 use crate::lighting::{SceneLightingParams, WorkflowRender3D};
+use crate::renderer::viewport::ViewportUniformSet;
 
 /// Holds StreamlineResources for all loaded TRX files, keyed by FileId.
 pub struct AllStreamlineResources {
@@ -24,10 +25,7 @@ pub struct StreamlineResources {
     pub tube_vertex_buffer: Option<wgpu::Buffer>,
     pub tube_index_buffer: Option<wgpu::Buffer>,
     pub num_tube_indices: u32,
-    /// Per-viewport uniform buffers: [3D, axial, coronal, sagittal].
-    pub uniform_buffers: [wgpu::Buffer; 4],
-    /// Per-viewport bind groups.
-    pub bind_groups: [wgpu::BindGroup; 4],
+    viewports: ViewportUniformSet<Uniforms>,
     pub num_indices: u32,
 }
 
@@ -104,24 +102,17 @@ impl StreamlineResources {
             post_params: [1.0, 1.0, 0.12, 0.0],
         };
 
-        let uniform_buffers: [wgpu::Buffer; 4] = std::array::from_fn(|i| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("streamline_uniforms_{i}")),
-                contents: bytemuck::bytes_of(&default_uniforms),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            })
-        });
-
-        let bind_groups: [wgpu::BindGroup; 4] = std::array::from_fn(|i| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("streamline_bind_group_{i}")),
-                layout: &bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffers[i].as_entire_binding(),
-                }],
-            })
-        });
+        let viewports =
+            ViewportUniformSet::new(device, "streamline_uniforms", &default_uniforms, |i, buffer| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("streamline_bind_group_{i}")),
+                    layout: &bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buffer.as_entire_binding(),
+                    }],
+                })
+            });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("streamline_pipeline_layout"),
@@ -251,8 +242,7 @@ impl StreamlineResources {
             tube_vertex_buffer: None,
             tube_index_buffer: None,
             num_tube_indices: 0,
-            uniform_buffers,
-            bind_groups,
+            viewports,
             num_indices: data.all_indices.len() as u32,
         }
     }
@@ -395,11 +385,11 @@ impl StreamlineResources {
                 0.0,
             ],
         };
-        queue.write_buffer(
-            &self.uniform_buffers[viewport],
-            0,
-            bytemuck::bytes_of(&uniforms),
-        );
+        self.viewports.update(queue, viewport, &uniforms);
+    }
+
+    pub fn bind_group(&self, viewport: usize) -> &wgpu::BindGroup {
+        self.viewports.bind_group(viewport)
     }
 
     /// Replace the tube geometry buffers.

@@ -1,6 +1,7 @@
 use wgpu::util::DeviceExt;
 
 use crate::data::nifti_data::NiftiVolume;
+use crate::renderer::viewport::ViewportUniformSet;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -28,13 +29,11 @@ pub enum SliceAxis {
 
 /// GPU resources for rendering NIfTI volume slices.
 ///
-/// We maintain 4 uniform buffers and bind groups so different viewports
-/// can use different view-projection matrices simultaneously:
-/// `uniform_buffers[0]` is the 3D view, `[1]` is axial 2D, `[2]` is coronal 2D, and `[3]` is sagittal 2D.
+/// We maintain one uniform/bind-group pair per viewport so different
+/// view-projection matrices can be active simultaneously.
 pub struct SliceResources {
     pub pipeline: wgpu::RenderPipeline,
-    pub uniform_buffers: [wgpu::Buffer; 4],
-    pub bind_groups: [wgpu::BindGroup; 4],
+    viewports: ViewportUniformSet<SliceUniforms>,
     pub quad_buffers: [wgpu::Buffer; 3],
     pub quad_index_buffer: wgpu::Buffer,
     pub dims: [usize; 3],
@@ -142,29 +141,20 @@ impl SliceResources {
             opacity: 1.0,
         };
 
-        let labels = ["slice_3d", "slice_axial", "slice_coronal", "slice_sagittal"];
-        let uniform_buffers: Vec<wgpu::Buffer> = labels
-            .iter()
-            .map(|label| {
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents: bytemuck::bytes_of(&default_uniforms),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                })
-            })
-            .collect();
-
-        let bind_groups: Vec<wgpu::BindGroup> = uniform_buffers
-            .iter()
-            .enumerate()
-            .map(|(i, ub)| {
+        let viewports =
+            ViewportUniformSet::new(device, "slice_uniform", &default_uniforms, |i, buffer| {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(labels[i]),
+                    label: Some(match i {
+                        0 => "slice_3d",
+                        1 => "slice_axial",
+                        2 => "slice_coronal",
+                        _ => "slice_sagittal",
+                    }),
                     layout: &bind_group_layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: ub.as_entire_binding(),
+                            resource: buffer.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
@@ -176,8 +166,7 @@ impl SliceResources {
                         },
                     ],
                 })
-            })
-            .collect();
+            });
 
         // Pipeline
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -270,13 +259,9 @@ impl SliceResources {
             }),
         ];
 
-        let uniform_buffers: [wgpu::Buffer; 4] = uniform_buffers.try_into().unwrap();
-        let bind_groups: [wgpu::BindGroup; 4] = bind_groups.try_into().unwrap();
-
         Self {
             pipeline,
-            uniform_buffers,
-            bind_groups,
+            viewports,
             quad_buffers,
             quad_index_buffer,
             dims,
@@ -349,11 +334,11 @@ impl SliceResources {
             colormap,
             opacity,
         };
-        queue.write_buffer(
-            &self.uniform_buffers[bind_group_index],
-            0,
-            bytemuck::bytes_of(&uniforms),
-        );
+        self.viewports.update(queue, bind_group_index, &uniforms);
+    }
+
+    pub fn bind_group(&self, viewport: usize) -> &wgpu::BindGroup {
+        self.viewports.bind_group(viewport)
     }
 }
 

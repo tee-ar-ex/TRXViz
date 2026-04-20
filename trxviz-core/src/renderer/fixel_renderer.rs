@@ -2,6 +2,7 @@ use wgpu::util::DeviceExt;
 
 use crate::data::odx_data::FixelInstance;
 use crate::lighting::{SceneLightingParams, WorkflowRender3D};
+use crate::renderer::viewport::ViewportUniformSet;
 
 pub struct FixelResources {
     pipeline: wgpu::RenderPipeline,
@@ -9,8 +10,7 @@ pub struct FixelResources {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     instance_buffer: Option<wgpu::Buffer>,
-    uniform_buffers: [wgpu::Buffer; 4],
-    bind_groups: [wgpu::BindGroup; 4],
+    viewports: ViewportUniformSet<FixelUniforms>,
     num_instances: u32,
 }
 
@@ -87,24 +87,17 @@ impl FixelResources {
             color_params: [0.0, 0.0, 1.0, 0.0],
         };
 
-        let uniform_buffers: [wgpu::Buffer; 4] = std::array::from_fn(|i| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("fixel_uniform_{i}")),
-                contents: bytemuck::bytes_of(&default_uniforms),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            })
-        });
-
-        let bind_groups: [wgpu::BindGroup; 4] = std::array::from_fn(|i| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("fixel_bg_{i}")),
-                layout: &bgl,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffers[i].as_entire_binding(),
-                }],
-            })
-        });
+        let viewports =
+            ViewportUniformSet::new(device, "fixel_uniform", &default_uniforms, |i, buffer| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("fixel_bg_{i}")),
+                    layout: &bgl,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buffer.as_entire_binding(),
+                    }],
+                })
+            });
 
         let vertex_layout = wgpu::VertexBufferLayout {
             array_stride: 8, // 2 × f32
@@ -179,8 +172,7 @@ impl FixelResources {
             vertex_buffer,
             index_buffer,
             instance_buffer: None,
-            uniform_buffers,
-            bind_groups,
+            viewports,
             num_instances: 0,
         }
     }
@@ -250,11 +242,7 @@ impl FixelResources {
             ],
             color_params: [0.0, 0.0, 1.0, 0.0],
         };
-        queue.write_buffer(
-            &self.uniform_buffers[viewport],
-            0,
-            bytemuck::bytes_of(&uniforms),
-        );
+        self.viewports.update(queue, viewport, &uniforms);
     }
 
     /// Patch colormap + scalar range via `color_params` at offset 176.
@@ -267,11 +255,8 @@ impl FixelResources {
     ) {
         const OFFSET: u64 = 176;
         let packed = [code as f32, range.0, range.1, 0.0f32];
-        queue.write_buffer(
-            &self.uniform_buffers[viewport],
-            OFFSET,
-            bytemuck::bytes_of(&packed),
-        );
+        self.viewports
+            .write(queue, viewport, OFFSET, bytemuck::bytes_of(&packed));
     }
 
     /// Patch the length multiplier (fixel instance length × mul) via `post_params.w`.
@@ -279,11 +264,8 @@ impl FixelResources {
     pub fn update_length_mul(&self, queue: &wgpu::Queue, viewport: usize, length_mul: f32) {
         // Offset of `post_params[3]` in `FixelUniforms`: 160 + 12.
         const OFFSET: u64 = 160 + 12;
-        queue.write_buffer(
-            &self.uniform_buffers[viewport],
-            OFFSET,
-            bytemuck::bytes_of(&length_mul),
-        );
+        self.viewports
+            .write(queue, viewport, OFFSET, bytemuck::bytes_of(&length_mul));
     }
 
     pub fn paint(&self, render_pass: &mut wgpu::RenderPass<'_>, viewport: usize, slice: bool) {
@@ -298,7 +280,7 @@ impl FixelResources {
         } else {
             &self.pipeline
         });
-        render_pass.set_bind_group(0, &self.bind_groups[viewport], &[]);
+        render_pass.set_bind_group(0, self.viewports.bind_group(viewport), &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_vertex_buffer(1, inst.slice(..));
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);

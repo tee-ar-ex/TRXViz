@@ -302,7 +302,7 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
             for vd in &self.volume_draws {
                 if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.file_id) {
                     render_pass.set_pipeline(&sr.pipeline);
-                    render_pass.set_bind_group(0, &sr.bind_groups[0], &[]);
+                    render_pass.set_bind_group(0, sr.bind_group(0), &[]);
                     render_pass.set_index_buffer(
                         sr.quad_index_buffer.slice(..),
                         wgpu::IndexFormat::Uint16,
@@ -325,7 +325,7 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                         continue;
                     }
                     if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == sd.file_id) {
-                        render_pass.set_bind_group(0, &sr.bind_groups[0], &[]);
+                        render_pass.set_bind_group(0, sr.bind_group(0), &[]);
                         if sd.render_style == RenderStyle::Tubes {
                             if sr.num_tube_indices == 0 {
                                 continue;
@@ -606,7 +606,7 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
             for vd in &self.volume_draws {
                 if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.file_id) {
                     render_pass.set_pipeline(&sr.pipeline);
-                    render_pass.set_bind_group(0, &sr.bind_groups[self.bind_group_index], &[]);
+                    render_pass.set_bind_group(0, sr.bind_group(self.bind_group_index), &[]);
                     render_pass.set_index_buffer(
                         sr.quad_index_buffer.slice(..),
                         wgpu::IndexFormat::Uint16,
@@ -628,7 +628,7 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                             continue;
                         }
                         render_pass.set_pipeline(&sr.slice_pipeline);
-                        render_pass.set_bind_group(0, &sr.bind_groups[self.bind_group_index], &[]);
+                        render_pass.set_bind_group(0, sr.bind_group(self.bind_group_index), &[]);
                         render_pass.set_vertex_buffer(0, sr.position_buffer.slice(..));
                         render_pass.set_vertex_buffer(1, sr.color_buffer.slice(..));
                         render_pass.set_vertex_buffer(2, sr.tangent_buffer.slice(..));
