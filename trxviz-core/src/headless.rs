@@ -4,9 +4,9 @@ mod bake;
 mod export_glb;
 mod gpu_context;
 mod readback;
-mod render_data;
 mod render_2d;
 mod render_3d;
+mod render_data;
 mod scene_loader;
 mod workflow_driver;
 
@@ -17,9 +17,9 @@ use glam::Vec3;
 
 use self::export_glb::{build_glb_scene, compute_scene_bounds};
 use self::gpu_context::{build_gpu_resources, create_gpu_context};
-use self::render_data::{build_camera, build_render_data, compute_render_bounds};
 use self::render_2d::render_scene2d_to_png;
 use self::render_3d::render_scene3d_to_png;
+use self::render_data::{build_camera, build_render_data, compute_render_bounds};
 use self::scene_loader::{load_asset_args_state, load_project_state};
 use self::workflow_driver::{ensure_export_tube_geometry, execute_workflow_to_completion};
 use crate::data::orientation_field::BoundaryGlyphColorMode;
@@ -29,11 +29,11 @@ use crate::scene::{HeadlessScene, HeadlessWorkflowState};
 use crate::units::Millimeters;
 
 #[cfg(test)]
-use std::sync::Arc;
-#[cfg(test)]
 use crate::data::odx_data::OdxScene;
 #[cfg(test)]
 use crate::workflow::WorkflowNodeUuid;
+#[cfg(test)]
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeadlessView {

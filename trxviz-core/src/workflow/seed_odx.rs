@@ -335,10 +335,7 @@ mod tests {
             document
                 .graph
                 .nodes()
-                .filter(|(_, node)| matches!(
-                    node.op,
-                    WorkflowNodeKind::ColorByFixelScalars { .. }
-                ))
+                .filter(|(_, node)| matches!(node.op, WorkflowNodeKind::ColorByFixelScalars { .. }))
                 .count(),
             2
         );

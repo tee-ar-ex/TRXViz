@@ -29,9 +29,9 @@ trxviz-core = { ..., default-features = false }
 
 ## Main Modules
 
+- `asset_loader` — shared asset-kind detection and load registry for the GUI and headless CLI
 - `headless` — offscreen scene rendering and export (PNG behind `png-export`,
-  GLB behind `glb-export`). This module will be decomposed into sub-modules in a
-  future refactor (Stage 6 of the refactor plan).
+  GLB behind `glb-export`)
 - `workflow` — project loading, graph evaluation, and execution helpers
 - `scene` — shared scene and asset state
 - `renderer` — GPU resource and draw-path infrastructure

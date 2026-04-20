@@ -1,5 +1,5 @@
-use std::hash::{Hash, Hasher};
 use crate::units::StreamlineIndex;
+use std::hash::{Hash, Hasher};
 
 use super::super::{
     EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_streamline_input,
@@ -42,12 +42,13 @@ impl WorkflowOp for RandomSubsetOp {
         ctx: &mut EvalCtx<'_, '_>,
     ) -> crate::error::WorkflowResult<Vec<super::super::EvaluatedValue>> {
         let mut flow = expect_streamline_input(ctx.inputs, self.title())?;
-        flow.selected_streamlines.sort_by_key(|index: &StreamlineIndex| {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            self.seed.hash(&mut hasher);
-            index.hash(&mut hasher);
-            hasher.finish()
-        });
+        flow.selected_streamlines
+            .sort_by_key(|index: &StreamlineIndex| {
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                self.seed.hash(&mut hasher);
+                index.hash(&mut hasher);
+                hasher.finish()
+            });
         flow.selected_streamlines.truncate(self.limit);
         Ok(vec![WorkflowValue::Streamline(flow).into()])
     }

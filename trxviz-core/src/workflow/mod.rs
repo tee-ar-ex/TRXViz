@@ -2,10 +2,12 @@
 
 pub use crate::error::{WorkflowError, WorkflowResult};
 
-mod evaluate;
 mod eval_inputs;
 mod eval_streamlines;
 mod eval_surface;
+mod evaluate;
+#[cfg(test)]
+mod evaluate_tests;
 mod fingerprint;
 mod graph;
 mod jobs;
@@ -17,8 +19,6 @@ mod seed;
 mod seed_odx;
 mod simple_workflow;
 mod types;
-#[cfg(test)]
-mod evaluate_tests;
 
 pub use evaluate::{evaluate_scene_plan, evaluate_scene_plan_with_mode, save_streamline_plan};
 pub use fingerprint::{
@@ -71,7 +71,6 @@ pub use ops::{
     SaveStreamlinesOp, SphereQueryOp, StreamlineDisplayOp, StreamlineSourceOp, SurfaceDepthQueryOp,
     SurfaceDisplayOp, SurfaceOverlayStackOp, SurfaceProjectionDensityOp,
     SurfaceProjectionMeanDpsOp, SurfaceSourceOp, UniformColorOp, VolumeDisplayOp,
-    VolumeScalarsDisplayOp, VolumeSourceOp,
-    WorkflowNodeKind,
+    VolumeScalarsDisplayOp, VolumeSourceOp, WorkflowNodeKind,
 };
 pub(crate) use types::{EvaluatedValue, WorkflowValue};

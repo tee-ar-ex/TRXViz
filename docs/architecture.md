@@ -1,135 +1,115 @@
 # Architecture
 
-TRXViz is a Cargo workspace with three crates. This page explains what each
-crate is responsible for, why the project is split this way, and how the
-pieces fit together at runtime.
+TRXViz is a three-crate Cargo workspace with a shared core library, a desktop GUI,
+and a headless CLI. 
 
-## The three crates
+## Workspace layout
 
+```text
+trxviz/                workspace root
+├── trxviz-core/       shared library
+├── trxviz/            eframe/egui desktop GUI
+└── trxviz-cli/        clap-based headless renderer
 ```
-trxviz/                (workspace root)
-├── trxviz-core/       library: data loading, workflow, rendering primitives
-├── trxviz/            binary: eframe/egui desktop GUI
-└── trxviz-cli/        binary: headless command-line renderer
-```
 
-### `trxviz-core` — the shared library
+## `trxviz-core`
 
-All of the non-UI logic lives here:
+`trxviz-core` owns the reusable, non-UI parts of the system:
 
-- **Data layer** (`src/data/`): readers for TRX, NIfTI, GIFTI, CIFTI, and
-  parcellation files. Pure CPU-side representations with no GPU or windowing
-  dependencies.
-- **Renderer** (`src/renderer/`): wgpu pipelines for streamlines, meshes,
-  slices, and glyphs. Camera math. Shader sources.
-- **Workflow** (`src/workflow/`): the DAG data model (`WorkflowGraph`,
-  `WorkflowNode`), the `WorkflowRuntime` that evaluates it with fingerprint
-  caching, and the per-node evaluation logic.
-- **Headless entry point** (`src/headless.rs`): project and loose-asset
-  render/export helpers drive the full pipeline for anatomical 3D, saved 2D
-  project views, and inflated-stage rendering/export without ever touching
-  winit, eframe, or a display server.
+- `asset_loader`:
+  shared asset-kind detection and loader registry for TRX, imported tractograms,
+  NIfTI, GIFTI, CIFTI, parcellations, and ODX inputs.
+- `data/`:
+  CPU-side format loaders and domain data structures.
+- `workflow/`:
+  the persisted `WorkflowDocument`, graph model, typed workflow ops, evaluator,
+  fingerprinting, seeding, and project I/O.
+- `renderer/`:
+  wgpu pipelines, cameras, viewport-uniform helpers, shaders, and shared color
+  mapping.
+- `headless/`:
+  offscreen render/export orchestration. This is now decomposed into focused
+  modules such as `gpu_context`, `scene_loader`, `workflow_driver`,
+  `render_data`, `render_2d`, `render_3d`, `readback`, `bake`, and
+  `export_glb/`.
+- `scene`:
+  shared scene/asset state used by both GUI and headless entry points.
 
-### `trxviz` — the desktop GUI
+`trxviz-core` is intentionally free of egui/eframe dependencies. GUI-specific
+state and widgets stay in the `trxviz` crate.
 
-A thin-ish shell on top of `trxviz-core`. It owns:
+## `trxviz`
 
-- The `eframe` application, egui event loop, and window management.
-- The egui-tiles workspace layout (assets pane, preview, graph editor,
-  inspector).
-- The `egui-snarl` node-graph editor widget.
-- Interactive concerns the CLI does not need: background job scheduling,
-  cancellation, progress reporting, import/merge dialogs.
+The desktop app is an egui shell over `trxviz-core`. It owns:
 
-The GUI drives the same `WorkflowRuntime` that `trxviz-core` exposes — it does
-not reimplement node evaluation.
+- window/event-loop integration via `eframe`
+- workspace layout and panes
+- the node-graph editor widget
+- background file-load and workflow-job scheduling
+- import/merge dialogs and other interactive-only UX
 
-### `trxviz-cli` — the headless renderer
+The GUI now splits file ingestion into two layers:
 
-A small `clap`-based binary (≈160 lines) that parses arguments, constructs a
-`HeadlessRenderOptions`, and calls into `trxviz_core::headless`. Zero egui
-dependencies. This crate exists so that TRXViz visualizations can be produced
-as part of batch data-processing pipelines on machines with no display.
+- `file_loading.rs`:
+  background job kickoff, import helpers, merge helpers, and ODX recovery if missing an affine 
+- `file_apply.rs`:
+  scene mutation and workflow-asset registration once a loaded asset is ready
 
-## Why split it this way
+Persisted view state lives in `WorkflowDocument`. `ViewportState` is now
+runtime/editor state only.
 
-The project started as a monolithic eframe app. Splitting became necessary
-when the goal shifted to also support headless rendering on compute nodes.
+## `trxviz-cli`
 
-Three observations drove the layout:
+The CLI is a thin wrapper around `trxviz_core::headless`. It parses arguments,
+loads either a workflow project or loose assets, and renders/export scenes
+without any GUI dependencies.
 
-1. **Headless rendering must not depend on a display server.** Anything the
-   CLI needs has to compile and run without winit, eframe, X11, or Wayland.
-   This is a hard constraint, not a preference.
-2. **The GUI and the CLI must render the same project identically.** A
-   project file rendered via the CLI on a compute node should produce the
-   same PNG as the GUI on a workstation. That means they must share *one*
-   implementation of the data model, the workflow runtime, and the rendering
-   pipelines.
-3. **GUI concerns should not contaminate the library.** Job scheduling,
-   cancellation, progress bars, and import dialogs are interactive concerns
-   that do not belong in the shared library.
+The CLI and GUI share the same asset classification and loading logic
+through `trxviz_core::asset_loader`.
 
-Splitting into `core` (shared library) + `trxviz` (GUI shell) + `cli` (headless
-binary) is the smallest arrangement that satisfies all three.
+## Workflow model
 
-## How a render happens
+`WorkflowDocument` is the canonical persisted model. It owns:
 
-### In the GUI
+- the workflow graph
+- persisted view state (`camera_3d`, `render_3d`, `slice_view_3d`,
+  `slice_view_ui`)
+- persisted selection
+- registered workflow assets
 
-1. The user opens a project file or edits nodes in the graph pane.
-2. `TrxVizApp::update` runs each frame, calling `refresh_workflow_runtime`
-   and `queue_workflow_jobs` to drive `WorkflowRuntime` forward.
-3. Expensive nodes (tube geometry, bundle surfaces, boundary fields) run on
-   background threads and send results back over `mpsc` channels.
-4. Completed node outputs populate `CallbackResources`; the next frame's
-   `egui-wgpu` paint callbacks draw the scene into the preview pane.
+Workflow execution is op-registry based:
 
-### In the CLI
+- each node stores a `WorkflowNodeKind` serde surface owned by the workflow-op
+  registry
+- per-op behavior lives under `trxviz-core/src/workflow/ops/`
+- `evaluate.rs` is a thin scheduler/dispatch facade
 
-1. `clap` parses the command-line arguments into a `HeadlessRenderOptions`.
-2. `trxviz_core::headless::render_project_png` loads the project file,
-   constructs a `WorkflowRuntime`, and evaluates the graph to completion
-   (synchronously — no job scheduler, no cancellation).
-3. A headless wgpu instance is created via `pollster::block_on`, the scene is
-   drawn into an offscreen texture, and the texture is written to a PNG.
+This keeps “add a new node” work localized to one op module plus one registry
+entry.
 
-The code path from `WorkflowRuntime::run` to pixels is identical in both
-cases; only the driver around it differs.
+## Render flow
 
-## The workflow graph data model
+### GUI
 
-`WorkflowDocument` holds the canonical workflow state:
+1. Load or edit a workflow document.
+2. Evaluate the workflow graph and queue any expensive jobs.
+3. Apply completed job results back into shared scene/runtime state.
+4. Render through egui-wgpu callbacks using the same renderer types as the
+   headless path.
 
-- `graph: WorkflowGraph` — a pure-serde DAG of `WorkflowNode` keyed by
-  `WorkflowNodeUuid`. This type lives in `trxviz_core::workflow::graph` and
-  has zero egui dependencies, so it can be loaded, evaluated, and
-  round-tripped on a headless host.
-- `workspace: egui_tiles::Tree<WorkspacePane>` — the pane layout. Still
-  egui-coupled (the CLI does not need it).
+### CLI
 
-In the GUI, the `egui-snarl` editor widget is built fresh each frame from the
-canonical `WorkflowGraph` (`snarl_from_graph`) and synced back after user
-edits (`sync_graph_from_snarl`). This keeps the on-disk format decoupled from
-`egui-snarl`'s internal representation — if that crate changes its serde
-shape, your saved projects still load.
+1. Parse arguments into a headless render request.
+2. Load assets/project state through the shared loader path.
+3. Evaluate the workflow to completion synchronously.
+4. Build GPU resources, render to offscreen textures, and export PNG or GLB.
 
-## External dependencies worth knowing about
+The evaluator and renderer stack is shared; only the driving shell differs.
 
-- **`trx-rs`** — TRX reader/writer plus imported tractogram support. Pulled from [GitHub](https://github.com/tee-ar-ex/trx-rs)
-  as a git dependency. Not a member of the TRXViz workspace so that it can evolve on its own cadence.
-- **`wgpu`** — GPU abstraction. Used by both the GUI and the headless
-  renderer; all shaders live in `trxviz-core/src/shaders/`.
-- **`egui` / `eframe` / `egui-snarl` / `egui_tiles`** — only used by the
-  `trxviz` GUI crate and a few GUI-facing types in `trxviz-core` that
-  will eventually move behind a feature flag.
+## Notable conventions
 
-## Conventions
-
-- **Coordinates**: all world-space positions use the **RAS+ neuroimaging
-  convention** (X=Right, Y=Anterior, Z=Superior).
-- **GPU structs**: anything uploaded to a uniform or vertex buffer derives
-  `bytemuck::Pod` + `Zeroable`.
-- **Split position/color buffers**: streamline vertex data lives in two
-  buffers so recoloring 100k+ streamlines only rewrites the 16-byte/vertex
-  color buffer, not the 12-byte/vertex positions.
+- World-space coordinates use RAS+ neuroimaging conventions.
+- Semantic newtypes such as `Millimeters`, `ParcelId`, and `StreamlineIndex`
+  are used in the workflow/runtime layer instead of raw scalar identifiers.
+- Heavy immutable dataset boundaries may still use `Arc`, but the workflow
+  evaluator itself is intentionally single-threaded.

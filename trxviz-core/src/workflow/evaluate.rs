@@ -10,7 +10,6 @@ use crate::scene::LoadedGiftiSurface;
 
 use super::*;
 
-pub use super::eval_streamlines::save_streamline_plan;
 pub(crate) use super::eval_inputs::{
     expect_boundary_field_input, expect_bundle_surface_input, expect_cifti_input,
     expect_fixel_scalars_input, expect_fixels_input, expect_odf_field_input,
@@ -19,13 +18,12 @@ pub(crate) use super::eval_inputs::{
     expect_volume_input, expect_volume_scalars_input, optional_volume_scalars_input,
     resolve_selected_labels, volume_scalars_from_nifti_volume,
 };
+pub use super::eval_streamlines::save_streamline_plan;
 pub(crate) use super::eval_streamlines::{
     evaluate_derived_streamline_plan, materialize_reactive_streamline_flow, robust_range,
     summarize_value,
 };
-pub(crate) use super::eval_surface::{
-    compose_surface_appearance, surface_display_model_matrix,
-};
+pub(crate) use super::eval_surface::{compose_surface_appearance, surface_display_model_matrix};
 
 pub fn evaluate_scene_plan(
     document: &WorkflowDocument,

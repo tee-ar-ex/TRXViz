@@ -230,7 +230,9 @@ pub(super) fn execute_workflow_to_completion(
     Ok(())
 }
 
-pub(super) fn ensure_export_tube_geometry(workflow: &mut HeadlessWorkflowState) -> anyhow::Result<()> {
+pub(super) fn ensure_export_tube_geometry(
+    workflow: &mut HeadlessWorkflowState,
+) -> anyhow::Result<()> {
     for draw in workflow.runtime.scene_plan.streamline_draws.clone() {
         if !draw.visible {
             continue;

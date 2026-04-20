@@ -102,8 +102,11 @@ impl StreamlineResources {
             post_params: [1.0, 1.0, 0.12, 0.0],
         };
 
-        let viewports =
-            ViewportUniformSet::new(device, "streamline_uniforms", &default_uniforms, |i, buffer| {
+        let viewports = ViewportUniformSet::new(
+            device,
+            "streamline_uniforms",
+            &default_uniforms,
+            |i, buffer| {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some(&format!("streamline_bind_group_{i}")),
                     layout: &bind_group_layout,
@@ -112,7 +115,8 @@ impl StreamlineResources {
                         resource: buffer.as_entire_binding(),
                     }],
                 })
-            });
+            },
+        );
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("streamline_pipeline_layout"),

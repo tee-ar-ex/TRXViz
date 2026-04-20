@@ -71,17 +71,16 @@ pub use volume_source::VolumeSourceOp;
 
 use super::{
     BundleSurfaceBuildMode, BundleSurfaceColorMode, DpsFieldName, DpvFieldName, EvalCtx,
-    GlyphColormap, GroupFilter, OpacityGate, ParcelIdSet, PortKind, SizeGate,
-    SurfaceDisplaySpace, SurfaceOverlayLayerConfig, WorkflowOp, WorkflowResult,
-    WorkflowSliceViewKind, default_boundary_field_normalization,
-    default_boundary_field_sphere_lod, default_boundary_field_voxel_size_mm,
-    default_boundary_glyph_color_mode, default_boundary_glyph_density_3d_step,
-    default_boundary_glyph_min_contacts, default_boundary_glyph_scale,
-    default_boundary_glyph_slice_density_step, default_bundle_surface_min_component_volume_mm3,
-    default_bundle_surface_outline_thickness, default_enabled, default_fixel_colormap,
-    default_fixel_length_scale, default_fixel_line_width, default_fixel_slab_thickness_mm,
-    default_full_opacity, default_odf_glyph_detail, default_odf_glyph_scale,
-    default_surface_overlay_layers, default_workflow_slice_view_kind,
+    GlyphColormap, GroupFilter, OpacityGate, ParcelIdSet, PortKind, SizeGate, SurfaceDisplaySpace,
+    SurfaceOverlayLayerConfig, WorkflowOp, WorkflowResult, WorkflowSliceViewKind,
+    default_boundary_field_normalization, default_boundary_field_sphere_lod,
+    default_boundary_field_voxel_size_mm, default_boundary_glyph_color_mode,
+    default_boundary_glyph_density_3d_step, default_boundary_glyph_min_contacts,
+    default_boundary_glyph_scale, default_boundary_glyph_slice_density_step,
+    default_bundle_surface_min_component_volume_mm3, default_bundle_surface_outline_thickness,
+    default_enabled, default_fixel_colormap, default_fixel_length_scale, default_fixel_line_width,
+    default_fixel_slab_thickness_mm, default_full_opacity, default_odf_glyph_detail,
+    default_odf_glyph_scale, default_surface_overlay_layers, default_workflow_slice_view_kind,
 };
 use crate::data::cifti::CiftiStructure;
 use crate::data::loaded_files::{FileId, VolumeColormap};

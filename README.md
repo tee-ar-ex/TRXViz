@@ -159,7 +159,7 @@ slice state under `document.slice_view_3d`.
 
 ## Documentation
 
-Full documentation is at the [TRXViz docs site](https://YOUR_GITHUB_USERNAME.github.io/TRXViz/) (built from [`docs/`](docs/)).
+Full documentation is at the [TRXViz docs site](https://tee-ar-ex.github.io/TRXViz/) (built from [`docs/`](docs/)).
 
 ## License
 

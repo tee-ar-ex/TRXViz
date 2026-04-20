@@ -11,9 +11,7 @@ use crate::lighting::WorkflowRender3D;
 use crate::renderer::camera::OrbitCamera;
 use crate::renderer::colormap::gloss_to_roughness;
 use crate::scene::{HeadlessScene, HeadlessWorkflowState};
-use crate::workflow::{
-    workflow_bundle_display_fingerprint, workflow_streamline_fingerprint,
-};
+use crate::workflow::{workflow_bundle_display_fingerprint, workflow_streamline_fingerprint};
 
 pub(crate) fn compute_scene_bounds(
     scene: &HeadlessScene,
@@ -123,8 +121,10 @@ pub(crate) fn build_glb_scene(
                 else {
                     continue;
                 };
-                let colors =
-                    super::super::bake::surface_vertex_colors_for_export(surface.data.as_ref(), draw);
+                let colors = super::super::bake::surface_vertex_colors_for_export(
+                    surface.data.as_ref(),
+                    draw,
+                );
                 let positions = surface
                     .data
                     .vertices
@@ -180,8 +180,10 @@ pub(crate) fn build_glb_scene(
                 else {
                     continue;
                 };
-                let colors =
-                    super::super::bake::surface_vertex_colors_for_export(surface.data.as_ref(), draw);
+                let colors = super::super::bake::surface_vertex_colors_for_export(
+                    surface.data.as_ref(),
+                    draw,
+                );
                 let positions = surface
                     .data
                     .vertices

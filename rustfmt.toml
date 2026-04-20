@@ -1,3 +1,6 @@
 edition = "2024"
+# TODO(TRXViz): `imports_granularity` and `group_imports` are nightly-only knobs today.
+# Keep them here as the intended style, but expect stable `cargo fmt` to warn and ignore them
+# until the toolchain supports them on stable.
 imports_granularity = "Crate"
 group_imports = "StdExternalCrate"

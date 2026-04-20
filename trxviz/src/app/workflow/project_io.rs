@@ -110,7 +110,11 @@ pub fn apply_gui_slice_view_state(viewport: &mut ViewportState, state: WorkflowS
     view_2d.lightbox_cols = state.lightbox_cols.max(1);
     view_2d.active_axis = state.active_axis.min(2);
     view_2d.ortho_show_row = state.ortho_show_row;
-    for (camera, saved) in viewport.slice_cameras_mut().iter_mut().zip(state.slice_cameras) {
+    for (camera, saved) in viewport
+        .slice_cameras_mut()
+        .iter_mut()
+        .zip(state.slice_cameras)
+    {
         camera.center = saved.center;
         camera.half_extent = saved.half_extent.max(0.001);
         camera.rotation = saved.rotation;

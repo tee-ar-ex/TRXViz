@@ -456,11 +456,7 @@ impl super::super::TrxVizApp {
     }
 
     fn workflow_node_op(&self, uuid: WorkflowNodeUuid) -> Option<&WorkflowNodeKind> {
-        self.workflow
-            .document
-            .graph
-            .get(uuid)
-            .map(|node| &node.op)
+        self.workflow.document.graph.get(uuid).map(|node| &node.op)
     }
 
     fn sync_editor_node_from_document(&mut self, node_uuid: WorkflowNodeUuid) {

@@ -3,6 +3,7 @@
 //! This crate is intended to be reused by both the desktop application and the headless CLI so
 //! rendering behavior and workflow execution stay aligned across both surfaces.
 
+pub mod asset_loader;
 pub mod data;
 /// Structured error types for the workflow evaluator and persistence layer.
 pub mod error;

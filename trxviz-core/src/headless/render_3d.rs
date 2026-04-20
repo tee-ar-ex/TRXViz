@@ -1,12 +1,8 @@
 use std::path::Path;
 
-use super::gpu_context::{
-    GpuSceneResources, TARGET_FORMAT,
-};
+use super::HeadlessRenderData;
+use super::gpu_context::{GpuSceneResources, TARGET_FORMAT};
 use super::readback::readback_texture_to_png;
-use super::{
-    HeadlessRenderData,
-};
 use crate::data::trx_data::RenderStyle;
 use crate::lighting::WorkflowRender3D;
 use crate::renderer::camera::OrbitCamera;

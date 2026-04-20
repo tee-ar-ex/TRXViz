@@ -369,12 +369,13 @@ impl super::super::TrxVizApp {
             .set_file_name(default_name)
             .save_file()
         {
-            self.viewport.set_pending_export(crate::app::state::PendingExportRequest {
-                target: self.viewport.export_dialog().target,
-                path,
-                scale: self.viewport.export_dialog().scale.max(1),
-                requested_screenshot: false,
-            });
+            self.viewport
+                .set_pending_export(crate::app::state::PendingExportRequest {
+                    target: self.viewport.export_dialog().target,
+                    path,
+                    scale: self.viewport.export_dialog().scale.max(1),
+                    requested_screenshot: false,
+                });
             self.viewport.export_dialog_mut().open = false;
             ctx.request_repaint();
         }
@@ -900,7 +901,8 @@ impl super::super::TrxVizApp {
         } else {
             (glam::Vec3::ZERO, 0.0)
         };
-        let fog_span = (self.viewport.camera_3d().distance + self.viewport.volume_extent()).max(1.0);
+        let fog_span =
+            (self.viewport.camera_3d().distance + self.viewport.volume_extent()).max(1.0);
         let render_3d = self.capture_document_render_3d();
         let fog_near = fog_span * render_3d.fog_start_fraction;
         let fog_far = fog_span * render_3d.fog_end_fraction;
@@ -984,9 +986,13 @@ impl super::super::TrxVizApp {
         }
 
         let aspect = rect.width() / rect.height().max(1.0);
-        let vp = self.viewport.inflated_stage_camera().view_projection(aspect);
-        let fog_span =
-            (self.viewport.inflated_stage_camera().distance + self.viewport.volume_extent()).max(1.0);
+        let vp = self
+            .viewport
+            .inflated_stage_camera()
+            .view_projection(aspect);
+        let fog_span = (self.viewport.inflated_stage_camera().distance
+            + self.viewport.volume_extent())
+        .max(1.0);
         let render_3d = self.capture_document_render_3d();
         let fog_near = fog_span * render_3d.fog_start_fraction;
         let fog_far = fog_span * render_3d.fog_end_fraction;
@@ -1081,8 +1087,7 @@ impl super::super::TrxVizApp {
             .view_projection(aspect, slice_pos);
         let glyph_slab_half_width = self
             .viewport
-            .boundary_field
-            ()
+            .boundary_field()
             .map(|field| 0.5 * field.grid.voxel_size_mm.0)
             .or_else(|| {
                 self.workflow

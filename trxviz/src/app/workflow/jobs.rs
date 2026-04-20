@@ -1436,7 +1436,11 @@ impl crate::app::TrxVizApp {
             return;
         };
 
-        match gui_save_project(&self.workflow.document, &self.workflow.workspace, &target_path) {
+        match gui_save_project(
+            &self.workflow.document,
+            &self.workflow.workspace,
+            &target_path,
+        ) {
             Ok(()) => {
                 self.workflow.project_path = Some(target_path.clone());
                 self.status_msg = Some(format!(

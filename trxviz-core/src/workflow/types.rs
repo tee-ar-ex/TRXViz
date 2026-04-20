@@ -1279,7 +1279,10 @@ mod tests {
 
         let json = serde_json::to_string(&project).unwrap();
         let restored: WorkflowProject = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.document.slice_view_ui, project.document.slice_view_ui);
+        assert_eq!(
+            restored.document.slice_view_ui,
+            project.document.slice_view_ui
+        );
         assert_eq!(restored.document.selection, project.document.selection);
     }
 

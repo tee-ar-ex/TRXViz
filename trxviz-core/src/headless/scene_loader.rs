@@ -3,19 +3,18 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow, bail};
 use glam::Vec3;
-use trx_rs::{AnyTrxFile, ConversionOptions};
 
+use crate::asset_loader::{AssetLoader, LoadedAsset, load_asset};
 use crate::data::gifti_data::GiftiSurfaceData;
 use crate::data::loaded_files::{
     FileId, LoadedNifti, LoadedTrx, StreamlineBacking, VolumeColormap,
 };
 use crate::data::nifti_data::NiftiVolume;
 use crate::data::odx_data::OdxScene;
-use crate::data::parcellation_data::{ParcellationVolume, guess_label_table_path};
-use crate::data::trx_data::TrxGpuData;
+use crate::data::parcellation_data::ParcellationVolume;
 use crate::scene::{
     HeadlessScene, HeadlessWorkflowState, LoadedGiftiSurface, LoadedParcellationSource,
-    LoadedStreamlineSource, direct_streamline_import_warnings,
+    LoadedStreamlineSource,
 };
 use crate::workflow::{
     LoadedParcellation, ParcellationAsset, WorkflowAssetDocument, add_default_nodes_for_asset,
@@ -35,35 +34,17 @@ pub(super) fn load_project_state(
     for asset in project.document.assets.clone() {
         match asset {
             WorkflowAssetDocument::Streamlines { id, path, imported } => {
-                let source = if imported {
-                    let tractogram = trx_rs::read_tractogram(&path, &ConversionOptions::default())
-                        .map_err(|err| anyhow!(err.to_string()))?;
-                    LoadedStreamlineSource {
-                        data: TrxGpuData::from_tractogram(&tractogram)
-                            .map_err(|err| anyhow!(err.to_string()))?,
-                        backing: StreamlineBacking::Imported(Arc::new(tractogram)),
-                        warnings: direct_streamline_import_warnings(
-                            &path,
-                            &ConversionOptions {
-                                vtk_coordinate_mode: trx_rs::VtkCoordinateMode::HeaderOrWarn,
-                                ..Default::default()
-                            },
-                        ),
-                    }
-                } else {
-                    let any = AnyTrxFile::load(&path).map_err(|err| anyhow!(err.to_string()))?;
-                    load_streamline_source_from_any(any)?
-                };
+                let source = LoadedStreamlineSource::load(&path)?;
+                let _ = imported;
                 apply_loaded_trx(&mut scene, path, source, Some(id));
             }
             WorkflowAssetDocument::Volume { id, path } => {
-                let volume = NiftiVolume::load(&path).map_err(|err| anyhow!(err.to_string()))?;
+                let volume = NiftiVolume::load(&path)?;
                 apply_loaded_nifti(&mut scene, path, volume, Some(id));
             }
             WorkflowAssetDocument::Cifti { .. } => {}
             WorkflowAssetDocument::Surface { id, path } => {
-                let surface =
-                    GiftiSurfaceData::load(&path).map_err(|err| anyhow!(err.to_string()))?;
+                let surface = GiftiSurfaceData::load(&path)?;
                 apply_loaded_surface(&mut scene, path, surface, Some(id));
             }
             WorkflowAssetDocument::Parcellation {
@@ -71,16 +52,14 @@ pub(super) fn load_project_state(
                 path,
                 label_table_path,
             } => {
-                let source = ParcellationVolume::load(&path, label_table_path.as_deref())
-                    .map(|data| LoadedParcellationSource {
-                        data,
-                        label_table_path,
-                    })
-                    .map_err(|err| anyhow!(err.to_string()))?;
+                let source = LoadedParcellationSource {
+                    data: ParcellationVolume::load(&path, label_table_path.as_deref())?,
+                    label_table_path,
+                };
                 apply_loaded_parcellation(&mut scene, path, source, Some(id));
             }
             WorkflowAssetDocument::Odx { id, path } => {
-                let odx_scene = OdxScene::open(&path)
+                let odx_scene = OdxScene::load(&path)
                     .map_err(|err| anyhow!("opening ODX {}: {}", path.display(), err))?;
                 let warnings = odx_scene.glyph_warnings().to_vec();
                 let name = path
@@ -132,7 +111,10 @@ pub(super) fn load_asset_args_state(
     let mut workflow = HeadlessWorkflowState::default();
 
     for path in &args.tractogram_paths {
-        let (source, imported) = load_streamline_source(path)?;
+        let LoadedAsset::Streamlines(source) = load_asset(path)? else {
+            bail!("expected streamline asset for {}", path.display());
+        };
+        let imported = !matches!(source.backing, StreamlineBacking::Native(_));
         let id = apply_loaded_trx(&mut scene, path.clone(), source, None);
         register_asset_default_nodes(
             &mut workflow.document,
@@ -153,7 +135,9 @@ pub(super) fn load_asset_args_state(
     }
 
     for path in &args.nifti_paths {
-        let volume = NiftiVolume::load(path).map_err(|err| anyhow!(err.to_string()))?;
+        let LoadedAsset::Volume(volume) = load_asset(path)? else {
+            bail!("expected NIfTI volume for {}", path.display());
+        };
         let id = apply_loaded_nifti(&mut scene, path.clone(), volume, None);
         register_asset_default_nodes(
             &mut workflow.document,
@@ -166,7 +150,9 @@ pub(super) fn load_asset_args_state(
     }
 
     for path in &args.surface_paths {
-        let surface = GiftiSurfaceData::load(path).map_err(|err| anyhow!(err.to_string()))?;
+        let LoadedAsset::Surface(surface) = load_asset(path)? else {
+            bail!("expected GIFTI surface for {}", path.display());
+        };
         let id = apply_loaded_surface(&mut scene, path.clone(), surface, None);
         register_asset_default_nodes(
             &mut workflow.document,
@@ -179,13 +165,10 @@ pub(super) fn load_asset_args_state(
     }
 
     for path in &args.parcellation_paths {
-        let label_table_path = guess_label_table_path(path);
-        let source = ParcellationVolume::load(path, label_table_path.as_deref())
-            .map(|data| LoadedParcellationSource {
-                data,
-                label_table_path: label_table_path.clone(),
-            })
-            .map_err(|err| anyhow!(err.to_string()))?;
+        let LoadedAsset::Parcellation(source) = load_asset(path)? else {
+            bail!("expected parcellation for {}", path.display());
+        };
+        let label_table_path = source.label_table_path.clone();
         let id = apply_loaded_parcellation(&mut scene, path.clone(), source, None);
         register_asset_default_nodes(
             &mut workflow.document,
@@ -199,11 +182,16 @@ pub(super) fn load_asset_args_state(
     }
 
     for path in &args.odx_paths {
-        let odx_scene =
-            OdxScene::open(path).with_context(|| format!("loading ODX file {}", path.display()))?;
+        let LoadedAsset::Odx(odx_scene) =
+            load_asset(path).with_context(|| format!("loading ODX file {}", path.display()))?
+        else {
+            bail!("expected ODX asset for {}", path.display());
+        };
         let show_fixel_3d_by_default = odx_scene.glyph_source_kind().is_none();
         let dims = odx_scene.dimensions();
-        let header = odx_rs::OdxDataset::open(path).ok().map(|ds| ds.header().clone());
+        let header = odx_rs::OdxDataset::open(path)
+            .ok()
+            .map(|ds| ds.header().clone());
         if let Some(h) = &header {
             let affine = &h.voxel_to_rasmm;
             let mid = [
@@ -287,39 +275,6 @@ fn register_asset_default_nodes(
     document.assets.push(asset.clone());
     let pos = crate::workflow::suggest_asset_branch_origin(document);
     let _ = add_default_nodes_for_asset(document, &asset, pos, streamline_limit);
-}
-
-fn load_streamline_source_from_any(any: AnyTrxFile) -> anyhow::Result<LoadedStreamlineSource> {
-    TrxGpuData::from_any_trx(&any)
-        .map(|data| LoadedStreamlineSource {
-            data,
-            backing: StreamlineBacking::Native(Arc::new(any)),
-            warnings: Vec::new(),
-        })
-        .map_err(|err| anyhow!(err.to_string()))
-}
-
-fn load_streamline_source(path: &Path) -> anyhow::Result<(LoadedStreamlineSource, bool)> {
-    let format = trx_rs::detect_format(path).map_err(|err| anyhow!(err.to_string()))?;
-    if format == trx_rs::Format::Trx {
-        let any = AnyTrxFile::load(path).map_err(|err| anyhow!(err.to_string()))?;
-        let source = load_streamline_source_from_any(any)?;
-        return Ok((source, false));
-    }
-
-    let options = ConversionOptions::default();
-    let warnings = direct_streamline_import_warnings(path, &options);
-    let tractogram =
-        trx_rs::read_tractogram(path, &options).map_err(|err| anyhow!(err.to_string()))?;
-    let data = TrxGpuData::from_tractogram(&tractogram).map_err(|err| anyhow!(err.to_string()))?;
-    Ok((
-        LoadedStreamlineSource {
-            data,
-            backing: StreamlineBacking::Imported(Arc::new(tractogram)),
-            warnings,
-        },
-        true,
-    ))
 }
 
 fn allocate_file_id(scene: &mut HeadlessScene, explicit_id: Option<FileId>) -> FileId {

@@ -630,6 +630,8 @@ fn cycle_in_graph_sets_graph_error() {
 
 // ---------------------------------------------------------------------------
 // Performance benchmark (ignored by default — run with `cargo test -- --ignored`)
+// TODO(TRXViz): replace this ad-hoc ignored test with a stable benchmark harness once the repo
+// has a committed performance-baseline workflow.
 // ---------------------------------------------------------------------------
 
 #[test]

@@ -6,8 +6,8 @@ use super::{
     HeadlessView, SceneBounds, StreamlineDrawInfo, VolumeDrawInfo,
 };
 use crate::data::cifti::CiftiStructure;
-use crate::renderer::mesh_renderer::MeshDrawStyle;
 use crate::renderer::camera::OrbitCamera;
+use crate::renderer::mesh_renderer::MeshDrawStyle;
 use crate::scene::{HeadlessScene, HeadlessWorkflowState};
 use crate::units::Millimeters;
 use crate::workflow::WorkflowCamera3D;
@@ -348,7 +348,12 @@ fn bbox_corners(min: Vec3, max: Vec3) -> [Vec3; 8] {
     ]
 }
 
-fn stage_panel_transform(center_transform: Mat4, x_shift: f32, z_shift: f32, turn_deg: f32) -> Mat4 {
+fn stage_panel_transform(
+    center_transform: Mat4,
+    x_shift: f32,
+    z_shift: f32,
+    turn_deg: f32,
+) -> Mat4 {
     Mat4::from_translation(Vec3::new(x_shift, 0.0, z_shift))
         * Mat4::from_rotation_z(turn_deg.to_radians())
         * center_transform

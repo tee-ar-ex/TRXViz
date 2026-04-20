@@ -1,4 +1,5 @@
 mod callbacks;
+mod file_apply;
 mod file_loading;
 mod helpers;
 mod state;
@@ -52,9 +53,12 @@ impl TrxVizApp {
         workflow::WorkflowSliceView3D {
             visible: self.viewport.slice_visible(),
             positions_ras: [
-                self.viewport.slice_world_position(&self.scene.nifti_files, 0),
-                self.viewport.slice_world_position(&self.scene.nifti_files, 1),
-                self.viewport.slice_world_position(&self.scene.nifti_files, 2),
+                self.viewport
+                    .slice_world_position(&self.scene.nifti_files, 0),
+                self.viewport
+                    .slice_world_position(&self.scene.nifti_files, 1),
+                self.viewport
+                    .slice_world_position(&self.scene.nifti_files, 2),
             ],
         }
     }
@@ -88,12 +92,16 @@ impl TrxVizApp {
             return;
         };
         self.viewport.set_slice_visible_all(slice_view.visible);
-        self.viewport.set_slice_world_offsets(slice_view.positions_ras);
+        self.viewport
+            .set_slice_world_offsets(slice_view.positions_ras);
         if let Some(nf) = self.scene.nifti_files.first() {
             self.viewport.set_slice_indices([
-                nf.volume.nearest_slice_index(0, slice_view.positions_ras[0]),
-                nf.volume.nearest_slice_index(1, slice_view.positions_ras[1]),
-                nf.volume.nearest_slice_index(2, slice_view.positions_ras[2]),
+                nf.volume
+                    .nearest_slice_index(0, slice_view.positions_ras[0]),
+                nf.volume
+                    .nearest_slice_index(1, slice_view.positions_ras[1]),
+                nf.volume
+                    .nearest_slice_index(2, slice_view.positions_ras[2]),
             ]);
             self.viewport.mark_slices_dirty();
         }
@@ -126,7 +134,7 @@ impl TrxVizApp {
     fn poll_worker_messages(&mut self, frame: &mut eframe::Frame) {
         while let Ok(message) = self.worker_rx.try_recv() {
             match message {
-                WorkerMessage::TrxLoaded {
+                WorkerMessage::AssetLoaded {
                     job_id,
                     path,
                     result,
@@ -134,66 +142,20 @@ impl TrxVizApp {
                     self.pending_file_loads.retain(|job| job.job_id != job_id);
                     match result {
                         Ok(data) => {
-                            if let Some(rs) = frame.wgpu_render_state() {
-                                self.apply_loaded_trx(path, data, rs);
+                            if matches!(data, trxviz_core::asset_loader::LoadedAsset::Odx(_)) {
+                                self.reference_affine_dialog.close();
                             }
-                        }
-                        Err(err) => self.error_msg = Some(format!("Failed to load TRX: {err}")),
-                    }
-                }
-                WorkerMessage::NiftiLoaded {
-                    job_id,
-                    path,
-                    result,
-                } => {
-                    self.pending_file_loads.retain(|job| job.job_id != job_id);
-                    match result {
-                        Ok(vol) => {
                             if let Some(rs) = frame.wgpu_render_state() {
-                                self.apply_loaded_nifti(path, vol, rs);
-                            }
-                        }
-                        Err(err) => self.error_msg = Some(format!("Failed to load NIfTI: {err}")),
-                    }
-                }
-                WorkerMessage::CiftiLoaded {
-                    job_id,
-                    path,
-                    result,
-                } => {
-                    self.pending_file_loads.retain(|job| job.job_id != job_id);
-                    match result {
-                        Ok(cifti) => self.apply_loaded_cifti(path, cifti),
-                        Err(err) => self.error_msg = Some(format!("Failed to load CIFTI: {err}")),
-                    }
-                }
-                WorkerMessage::GiftiLoaded {
-                    job_id,
-                    path,
-                    result,
-                } => {
-                    self.pending_file_loads.retain(|job| job.job_id != job_id);
-                    match result {
-                        Ok(surface) => {
-                            if let Some(rs) = frame.wgpu_render_state() {
-                                self.apply_loaded_gifti_surface(path, surface, rs);
+                                self.apply_loaded_asset(path, data, rs);
                             }
                         }
                         Err(err) => {
-                            self.error_msg = Some(format!("Failed to load GIFTI surface: {err}"))
-                        }
-                    }
-                }
-                WorkerMessage::ParcellationLoaded {
-                    job_id,
-                    path,
-                    result,
-                } => {
-                    self.pending_file_loads.retain(|job| job.job_id != job_id);
-                    match result {
-                        Ok(source) => self.apply_loaded_parcellation(path, source),
-                        Err(err) => {
-                            self.error_msg = Some(format!("Failed to load parcellation: {err}"))
+                            if file_loading::needs_reference_affine_recovery(&path, &err) {
+                                self.reference_affine_dialog.open_for_source(path);
+                                self.error_msg = None;
+                            } else {
+                                self.error_msg = Some(format!("Failed to load asset: {err}"));
+                            }
                         }
                     }
                 }
@@ -234,29 +196,6 @@ impl TrxVizApp {
                         Err(err) => {
                             self.error_msg =
                                 Some(format!("Failed to create merged streamlines: {err}"))
-                        }
-                    }
-                }
-                WorkerMessage::OdxLoaded {
-                    job_id,
-                    path,
-                    result,
-                } => {
-                    self.pending_file_loads.retain(|job| job.job_id != job_id);
-                    match result {
-                        Ok(scene) => {
-                            self.reference_affine_dialog.close();
-                            if let Some(rs) = frame.wgpu_render_state() {
-                                self.apply_loaded_odx(path, scene, rs);
-                            }
-                        }
-                        Err(err) => {
-                            if file_loading::needs_reference_affine_recovery(&path, &err) {
-                                self.reference_affine_dialog.open_for_source(path);
-                                self.error_msg = None;
-                            } else {
-                                self.error_msg = Some(format!("Failed to load ODX: {err}"));
-                            }
                         }
                     }
                 }

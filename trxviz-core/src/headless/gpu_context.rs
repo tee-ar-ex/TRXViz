@@ -3,8 +3,8 @@ use glam::Vec3;
 use pollster::block_on;
 
 use super::SceneBounds;
-use crate::data::odx_data::{FixelScalarValues, OdxGlyphSourceKind};
 use crate::data::odx_data::OdxScene;
+use crate::data::odx_data::{FixelScalarValues, OdxGlyphSourceKind};
 use crate::data::trx_data::RenderStyle;
 use crate::renderer::background_renderer::BackgroundResources;
 use crate::renderer::fixel_renderer::FixelResources;
@@ -387,8 +387,13 @@ pub(super) fn build_gpu_resources(
                 }
             }
             Some(OdxGlyphSourceKind::Sh) => {
-                let detail =
-                    clamped_sh_detail_for_slice(odx, default_odf_glyph_detail(), 2, axial_slice, device);
+                let detail = clamped_sh_detail_for_slice(
+                    odx,
+                    default_odf_glyph_detail(),
+                    2,
+                    axial_slice,
+                    device,
+                );
                 let mesh = odx
                     .sh_render_mesh(detail)
                     .expect("SH render mesh should exist for SH glyph mode");

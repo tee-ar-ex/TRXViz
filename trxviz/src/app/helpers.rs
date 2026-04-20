@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use trx_rs::Format;
-use trxviz_core::data::parcellation_data::guess_label_table_path;
+use trxviz_core::asset_loader::{AssetKind, detect_asset_kind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DroppedPathKind {
@@ -16,81 +16,21 @@ pub(super) enum DroppedPathKind {
 }
 
 pub(super) fn classify_dropped_path(path: &Path) -> DroppedPathKind {
-    // Check ODX-compatible formats first, before trx_rs::detect_format which
-    // doesn't know about these extensions.
-    if let Some(kind) = classify_odx_compatible(path) {
-        return kind;
-    }
-
-    match trx_rs::detect_format(path) {
-        Ok(Format::Trx) => DroppedPathKind::OpenTrx,
-        Ok(format @ (Format::Trk | Format::Tck | Format::Vtk | Format::TinyTrack)) => {
-            DroppedPathKind::ImportTractogram(format)
-        }
-        Err(_) => {
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-            let file_name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            match ext.as_str() {
-                "gz" if stem.ends_with(".nii") => classify_nifti_like(path, &file_name),
-                "nii" => classify_nifti_like(path, &file_name),
-                "gii" | "gifti" => DroppedPathKind::OpenGifti,
-                _ => DroppedPathKind::Unsupported,
+    match detect_asset_kind(path) {
+        AssetKind::Odx => DroppedPathKind::OpenOdx,
+        AssetKind::Streamlines => DroppedPathKind::OpenTrx,
+        AssetKind::ImportedStreamlines => match trx_rs::detect_format(path) {
+            Ok(format @ (Format::Trk | Format::Tck | Format::Vtk | Format::TinyTrack)) => {
+                DroppedPathKind::ImportTractogram(format)
             }
-        }
+            _ => DroppedPathKind::Unsupported,
+        },
+        AssetKind::Volume => DroppedPathKind::OpenNifti,
+        AssetKind::Cifti => DroppedPathKind::OpenCifti,
+        AssetKind::Surface => DroppedPathKind::OpenGifti,
+        AssetKind::Parcellation => DroppedPathKind::OpenParcellation,
+        AssetKind::Unsupported => DroppedPathKind::Unsupported,
     }
-}
-
-/// Detect ODX-compatible formats: .odx, .fib.gz, .fz, .pam5, .mif/.mif.gz,
-/// MRtrix fixel directories, and ODX directory format.
-fn classify_odx_compatible(path: &Path) -> Option<DroppedPathKind> {
-    let file_name = path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default();
-    let lower = file_name.to_ascii_lowercase();
-
-    // Directory formats: ODX directory or MRtrix fixel directory
-    if path.is_dir() {
-        if path.join("header.json").exists() {
-            return Some(DroppedPathKind::OpenOdx);
-        }
-        // MRtrix fixel directory: must have index.* and directions.* files
-        let has_index = path.join("index.mif").exists() || path.join("index.nii.gz").exists();
-        let has_dirs =
-            path.join("directions.mif").exists() || path.join("directions.nii.gz").exists();
-        if has_index && has_dirs {
-            return Some(DroppedPathKind::OpenOdx);
-        }
-        return None;
-    }
-
-    // File formats
-    if lower.ends_with(".odx") || lower.ends_with(".odxd") {
-        return Some(DroppedPathKind::OpenOdx);
-    }
-    if lower.ends_with(".fib.gz") {
-        return Some(DroppedPathKind::OpenOdx);
-    }
-    if lower.ends_with(".fz") {
-        return Some(DroppedPathKind::OpenOdx);
-    }
-    if lower.ends_with(".pam5") {
-        return Some(DroppedPathKind::OpenOdx);
-    }
-    if lower.ends_with(".mif") || lower.ends_with(".mif.gz") {
-        return Some(DroppedPathKind::OpenOdx);
-    }
-
-    None
 }
 
 #[cfg(test)]
@@ -104,29 +44,6 @@ mod tests {
             classify_dropped_path(std::path::Path::new("sample.trk.gz")),
             DroppedPathKind::ImportTractogram(Format::Trk)
         );
-    }
-}
-
-fn classify_nifti_like(path: &Path, file_name: &str) -> DroppedPathKind {
-    if [
-        ".dscalar.nii",
-        ".dlabel.nii",
-        ".dtseries.nii",
-        ".pscalar.nii",
-    ]
-    .iter()
-    .any(|suffix| file_name.ends_with(suffix))
-    {
-        return DroppedPathKind::OpenCifti;
-    }
-    if guess_label_table_path(path).is_some()
-        || ["parcel", "parc", "atlas", "label", "seg", "segmentation"]
-            .iter()
-            .any(|needle| file_name.contains(needle))
-    {
-        DroppedPathKind::OpenParcellation
-    } else {
-        DroppedPathKind::OpenNifti
     }
 }
 

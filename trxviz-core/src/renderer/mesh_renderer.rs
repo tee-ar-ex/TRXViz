@@ -380,16 +380,17 @@ impl MeshResources {
             post_params: [1.0, 1.0, 0.12, 0.0],
         };
 
-        let viewports = ViewportUniformSet::new(device, "mesh_uniforms", &default_uniforms, |i, buffer| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("mesh_bind_group_{i}")),
-                layout: &bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: buffer.as_entire_binding(),
-                }],
-            })
-        });
+        let viewports =
+            ViewportUniformSet::new(device, "mesh_uniforms", &default_uniforms, |i, buffer| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("mesh_bind_group_{i}")),
+                    layout: &bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buffer.as_entire_binding(),
+                    }],
+                })
+            });
 
         self.surfaces.insert(
             surface_id,

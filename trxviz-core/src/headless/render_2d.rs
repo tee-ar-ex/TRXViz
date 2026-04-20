@@ -3,9 +3,9 @@ use std::path::Path;
 use anyhow::anyhow;
 use glam::Vec3;
 
+use super::HeadlessRenderData;
 use super::gpu_context::{GpuSceneResources, TARGET_FORMAT};
 use super::readback::readback_texture_to_png;
-use super::HeadlessRenderData;
 use crate::lighting::{SceneLightingParams, WorkflowRender3D};
 use crate::renderer::camera::OrthoSliceCamera;
 use crate::renderer::slice_renderer::SliceAxis;
@@ -288,7 +288,9 @@ pub(super) fn render_scene2d_to_png(
                 resources.glyphs.paint(render_pass, viewport.into(), true);
             }
             if render_data.odx_visible && render_data.odx_fixel_2d_visible {
-                resources.fixels_2d.paint(render_pass, viewport.into(), true);
+                resources
+                    .fixels_2d
+                    .paint(render_pass, viewport.into(), true);
             }
         }
     }
@@ -308,7 +310,12 @@ fn build_2d_panels(
             let axis_index = axis_index_for_kind(slice_view_ui.single_view);
             let slice_index = scene.slice_indices[axis_index];
             vec![SlicePanel {
-                rect: ViewportRect { x: 0, y: 0, width, height },
+                rect: ViewportRect {
+                    x: 0,
+                    y: 0,
+                    width,
+                    height,
+                },
                 axis_index,
                 slice_index,
                 slice_pos: slice_world_position(scene, axis_index),
@@ -335,7 +342,12 @@ fn build_2d_panels(
                 let panel_height = ((height.saturating_sub(SPACING)) / 2).max(1);
                 vec![
                     SlicePanel {
-                        rect: ViewportRect { x: 0, y: 0, width: panel_width, height: panel_height },
+                        rect: ViewportRect {
+                            x: 0,
+                            y: 0,
+                            width: panel_width,
+                            height: panel_height,
+                        },
                         axis_index: 0,
                         slice_index: scene.slice_indices[0],
                         slice_pos: slice_world_position(scene, 0),

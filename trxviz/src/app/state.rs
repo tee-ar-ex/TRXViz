@@ -6,10 +6,8 @@ use std::sync::mpsc;
 use egui::Rect;
 use egui_snarl::Snarl;
 use glam::Vec3;
-use trxviz_core::data::gifti_data::GiftiSurfaceData;
-use trxviz_core::data::loaded_files::{FileId, LoadedCifti, LoadedNifti};
-use trxviz_core::data::nifti_data::NiftiVolume;
-use trxviz_core::data::odx_data::OdxScene;
+use trxviz_core::asset_loader::LoadedAsset;
+use trxviz_core::data::loaded_files::{FileId, LoadedNifti};
 use trxviz_core::data::orientation_field::BoundaryContactField;
 pub use trxviz_core::lighting::{SceneLightingParams, WorkflowBackground3D, WorkflowRender3D};
 use trxviz_core::renderer::camera::{OrbitCamera, OrthoSliceCamera};
@@ -23,8 +21,7 @@ pub use trxviz_core::scene::{
 use crate::app::workflow::{
     NodeSize, StreamlineDisplayRuntime, WorkflowDocument, WorkflowExecutionCache, WorkflowJobKind,
     WorkflowJobMessage, WorkflowNode, WorkflowNodeUuid, WorkflowRuntime, WorkflowSelection,
-    WorkspacePane, default_document,
-    default_workspace_tree, snarl_from_graph,
+    WorkspacePane, default_document, default_workspace_tree, snarl_from_graph,
 };
 use egui_tiles::Tree;
 use trx_rs::{Format, VtkCoordinateMode};
@@ -751,9 +748,8 @@ impl ViewportState {
             1 => field.grid.origin_ras.y + (dims[1] as f32 - 0.5) * voxel,
             _ => field.grid.origin_ras.x + (dims[0] as f32 - 0.5) * voxel,
         };
-        let new_pos =
-            (self.slices.slice_world_offsets[axis_index] + delta as f32 * voxel)
-                .clamp(min_pos, max_pos);
+        let new_pos = (self.slices.slice_world_offsets[axis_index] + delta as f32 * voxel)
+            .clamp(min_pos, max_pos);
         if (new_pos - self.slices.slice_world_offsets[axis_index]).abs() > f32::EPSILON {
             self.slices.slice_world_offsets[axis_index] = new_pos;
             return true;
@@ -848,10 +844,10 @@ impl WorkflowState {
 }
 
 pub enum WorkerMessage {
-    TrxLoaded {
+    AssetLoaded {
         job_id: u64,
         path: PathBuf,
-        result: Result<LoadedStreamlineSource, String>,
+        result: Result<LoadedAsset, String>,
     },
     ImportedStreamlinesLoaded {
         job_id: u64,
@@ -862,31 +858,6 @@ pub enum WorkerMessage {
         job_id: u64,
         path: PathBuf,
         result: Result<LoadedStreamlineSource, String>,
-    },
-    NiftiLoaded {
-        job_id: u64,
-        path: PathBuf,
-        result: Result<NiftiVolume, String>,
-    },
-    CiftiLoaded {
-        job_id: u64,
-        path: PathBuf,
-        result: Result<LoadedCifti, String>,
-    },
-    GiftiLoaded {
-        job_id: u64,
-        path: PathBuf,
-        result: Result<GiftiSurfaceData, String>,
-    },
-    ParcellationLoaded {
-        job_id: u64,
-        path: PathBuf,
-        result: Result<LoadedParcellationSource, String>,
-    },
-    OdxLoaded {
-        job_id: u64,
-        path: PathBuf,
-        result: Result<OdxScene, String>,
     },
 }
 

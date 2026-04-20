@@ -223,7 +223,11 @@ fn test_streamline_flow() -> StreamlineFlow {
     }
 }
 
-fn evaluate_streamline_op(op: &impl WorkflowOp, node_op: WorkflowNodeKind, flow: StreamlineFlow) -> StreamlineFlow {
+fn evaluate_streamline_op(
+    op: &impl WorkflowOp,
+    node_op: WorkflowNodeKind,
+    flow: StreamlineFlow,
+) -> StreamlineFlow {
     let node = WorkflowNode {
         uuid: WorkflowNodeUuid(1),
         label: op.title().to_string(),

@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use crate::units::StreamlineIndex;
+use std::collections::HashSet;
 
 use super::super::{
     EvalCtx, GroupFilter, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue,
