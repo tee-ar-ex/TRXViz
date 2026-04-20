@@ -12,7 +12,6 @@ category = "public.app-category.medical"
 [dependencies]
 trxviz-core = { path = "../trxviz-core" }
 trx-rs = { git = "https://github.com/tee-ar-ex/trx-rs" }
-odx-rs = { git = "https://github.com/PennLINC/odx-rs" }
 eframe = { version = "0.33", default-features = false, features = ["wgpu", "wayland", "x11", "default_fonts"] }
 egui = "0.33"
 egui-wgpu = "0.33"
@@ -20,22 +19,11 @@ egui-snarl = { version = "0.9.0", features = ["serde"] }
 egui_tiles = { version = "0.14", features = ["serde"] }
 wgpu = "27"
 glam = { version = "0.29", features = ["bytemuck"] }
-bytemuck = { version = "1", features = ["derive"] }
-half = { version = "2", features = ["bytemuck"] }
 log = "0.4"
 env_logger = "0.11"
 anyhow = "1"
-nifti = { version = "0.17", features = ["ndarray_volumes"] }
-ndarray = "0.16"
 rfd = "0.15"
-parking_lot = "0.12"
 image = { version = "0.25", default-features = false, features = ["png"] }
-roxmltree = "0.20"
-base64 = "0.22"
-flate2 = "1"
-mcubes = "0.1.7"
-lin_alg = "1.3.5"
-petgraph = { version = "0.8", features = ["serde-1"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
