@@ -89,6 +89,7 @@ impl super::super::TrxVizApp {
                         };
                         if ui.selectable_label(selected, label).clicked() {
                             self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                            self.workflow.document.selection = self.workflow.selection;
                         }
                     }
                     workflow::WorkflowAssetDocument::Volume { id, path } => {
@@ -99,6 +100,7 @@ impl super::super::TrxVizApp {
                             .clicked()
                         {
                             self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                            self.workflow.document.selection = self.workflow.selection;
                         }
                     }
                     workflow::WorkflowAssetDocument::Cifti { id, path, .. } => {
@@ -109,6 +111,7 @@ impl super::super::TrxVizApp {
                             .clicked()
                         {
                             self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                            self.workflow.document.selection = self.workflow.selection;
                         }
                     }
                     workflow::WorkflowAssetDocument::Surface { id, path } => {
@@ -119,6 +122,7 @@ impl super::super::TrxVizApp {
                             .clicked()
                         {
                             self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                            self.workflow.document.selection = self.workflow.selection;
                         }
                     }
                     workflow::WorkflowAssetDocument::Parcellation { id, path, .. } => {
@@ -129,6 +133,7 @@ impl super::super::TrxVizApp {
                             .clicked()
                         {
                             self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                            self.workflow.document.selection = self.workflow.selection;
                         }
                     }
                     workflow::WorkflowAssetDocument::Odx { id, path, .. } => {
@@ -139,6 +144,7 @@ impl super::super::TrxVizApp {
                             .clicked()
                         {
                             self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                            self.workflow.document.selection = self.workflow.selection;
                         }
                     }
                 }
@@ -184,6 +190,9 @@ impl super::super::TrxVizApp {
             &mut self.workflow.document,
         );
         summary.selection_changed = self.workflow.selection != prior_selection;
+        if summary.selection_changed {
+            self.workflow.document.selection = self.workflow.selection;
+        }
         if summary.semantic_changed() {
             self.mark_workflow_semantic_edit(ui.ctx().input(|input| input.time));
         } else if summary.node_positions_changed || summary.selection_changed {
@@ -204,7 +213,7 @@ impl super::super::TrxVizApp {
 
         let render_changed = self.show_render_settings_section(ui);
         if render_changed {
-            self.workflow.document.render_3d = Some(self.viewport.workflow_render_3d());
+            self.workflow.document.render_3d = Some(self.capture_document_render_3d());
             self.mark_workflow_semantic_edit(ui.ctx().input(|input| input.time));
         }
 
@@ -224,7 +233,7 @@ impl super::super::TrxVizApp {
     }
 
     fn show_render_settings_section(&mut self, ui: &mut egui::Ui) -> bool {
-        let original = self.viewport.render_3d().clone().sanitized();
+        let original = self.capture_document_render_3d();
         let render = self.viewport.render_3d_mut();
 
         ui.collapsing("Render", |ui| {
@@ -288,7 +297,7 @@ impl super::super::TrxVizApp {
             });
         });
 
-        let current = self.viewport.workflow_render_3d();
+        let current = self.capture_document_render_3d();
         self.viewport.set_render_3d(current.clone());
         current != original
     }

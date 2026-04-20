@@ -120,36 +120,26 @@ pub fn apply_gui_slice_view_state(viewport: &mut ViewportState, state: WorkflowS
 /// Load a project file. Returns `(WorkflowProject, workspace_tree)`.
 /// Old files that have `workspace` nested inside `document` are handled by
 /// trying the new format first, then falling back.
-pub fn gui_load_project(
-    path: &Path,
-) -> Result<
-    (
-        WorkflowProject,
-        Tree<WorkspacePane>,
-        Option<WorkflowSliceViewUi>,
-    ),
-    String,
-> {
+pub fn gui_load_project(path: &Path) -> Result<(WorkflowProject, Tree<WorkspacePane>), String> {
     let contents = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
 
     // New format: workspace at top level.
     if let Ok(gui) = serde_json::from_str::<GuiWorkflowProject>(&contents) {
         let mut project = gui.project;
         resolve_document_asset_paths(&mut project.document, path);
-        return Ok((project.clone(), gui.workspace, project.slice_view_ui));
+        return Ok((project, gui.workspace));
     }
 
     // Fall back to core loader (handles bare WorkflowDocument too).
     let mut project = load_workflow_project_from_path(path).map_err(|e| e.to_string())?;
     resolve_document_asset_paths(&mut project.document, path);
-    Ok((project, default_workspace_tree(), None))
+    Ok((project, default_workspace_tree()))
 }
 
 /// Save a project file with the workspace tree at the top level.
 pub fn gui_save_project(
     document: &WorkflowDocument,
     workspace: &Tree<WorkspacePane>,
-    slice_view_ui: WorkflowSliceViewUi,
     path: &Path,
 ) -> Result<(), String> {
     let document = relativized_document(document, path);
@@ -158,7 +148,6 @@ pub fn gui_save_project(
     let project = serde_json::to_value(WorkflowProject {
         version: 1,
         document,
-        slice_view_ui: Some(slice_view_ui),
     })
     .map_err(|e| e.to_string())?;
     let workspace_val = serde_json::to_value(workspace).map_err(|e| e.to_string())?;

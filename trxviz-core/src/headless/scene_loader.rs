@@ -115,13 +115,10 @@ pub(super) fn load_project_state(
                     .nearest_slice_index(2, slice_view.positions_ras[2]),
             ];
         }
-    } else if let Some(slice_visible) = project.document.slice_visible_3d {
-        scene.slice_visible = slice_visible;
     }
 
     let workflow = HeadlessWorkflowState {
         document: project.document,
-        slice_view_ui: project.slice_view_ui,
         project_path: Some(project_path.to_path_buf()),
         ..Default::default()
     };

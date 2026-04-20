@@ -9,7 +9,6 @@ pub fn save_workflow_project_to_path(
     let project = WorkflowProject {
         version: 1,
         document: document.clone(),
-        slice_view_ui: None,
     };
     let json = serde_json::to_string_pretty(&project)?;
     std::fs::write(path, json)?;
@@ -40,7 +39,6 @@ fn load_workflow_project_from_value(value: serde_json::Value) -> WorkflowResult<
     Ok(WorkflowProject {
         version: 1,
         document,
-        slice_view_ui: None,
     })
 }
 

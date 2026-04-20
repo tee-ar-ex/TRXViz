@@ -150,7 +150,6 @@ slice state under `document.slice_view_3d`.
 - Saved GUI projects also restore the slice-plane positions and 2D slice-view pan/zoom state.
 - `trxviz-cli render --project workflow.json --view 2d` renders the saved 2D viewer state to a
   PNG using the project’s stored slice layout and cameras.
-- Saved GUI projects also restore the slice-plane positions and 2D slice-view pan/zoom state.
 - `trxviz-cli render --project workflow.json` uses the saved camera by default unless you pass
   `--target`, `--azimuth`, `--elevation`, or `--distance`.
 

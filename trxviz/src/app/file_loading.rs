@@ -70,6 +70,7 @@ impl super::TrxVizApp {
                 streamline_limit,
             );
             self.workflow.selection = Some(branch.primary_selection);
+            self.workflow.document.selection = self.workflow.selection;
             self.workflow.graph_focus_request = Some(egui::Rect::from_min_max(
                 egui::pos2(branch.bounds.min.x, branch.bounds.min.y),
                 egui::pos2(branch.bounds.max.x, branch.bounds.max.y),

@@ -1378,11 +1378,12 @@ impl crate::app::TrxVizApp {
         self.scene.parcellations.clear();
         self.pending_file_loads.clear();
         self.viewport.clear_boundary_field();
-        self.viewport.apply_workflow_render_3d(Default::default());
+        *self.viewport.render_3d_mut() = Default::default();
         self.workflow.runtime = WorkflowRuntime::default();
         self.workflow.execution_cache = WorkflowExecutionCache::default();
         self.workflow.display_runtimes.clear();
         self.workflow.selection = None;
+        self.workflow.document.selection = None;
         self.workflow.node_feedback.clear();
         self.workflow.document = default_document();
         self.rebuild_workflow_editor_from_document();
@@ -1414,7 +1415,11 @@ impl crate::app::TrxVizApp {
     }
 
     pub(in crate::app) fn save_workflow_project(&mut self, save_as: bool) {
-        self.sync_viewport_camera_into_workflow_document();
+        self.workflow.document.camera_3d = Some(self.capture_document_camera_3d());
+        self.workflow.document.render_3d = Some(self.capture_document_render_3d());
+        self.workflow.document.slice_view_3d = Some(self.capture_document_slice_view_3d());
+        self.workflow.document.slice_view_ui = Some(self.capture_document_slice_view_ui());
+        self.workflow.document.selection = self.workflow.selection;
         let target_path = if !save_as {
             self.workflow.project_path.clone()
         } else {
@@ -1431,12 +1436,7 @@ impl crate::app::TrxVizApp {
             return;
         };
 
-        match gui_save_project(
-            &self.workflow.document,
-            &self.workflow.workspace,
-            crate::app::workflow::capture_gui_slice_view_state(&self.viewport),
-            &target_path,
-        ) {
+        match gui_save_project(&self.workflow.document, &self.workflow.workspace, &target_path) {
             Ok(()) => {
                 self.workflow.project_path = Some(target_path.clone());
                 self.status_msg = Some(format!(
@@ -1453,7 +1453,12 @@ impl crate::app::TrxVizApp {
 
     pub(in crate::app) fn export_to_blender(&mut self, view: HeadlessView) {
         match view {
-            HeadlessView::View3D => self.sync_viewport_camera_into_workflow_document(),
+            HeadlessView::View3D => {
+                self.workflow.document.camera_3d = Some(self.capture_document_camera_3d());
+                self.workflow.document.render_3d = Some(self.capture_document_render_3d());
+                self.workflow.document.slice_view_3d = Some(self.capture_document_slice_view_3d());
+                self.workflow.document.slice_view_ui = Some(self.capture_document_slice_view_ui());
+            }
             HeadlessView::InflatedStage => {}
             HeadlessView::View2D => {
                 self.error_msg = Some("2D views cannot be exported to Blender.".to_string());
@@ -1515,9 +1520,6 @@ impl crate::app::TrxVizApp {
 
         let workflow = HeadlessWorkflowState {
             document: self.workflow.document.clone(),
-            slice_view_ui: Some(crate::app::workflow::capture_gui_slice_view_state(
-                &self.viewport,
-            )),
             runtime: self.workflow.runtime.clone(),
             display_runtimes: self.workflow.display_runtimes.clone(),
             next_draw_id: self.workflow.next_draw_id,
@@ -1550,7 +1552,7 @@ impl crate::app::TrxVizApp {
             return;
         }
 
-        let (project, workspace, slice_view_ui) = match gui_load_project(&path) {
+        let (project, workspace) = match gui_load_project(&path) {
             Ok(result) => result,
             Err(err) => {
                 self.error_msg = Some(format!("Failed to read workflow project: {err}"));
@@ -1730,21 +1732,12 @@ impl crate::app::TrxVizApp {
         }
 
         self.workflow.document = project.document;
-        if let Some(camera) = self.workflow.document.camera_3d {
-            self.viewport.apply_workflow_camera_3d(camera);
-        }
-        self.viewport
-            .apply_workflow_render_3d(self.workflow.document.render_3d.clone().unwrap_or_default());
-        if let Some(slice_view) = self.workflow.document.slice_view_3d {
-            self.viewport
-                .apply_workflow_slice_view_3d(slice_view, &self.scene.nifti_files);
-        } else if let Some(slice_visible) = self.workflow.document.slice_visible_3d {
-            self.viewport.set_slice_visible_all(slice_visible);
-        }
-        if let Some(slice_view_ui) = slice_view_ui {
-            crate::app::workflow::apply_gui_slice_view_state(&mut self.viewport, slice_view_ui);
-        }
+        self.apply_document_camera_3d_to_viewport();
+        self.apply_document_render_3d_to_viewport();
+        self.apply_document_slice_view_3d_to_viewport();
+        self.apply_document_slice_view_ui_to_viewport();
         self.workflow.workspace = workspace;
+        self.workflow.selection = self.workflow.document.selection;
         ensure_node_uuids(&mut self.workflow.document);
         self.rebuild_workflow_editor_from_document();
         self.workflow.project_path = Some(path.clone());

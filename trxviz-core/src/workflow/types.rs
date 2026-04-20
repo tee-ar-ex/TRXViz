@@ -382,17 +382,16 @@ pub struct WorkflowDocument {
     pub render_3d: Option<WorkflowRender3D>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slice_view_3d: Option<WorkflowSliceView3D>,
-    // Backward compatibility for projects saved before slice positions were persisted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slice_visible_3d: Option<[bool; 3]>,
+    pub slice_view_ui: Option<WorkflowSliceViewUi>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection: Option<WorkflowSelection>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WorkflowProject {
     pub version: u32,
     pub document: WorkflowDocument,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slice_view_ui: Option<WorkflowSliceViewUi>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -510,7 +509,7 @@ pub struct NodeEvalState {
     pub available_streamline_groups: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum WorkflowEvalMode {
     Interactive,
     Settled,
@@ -998,7 +997,7 @@ impl From<WorkflowValue> for EvaluatedValue {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum WorkflowSelection {
     Node(WorkflowNodeUuid),
     Asset(FileId),
@@ -1114,7 +1113,8 @@ pub fn default_document() -> WorkflowDocument {
         camera_3d: None,
         render_3d: None,
         slice_view_3d: None,
-        slice_visible_3d: None,
+        slice_view_ui: None,
+        selection: None,
     }
 }
 
@@ -1123,7 +1123,6 @@ impl Default for WorkflowProject {
         Self {
             version: 1,
             document: default_document(),
-            slice_view_ui: None,
         }
     }
 }
@@ -1184,14 +1183,29 @@ mod tests {
             visible: [true, false, true],
             positions_ras: [10.0, 20.0, 30.0],
         });
-        document.slice_visible_3d = Some([true, false, true]);
+        document.slice_view_ui = Some(WorkflowSliceViewUi {
+            mode: WorkflowView2DMode::Lightbox,
+            single_view: WorkflowSliceViewKind::Axial,
+            lightbox_axis: WorkflowSliceViewKind::Sagittal,
+            lightbox_rows: 3,
+            lightbox_cols: 4,
+            active_axis: 2,
+            ortho_show_row: false,
+            slice_cameras: [WorkflowOrthoSliceCamera {
+                center: [0.0, 1.0],
+                half_extent: 42.0,
+                rotation: 0.0,
+            }; 3],
+        });
+        document.selection = Some(super::WorkflowSelection::Node(super::WorkflowNodeUuid(7)));
 
         let json = serde_json::to_string(&document).unwrap();
         let restored: WorkflowDocument = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.camera_3d, document.camera_3d);
         assert_eq!(restored.render_3d, document.render_3d);
         assert_eq!(restored.slice_view_3d, document.slice_view_3d);
-        assert_eq!(restored.slice_visible_3d, document.slice_visible_3d);
+        assert_eq!(restored.slice_view_ui, document.slice_view_ui);
+        assert_eq!(restored.selection, document.selection);
     }
 
     #[test]
@@ -1201,7 +1215,8 @@ mod tests {
         assert!(restored.camera_3d.is_none());
         assert!(restored.render_3d.is_none());
         assert!(restored.slice_view_3d.is_none());
-        assert!(restored.slice_visible_3d.is_none());
+        assert!(restored.slice_view_ui.is_none());
+        assert!(restored.selection.is_none());
     }
 
     #[test]
@@ -1242,26 +1257,30 @@ mod tests {
     fn workflow_project_slice_view_ui_round_trips() {
         let project = WorkflowProject {
             version: 1,
-            document: super::default_document(),
-            slice_view_ui: Some(WorkflowSliceViewUi {
-                mode: WorkflowView2DMode::Lightbox,
-                single_view: WorkflowSliceViewKind::Axial,
-                lightbox_axis: WorkflowSliceViewKind::Sagittal,
-                lightbox_rows: 3,
-                lightbox_cols: 4,
-                active_axis: 2,
-                ortho_show_row: false,
-                slice_cameras: [WorkflowOrthoSliceCamera {
-                    center: [0.0, 1.0],
-                    half_extent: 42.0,
-                    rotation: 0.0,
-                }; 3],
-            }),
+            document: WorkflowDocument {
+                slice_view_ui: Some(WorkflowSliceViewUi {
+                    mode: WorkflowView2DMode::Lightbox,
+                    single_view: WorkflowSliceViewKind::Axial,
+                    lightbox_axis: WorkflowSliceViewKind::Sagittal,
+                    lightbox_rows: 3,
+                    lightbox_cols: 4,
+                    active_axis: 2,
+                    ortho_show_row: false,
+                    slice_cameras: [WorkflowOrthoSliceCamera {
+                        center: [0.0, 1.0],
+                        half_extent: 42.0,
+                        rotation: 0.0,
+                    }; 3],
+                }),
+                selection: Some(super::WorkflowSelection::Asset(42)),
+                ..super::default_document()
+            },
         };
 
         let json = serde_json::to_string(&project).unwrap();
         let restored: WorkflowProject = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.slice_view_ui, project.slice_view_ui);
+        assert_eq!(restored.document.slice_view_ui, project.document.slice_view_ui);
+        assert_eq!(restored.document.selection, project.document.selection);
     }
 
     #[test]

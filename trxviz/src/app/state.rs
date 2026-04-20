@@ -21,9 +21,9 @@ pub use trxviz_core::scene::{
 };
 
 use crate::app::workflow::{
-    NodeSize, StreamlineDisplayRuntime, WorkflowCamera3D, WorkflowDocument, WorkflowExecutionCache,
-    WorkflowJobKind, WorkflowJobMessage, WorkflowNode, WorkflowNodeUuid, WorkflowRuntime,
-    WorkflowSelection, WorkflowSliceView3D, WorkspacePane, default_document,
+    NodeSize, StreamlineDisplayRuntime, WorkflowDocument, WorkflowExecutionCache, WorkflowJobKind,
+    WorkflowJobMessage, WorkflowNode, WorkflowNodeUuid, WorkflowRuntime, WorkflowSelection,
+    WorkspacePane, default_document,
     default_workspace_tree, snarl_from_graph,
 };
 use egui_tiles::Tree;
@@ -600,67 +600,8 @@ impl ViewportState {
         self.export.pending_export = None;
     }
 
-    pub fn workflow_camera_3d(&self) -> WorkflowCamera3D {
-        WorkflowCamera3D {
-            target: self.viewport_target().to_array(),
-            azimuth_deg: self.camera.camera_3d.yaw.to_degrees(),
-            elevation_deg: self.camera.camera_3d.pitch.to_degrees(),
-            distance: self.camera.camera_3d.distance,
-        }
-    }
-
-    pub fn apply_workflow_camera_3d(&mut self, camera: WorkflowCamera3D) {
-        self.camera.camera_3d.center = Vec3::from_array(camera.target);
-        self.camera.camera_3d.yaw = camera.azimuth_deg.to_radians();
-        self.camera.camera_3d.pitch = camera.elevation_deg.to_radians();
-        self.camera.camera_3d.distance = camera.distance.max(0.1);
-    }
-
-    pub fn workflow_render_3d(&self) -> WorkflowRender3D {
-        self.render.render_3d.clone().sanitized()
-    }
-
-    pub fn apply_workflow_render_3d(&mut self, render_3d: WorkflowRender3D) {
-        self.render.render_3d = render_3d.sanitized();
-    }
-
     pub fn scene_lighting(&self) -> SceneLightingParams {
         self.render.render_3d.scene_lighting()
-    }
-
-    pub fn workflow_slice_view_3d(&self, nifti_files: &[LoadedNifti]) -> WorkflowSliceView3D {
-        WorkflowSliceView3D {
-            visible: self.slices.slice_visible,
-            positions_ras: [
-                self.slice_world_position(nifti_files, 0),
-                self.slice_world_position(nifti_files, 1),
-                self.slice_world_position(nifti_files, 2),
-            ],
-        }
-    }
-
-    pub fn apply_workflow_slice_view_3d(
-        &mut self,
-        slice_view: WorkflowSliceView3D,
-        nifti_files: &[LoadedNifti],
-    ) {
-        self.slices.slice_visible = slice_view.visible;
-        self.slices.slice_world_offsets = slice_view.positions_ras;
-        if let Some(nf) = nifti_files.first() {
-            self.slices.slice_indices = [
-                nf.volume
-                    .nearest_slice_index(0, slice_view.positions_ras[0]),
-                nf.volume
-                    .nearest_slice_index(1, slice_view.positions_ras[1]),
-                nf.volume
-                    .nearest_slice_index(2, slice_view.positions_ras[2]),
-            ];
-            self.slices.slices_dirty = true;
-        }
-    }
-
-    fn viewport_target(&self) -> Vec3 {
-        self.camera.camera_3d.center
     }
 
     fn gifti_axis_bounds(

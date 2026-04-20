@@ -168,6 +168,10 @@ impl super::super::TrxVizApp {
                 }
             });
         }
+
+        self.workflow.document.camera_3d = Some(self.capture_document_camera_3d());
+        self.workflow.document.slice_view_3d = Some(self.capture_document_slice_view_3d());
+        self.workflow.document.slice_view_ui = Some(self.capture_document_slice_view_ui());
     }
 
     fn show_embedded_preview_toolbar(&mut self, ui: &mut egui::Ui) {
@@ -451,6 +455,10 @@ impl super::super::TrxVizApp {
             self.draw_scene3d_rect(ui, rect, interactive.then_some(&response), &render_data);
         });
 
+        self.workflow.document.camera_3d = Some(self.capture_document_camera_3d());
+        self.workflow.document.render_3d = Some(self.capture_document_render_3d());
+        self.workflow.document.slice_view_3d = Some(self.capture_document_slice_view_3d());
+
         self.finish_export_if_ready(ctx, ExportTarget::View3D);
     }
 
@@ -665,6 +673,9 @@ impl super::super::TrxVizApp {
                 View2DMode::Lightbox => self.show_2d_lightbox_mode(ui, &render_data, interactive),
             }
         });
+
+        self.workflow.document.slice_view_3d = Some(self.capture_document_slice_view_3d());
+        self.workflow.document.slice_view_ui = Some(self.capture_document_slice_view_ui());
 
         self.finish_export_if_ready(ctx, ExportTarget::View2D);
     }
@@ -890,7 +901,7 @@ impl super::super::TrxVizApp {
             (glam::Vec3::ZERO, 0.0)
         };
         let fog_span = (self.viewport.camera_3d().distance + self.viewport.volume_extent()).max(1.0);
-        let render_3d = self.viewport.workflow_render_3d();
+        let render_3d = self.capture_document_render_3d();
         let fog_near = fog_span * render_3d.fog_start_fraction;
         let fog_far = fog_span * render_3d.fog_end_fraction;
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
@@ -976,7 +987,7 @@ impl super::super::TrxVizApp {
         let vp = self.viewport.inflated_stage_camera().view_projection(aspect);
         let fog_span =
             (self.viewport.inflated_stage_camera().distance + self.viewport.volume_extent()).max(1.0);
-        let render_3d = self.viewport.workflow_render_3d();
+        let render_3d = self.capture_document_render_3d();
         let fog_near = fog_span * render_3d.fog_start_fraction;
         let fog_far = fog_span * render_3d.fog_end_fraction;
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(

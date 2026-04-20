@@ -250,7 +250,7 @@ fn render_loaded_scene(
             &gpu.queue,
             &mut resources,
             &render_data,
-            workflow.slice_view_ui,
+            workflow.document.slice_view_ui.clone(),
             &scene,
             options.width,
             options.height,

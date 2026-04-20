@@ -4,8 +4,11 @@
 
 TRXViz is designed around two usage modes:
 
-- **Simple**: adjust display, color, visibility, and a constrained set of workflow-affecting controls
-- **Advanced**: edit the full workflow graph directly
+- **Simple**: a constrained asset-first editor that exposes common display and workflow-affecting controls without showing the graph pane
+- **Advanced**: the full pane-based workspace, including graph editing, asset inspection, and unrestricted workflow editing
+
+This is an intentional split, not two symmetric shells. Simple mode is the simplified editor surface.
+Advanced mode is the workspace.
 
 The desktop app combines:
 
@@ -14,6 +17,40 @@ The desktop app combines:
 - axial, coronal, and sagittal slice views
 - asset and inspector panes
 - workflow graph editing when advanced mode is enabled
+
+## What Each Mode Actually Does
+
+### Simple
+
+Simple mode is for the common case where you want to:
+
+- open assets and get a seeded workflow branch automatically
+- adjust visibility, color, display style, and a small set of workflow-backed controls
+- work asset-by-asset without reasoning about graph topology
+
+Simple mode uses the workflow document underneath, but only exposes edits that can be mapped onto
+the existing simple bindings. If a project stops fitting that model, the app will tell you to
+switch to Advanced mode.
+
+Examples of Advanced-only situations include:
+
+- branches with multiple terminal displays for the same asset
+- CIFTI workflow editing
+- ODX-specific graph editing
+- assets whose workflow branch has been routed through additional nodes that no longer map cleanly
+  onto the simplified controls
+
+### Advanced
+
+Advanced mode is the normal workspace UI:
+
+- preview pane
+- assets pane
+- graph pane
+- inspector pane
+
+Use it when you need to edit the workflow graph directly, inspect node ports and parameters, or
+work on projects that exceed the Simple-mode constraint solver.
 
 ## What The GUI Is Best For
 

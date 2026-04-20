@@ -35,21 +35,80 @@ pub struct TrxVizApp {
 }
 
 impl TrxVizApp {
-    fn sync_viewport_camera_into_workflow_document(&mut self) {
-        self.workflow.document.camera_3d = Some(self.viewport.workflow_camera_3d());
-        self.workflow.document.render_3d = Some(self.viewport.workflow_render_3d());
-        self.workflow.document.slice_view_3d = Some(
-            self.viewport
-                .workflow_slice_view_3d(&self.scene.nifti_files),
-        );
-        self.workflow.document.slice_visible_3d = Some(self.viewport.slice_visible());
+    fn capture_document_camera_3d(&self) -> workflow::WorkflowCamera3D {
+        workflow::WorkflowCamera3D {
+            target: self.viewport.camera_3d().center.to_array(),
+            azimuth_deg: self.viewport.camera_3d().yaw.to_degrees(),
+            elevation_deg: self.viewport.camera_3d().pitch.to_degrees(),
+            distance: self.viewport.camera_3d().distance,
+        }
+    }
+
+    fn capture_document_render_3d(&self) -> trxviz_core::lighting::WorkflowRender3D {
+        self.viewport.render_3d().clone().sanitized()
+    }
+
+    fn capture_document_slice_view_3d(&self) -> workflow::WorkflowSliceView3D {
+        workflow::WorkflowSliceView3D {
+            visible: self.viewport.slice_visible(),
+            positions_ras: [
+                self.viewport.slice_world_position(&self.scene.nifti_files, 0),
+                self.viewport.slice_world_position(&self.scene.nifti_files, 1),
+                self.viewport.slice_world_position(&self.scene.nifti_files, 2),
+            ],
+        }
+    }
+
+    fn capture_document_slice_view_ui(&self) -> workflow::WorkflowSliceViewUi {
+        crate::app::workflow::capture_gui_slice_view_state(&self.viewport)
+    }
+
+    fn apply_document_camera_3d_to_viewport(&mut self) {
+        let Some(camera) = self.workflow.document.camera_3d else {
+            return;
+        };
+        self.viewport.camera_3d_mut().center = glam::Vec3::from_array(camera.target);
+        self.viewport.camera_3d_mut().yaw = camera.azimuth_deg.to_radians();
+        self.viewport.camera_3d_mut().pitch = camera.elevation_deg.to_radians();
+        self.viewport.camera_3d_mut().distance = camera.distance.max(0.1);
+    }
+
+    fn apply_document_render_3d_to_viewport(&mut self) {
+        *self.viewport.render_3d_mut() = self
+            .workflow
+            .document
+            .render_3d
+            .clone()
+            .unwrap_or_default()
+            .sanitized();
+    }
+
+    fn apply_document_slice_view_3d_to_viewport(&mut self) {
+        let Some(slice_view) = self.workflow.document.slice_view_3d else {
+            return;
+        };
+        self.viewport.set_slice_visible_all(slice_view.visible);
+        self.viewport.set_slice_world_offsets(slice_view.positions_ras);
+        if let Some(nf) = self.scene.nifti_files.first() {
+            self.viewport.set_slice_indices([
+                nf.volume.nearest_slice_index(0, slice_view.positions_ras[0]),
+                nf.volume.nearest_slice_index(1, slice_view.positions_ras[1]),
+                nf.volume.nearest_slice_index(2, slice_view.positions_ras[2]),
+            ]);
+            self.viewport.mark_slices_dirty();
+        }
+    }
+
+    fn apply_document_slice_view_ui_to_viewport(&mut self) {
+        if let Some(slice_view_ui) = self.workflow.document.slice_view_ui.clone() {
+            crate::app::workflow::apply_gui_slice_view_state(&mut self.viewport, slice_view_ui);
+        }
     }
 
     fn copy_camera_3d_json(&mut self, ctx: &egui::Context) {
         let snippet = serde_json::json!({
-            "camera_3d": self.viewport.workflow_camera_3d(),
-            "slice_view_3d": self.viewport.workflow_slice_view_3d(&self.scene.nifti_files),
-            "slice_visible_3d": self.viewport.slice_visible(),
+            "camera_3d": self.capture_document_camera_3d(),
+            "slice_view_3d": self.capture_document_slice_view_3d(),
         });
         match serde_json::to_string_pretty(&snippet) {
             Ok(json) => {
@@ -578,7 +637,7 @@ impl eframe::App for TrxVizApp {
         let open_files_after_ui = match self.ui_mode {
             UiMode::Simple => self.show_simple_shell(ctx),
             UiMode::Advanced => {
-                self.show_advanced_shell(ctx, frame);
+                self.show_workspace(ctx, frame);
                 false
             }
         };

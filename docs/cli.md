@@ -38,10 +38,10 @@ trxviz-cli render --project workflow.json --view 2d --out scene.png
 Project-driven 2D rendering reads:
 
 - `document.slice_view_3d` for the shared slice-plane positions and visibility
-- top-level `slice_view_ui` for the saved 2D mode, layout, and per-slice pan/zoom state
+- `document.slice_view_ui` for the saved 2D mode, layout, and per-slice pan/zoom state
 
-If `slice_view_ui` is missing, `--view 2d` exits with an error telling the user to open and save
-the project from the GUI first.
+If `document.slice_view_ui` is missing, `--view 2d` exits with an error telling the user to open
+and save the project from the GUI first.
 
 To render the saved inflated-stage layout instead of the anatomical 3D scene:
 

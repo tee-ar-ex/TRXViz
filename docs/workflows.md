@@ -23,13 +23,16 @@ The graph can combine:
 
 ## Simple vs Advanced
 
-- **Simple mode** keeps common workflows editable through constrained controls
-- **Advanced mode** exposes the full graph for arbitrary editing
+- **Simple mode** is a constrained asset-first editor built on top of the workflow document
+- **Advanced mode** is the full workspace and graph editor
 
-If a loaded project exceeds the simple surface, switch to advanced mode and treat the graph as the
-source of truth.
+These are intentionally different surfaces, not two symmetric wrappers over the same UI.
 
-CIFTI workflow editing is an Advanced-mode feature.
+If a loaded project exceeds the Simple-mode constraint surface, switch to Advanced mode and treat
+the graph as the source of truth.
+
+CIFTI workflow editing is an Advanced-mode feature. More generally, any project with branching or
+node wiring that no longer maps cleanly onto the simple bindings should be edited in Advanced mode.
 
 ## Project Files
 
