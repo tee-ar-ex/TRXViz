@@ -137,13 +137,13 @@ fn active_odx_slice_state(app: &crate::app::TrxVizApp) -> Option<(usize, u32)> {
         let viewport_index = plan.slice_axis.viewport_index();
         return Some((
             plan.slice_axis.odx_axis(),
-            app.viewport.slice_indices[viewport_index] as u32,
+            app.viewport.slice_index(viewport_index) as u32,
         ));
     }
     app.scene
         .odx_scene
         .as_ref()
-        .map(|_| (2usize, app.viewport.slice_indices[0] as u32))
+        .map(|_| (2usize, app.viewport.slice_index(0) as u32))
 }
 
 fn clamped_active_odx_sh_detail(
@@ -1084,7 +1084,7 @@ impl crate::app::TrxVizApp {
                     .get(&draw.build_node_uuid)
                 {
                     let boundary_field_changed =
-                        self.viewport.boundary_field_revision != cache.fingerprint;
+                        self.viewport.boundary_field_revision() != cache.fingerprint;
                     let field = cache.field.clone();
                     self.workflow.uploaded_odx_glyph_resource_key = None;
                     glyph_resources.set_field(
@@ -1093,28 +1093,24 @@ impl crate::app::TrxVizApp {
                         draw.scale,
                         draw.min_contacts,
                     );
-                    self.viewport.boundary_field = Some(field.clone());
-                    self.viewport.boundary_field_revision = cache.fingerprint;
+                    self.viewport
+                        .set_boundary_field(field.clone(), cache.fingerprint);
                     if boundary_field_changed && self.scene.nifti_files.is_empty() {
                         self.reset_slice_view_to_boundary_field(field.as_ref());
                     }
                 } else if self.scene.odx_scene.is_none() {
                     glyph_resources.clear();
                     self.workflow.uploaded_odx_glyph_resource_key = None;
-                    self.viewport.boundary_field = None;
-                    self.viewport.boundary_field_revision = 0;
+                    self.viewport.clear_boundary_field();
                 } else {
-                    self.viewport.boundary_field = None;
-                    self.viewport.boundary_field_revision = 0;
+                    self.viewport.clear_boundary_field();
                 }
             } else if self.scene.odx_scene.is_none() {
                 glyph_resources.clear();
                 self.workflow.uploaded_odx_glyph_resource_key = None;
-                self.viewport.boundary_field = None;
-                self.viewport.boundary_field_revision = 0;
+                self.viewport.clear_boundary_field();
             } else {
-                self.viewport.boundary_field = None;
-                self.viewport.boundary_field_revision = 0;
+                self.viewport.clear_boundary_field();
             }
         }
         self.ensure_active_odx_glyph_resources(
@@ -1315,19 +1311,19 @@ impl crate::app::TrxVizApp {
                 slice_resources.update_slice(
                     &rs.queue,
                     SliceAxis::Axial,
-                    self.viewport.slice_indices[0],
+                    self.viewport.slice_index(0),
                     vol_ref,
                 );
                 slice_resources.update_slice(
                     &rs.queue,
                     SliceAxis::Coronal,
-                    self.viewport.slice_indices[1],
+                    self.viewport.slice_index(1),
                     vol_ref,
                 );
                 slice_resources.update_slice(
                     &rs.queue,
                     SliceAxis::Sagittal,
-                    self.viewport.slice_indices[2],
+                    self.viewport.slice_index(2),
                     vol_ref,
                 );
                 if let Some(all) = renderer.callback_resources.get_mut::<AllSliceResources>() {
@@ -1381,8 +1377,7 @@ impl crate::app::TrxVizApp {
         self.scene.gifti_surfaces.clear();
         self.scene.parcellations.clear();
         self.pending_file_loads.clear();
-        self.viewport.boundary_field = None;
-        self.viewport.boundary_field_revision = 0;
+        self.viewport.clear_boundary_field();
         self.viewport.apply_workflow_render_3d(Default::default());
         self.workflow.runtime = WorkflowRuntime::default();
         self.workflow.execution_cache = WorkflowExecutionCache::default();
@@ -1485,8 +1480,8 @@ impl crate::app::TrxVizApp {
         let (width, height, include_slices, target, azimuth_deg, elevation_deg, distance) =
             match view {
                 HeadlessView::View3D => (
-                    self.viewport.window_3d_size[0].max(1.0).round() as u32,
-                    self.viewport.window_3d_size[1].max(1.0).round() as u32,
+                    self.viewport.window_3d_size()[0].max(1.0).round() as u32,
+                    self.viewport.window_3d_size()[1].max(1.0).round() as u32,
                     true,
                     None,
                     None,
@@ -1494,13 +1489,13 @@ impl crate::app::TrxVizApp {
                     None,
                 ),
                 HeadlessView::InflatedStage => (
-                    self.viewport.inflated_stage_size[0].max(1.0).round() as u32,
-                    self.viewport.inflated_stage_size[1].max(1.0).round() as u32,
+                    self.viewport.inflated_stage_size()[0].max(1.0).round() as u32,
+                    self.viewport.inflated_stage_size()[1].max(1.0).round() as u32,
                     false,
-                    Some(self.viewport.inflated_stage_camera.center),
-                    Some(self.viewport.inflated_stage_camera.yaw.to_degrees()),
-                    Some(self.viewport.inflated_stage_camera.pitch.to_degrees()),
-                    Some(self.viewport.inflated_stage_camera.distance),
+                    Some(self.viewport.inflated_stage_camera().center),
+                    Some(self.viewport.inflated_stage_camera().yaw.to_degrees()),
+                    Some(self.viewport.inflated_stage_camera().pitch.to_degrees()),
+                    Some(self.viewport.inflated_stage_camera().distance),
                 ),
                 HeadlessView::View2D => unreachable!(),
             };
@@ -1744,7 +1739,7 @@ impl crate::app::TrxVizApp {
             self.viewport
                 .apply_workflow_slice_view_3d(slice_view, &self.scene.nifti_files);
         } else if let Some(slice_visible) = self.workflow.document.slice_visible_3d {
-            self.viewport.slice_visible = slice_visible;
+            self.viewport.set_slice_visible_all(slice_visible);
         }
         if let Some(slice_view_ui) = slice_view_ui {
             crate::app::workflow::apply_gui_slice_view_state(&mut self.viewport, slice_view_ui);

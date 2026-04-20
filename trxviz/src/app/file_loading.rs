@@ -323,13 +323,10 @@ impl super::TrxVizApp {
         let is_first = self.scene.trx_files.is_empty()
             && self.scene.nifti_files.is_empty()
             && self.scene.gifti_surfaces.is_empty();
-        self.viewport.volume_center = data.center();
-        self.viewport.volume_extent = data.extent();
+        self.viewport.set_volume_bounds(data.center(), data.extent());
         if is_first {
-            self.viewport.camera_3d = OrbitCamera::new(
-                self.viewport.volume_center,
-                self.viewport.volume_extent * 0.8,
-            );
+            *self.viewport.camera_3d_mut() =
+                OrbitCamera::new(self.viewport.volume_center(), self.viewport.volume_extent() * 0.8);
             self.reset_slice_cameras();
         }
 
@@ -363,11 +360,11 @@ impl super::TrxVizApp {
         }
 
         if is_first {
-            self.viewport.slice_world_offsets = [
-                self.viewport.volume_center.z,
-                self.viewport.volume_center.y,
-                self.viewport.volume_center.x,
-            ];
+            self.viewport.set_slice_world_offsets([
+                self.viewport.volume_center().z,
+                self.viewport.volume_center().y,
+                self.viewport.volume_center().x,
+            ]);
         }
 
         let max_streamlines = data.nb_streamlines.min(30_000);
@@ -421,40 +418,39 @@ impl super::TrxVizApp {
             && self.scene.trx_files.is_empty()
             && self.scene.gifti_surfaces.is_empty();
         if is_first {
-            self.viewport.volume_center = vol.voxel_to_world(Vec3::new(
+            let volume_center = vol.voxel_to_world(Vec3::new(
                 vol.dims[0] as f32 / 2.0,
                 vol.dims[1] as f32 / 2.0,
                 vol.dims[2] as f32 / 2.0,
             ));
-            self.viewport.volume_extent = (vol.voxel_to_world(Vec3::new(
+            let volume_extent = (vol.voxel_to_world(Vec3::new(
                 vol.dims[0] as f32,
                 vol.dims[1] as f32,
                 vol.dims[2] as f32,
             )) - vol.voxel_to_world(Vec3::ZERO))
             .length();
-            self.viewport.camera_3d = OrbitCamera::new(
-                self.viewport.volume_center,
-                self.viewport.volume_extent * 0.8,
-            );
+            self.viewport.set_volume_bounds(volume_center, volume_extent);
+            *self.viewport.camera_3d_mut() =
+                OrbitCamera::new(self.viewport.volume_center(), self.viewport.volume_extent() * 0.8);
         }
 
         let slice_resources = SliceResources::new(&rs.device, &rs.queue, rs.target_format, &vol);
         slice_resources.update_slice(
             &rs.queue,
             SliceAxis::Axial,
-            self.viewport.slice_indices[0],
+            self.viewport.slice_index(0),
             &vol,
         );
         slice_resources.update_slice(
             &rs.queue,
             SliceAxis::Coronal,
-            self.viewport.slice_indices[1],
+            self.viewport.slice_index(1),
             &vol,
         );
         slice_resources.update_slice(
             &rs.queue,
             SliceAxis::Sagittal,
-            self.viewport.slice_indices[2],
+            self.viewport.slice_index(2),
             &vol,
         );
 
@@ -497,10 +493,10 @@ impl super::TrxVizApp {
             );
         }
         if first_nifti {
-            self.viewport.slice_indices = slice_indices;
+            self.viewport.set_slice_indices(slice_indices);
             self.reset_slice_view();
         } else {
-            self.viewport.slices_dirty = false;
+            self.viewport.clear_slices_dirty();
         }
         self.error_msg = None;
         self.status_msg = None;
@@ -590,11 +586,11 @@ impl super::TrxVizApp {
             );
         }
         if let Some((center, extent)) = initial_surface_view {
-            self.viewport.volume_center = center;
-            self.viewport.volume_extent = extent;
-            self.viewport.camera_3d = OrbitCamera::new(center, extent * 0.8);
+            self.viewport.set_volume_bounds(center, extent);
+            *self.viewport.camera_3d_mut() = OrbitCamera::new(center, extent * 0.8);
             self.reset_slice_cameras();
-            self.viewport.slice_world_offsets = [center.z, center.y, center.x];
+            self.viewport
+                .set_slice_world_offsets([center.z, center.y, center.x]);
         }
         self.error_msg = None;
         self.status_msg = None;
@@ -723,12 +719,12 @@ impl super::TrxVizApp {
             }
             let center = (min + max) * 0.5;
             let extent = (max - min).length().max(1.0);
-            self.viewport.volume_center = center;
-            self.viewport.volume_extent = extent;
+            self.viewport.set_volume_bounds(center, extent);
             if is_first {
-                self.viewport.camera_3d = OrbitCamera::new(center, extent * 0.8);
+                *self.viewport.camera_3d_mut() = OrbitCamera::new(center, extent * 0.8);
                 self.reset_slice_cameras();
-                self.viewport.slice_world_offsets = [center.z, center.y, center.x];
+                self.viewport
+                    .set_slice_world_offsets([center.z, center.y, center.x]);
             }
         }
 
@@ -759,27 +755,27 @@ impl super::TrxVizApp {
                     mid[slot] = median;
                 }
             }
-            self.viewport.slice_indices = mid;
+            self.viewport.set_slice_indices(mid);
             // Seed slice_world_offsets from the ODX affine so slab_center for 2D
             // slice views tracks the voxel-grid slice position.
             let affine = scene.voxel_to_ras();
             let w0 = affine.transform_point3(Vec3::new(0.0, 0.0, mid[0] as f32));
             let w1 = affine.transform_point3(Vec3::new(0.0, mid[1] as f32, 0.0));
             let w2 = affine.transform_point3(Vec3::new(mid[2] as f32, 0.0, 0.0));
-            self.viewport.slice_world_offsets = [w0.z, w1.y, w2.x];
+            self.viewport.set_slice_world_offsets([w0.z, w1.y, w2.x]);
         }
 
         let scene = Arc::new(scene);
         if scene.has_glyph_field() {
-            let current_axial = self.viewport.slice_indices[0] as u32;
+            let current_axial = self.viewport.slice_index(0) as u32;
             if let Some(nonempty_axial) = scene.nearest_nonempty_slice(2, current_axial) {
-                self.viewport.slice_indices[0] = nonempty_axial as usize;
+                self.viewport.set_slice_index(0, nonempty_axial as usize);
                 let w = scene.voxel_to_ras().transform_point3(Vec3::new(
                     0.0,
                     0.0,
                     nonempty_axial as f32,
                 ));
-                self.viewport.slice_world_offsets[0] = w.z;
+                self.viewport.set_slice_world_offset(0, w.z);
             }
         }
         if scene.glyph_source_kind() == Some(trxviz_core::data::odx_data::OdxGlyphSourceKind::Odf)
@@ -788,7 +784,7 @@ impl super::TrxVizApp {
         {
             scene.prewarm_odf_slice_metadata(
                 2,
-                self.viewport.slice_indices[0] as u32,
+                self.viewport.slice_index(0) as u32,
                 rows_per_chunk,
             );
         }
@@ -884,21 +880,21 @@ impl super::TrxVizApp {
             .nifti_files
             .first()
             .map(|n| n.volume.slice_half_extents())
-            .unwrap_or([self.viewport.volume_extent * 0.5; 3]);
-        self.viewport.slice_cameras = [
+            .unwrap_or([self.viewport.volume_extent() * 0.5; 3]);
+        *self.viewport.slice_cameras_mut() = [
             OrthoSliceCamera::new(
                 SliceAxis::Axial,
-                self.viewport.volume_center,
+                self.viewport.volume_center(),
                 half_extents[0] * 2.0,
             ),
             OrthoSliceCamera::new(
                 SliceAxis::Coronal,
-                self.viewport.volume_center,
+                self.viewport.volume_center(),
                 half_extents[1] * 2.0,
             ),
             OrthoSliceCamera::new(
                 SliceAxis::Sagittal,
-                self.viewport.volume_center,
+                self.viewport.volume_center(),
                 half_extents[2] * 2.0,
             ),
         ];
@@ -915,13 +911,14 @@ impl super::TrxVizApp {
             vol.dims[2] as f32 / 2.0,
         ));
         let half_extents = vol.slice_half_extents();
-        self.viewport.slice_cameras = [
+        *self.viewport.slice_cameras_mut() = [
             OrthoSliceCamera::new(SliceAxis::Axial, world_center, half_extents[0] * 2.0),
             OrthoSliceCamera::new(SliceAxis::Coronal, world_center, half_extents[1] * 2.0),
             OrthoSliceCamera::new(SliceAxis::Sagittal, world_center, half_extents[2] * 2.0),
         ];
-        self.viewport.slice_world_offsets = [world_center.z, world_center.y, world_center.x];
-        self.viewport.slices_dirty = true;
+        self.viewport
+            .set_slice_world_offsets([world_center.z, world_center.y, world_center.x]);
+        self.viewport.mark_slices_dirty();
     }
 
     pub(crate) fn reset_slice_view_to_boundary_field(&mut self, field: &BoundaryContactField) {
@@ -935,12 +932,13 @@ impl super::TrxVizApp {
         let coronal_extent = size.x.max(size.z);
         let sagittal_extent = size.y.max(size.z);
 
-        self.viewport.slice_cameras = [
+        *self.viewport.slice_cameras_mut() = [
             OrthoSliceCamera::new(SliceAxis::Axial, center, axial_extent),
             OrthoSliceCamera::new(SliceAxis::Coronal, center, coronal_extent),
             OrthoSliceCamera::new(SliceAxis::Sagittal, center, sagittal_extent),
         ];
-        self.viewport.slice_world_offsets = [center.z, center.y, center.x];
+        self.viewport
+            .set_slice_world_offsets([center.z, center.y, center.x]);
     }
 }
 

@@ -224,8 +224,8 @@ impl super::super::TrxVizApp {
     }
 
     fn show_render_settings_section(&mut self, ui: &mut egui::Ui) -> bool {
-        let original = self.viewport.workflow_render_3d();
-        let render = &mut self.viewport.render_3d;
+        let original = self.viewport.render_3d().clone().sanitized();
+        let render = self.viewport.render_3d_mut();
 
         ui.collapsing("Render", |ui| {
             egui::ComboBox::from_id_salt("scene_lighting_preset")
@@ -288,8 +288,9 @@ impl super::super::TrxVizApp {
             });
         });
 
-        self.viewport.render_3d = self.viewport.workflow_render_3d();
-        self.viewport.workflow_render_3d() != original
+        let current = self.viewport.workflow_render_3d();
+        self.viewport.set_render_3d(current.clone());
+        current != original
     }
 
     fn show_asset_inspector(&mut self, ui: &mut egui::Ui, asset_id: usize) {
@@ -559,7 +560,7 @@ impl super::super::TrxVizApp {
         }
         let viewport_index = plan.slice_axis.viewport_index();
         let axis = plan.slice_axis.odx_axis();
-        let slice_idx = self.viewport.slice_indices[viewport_index] as u32;
+        let slice_idx = self.viewport.slice_index(viewport_index) as u32;
         Some(
             plan.field
                 .scene

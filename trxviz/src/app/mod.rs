@@ -42,14 +42,14 @@ impl TrxVizApp {
             self.viewport
                 .workflow_slice_view_3d(&self.scene.nifti_files),
         );
-        self.workflow.document.slice_visible_3d = Some(self.viewport.slice_visible);
+        self.workflow.document.slice_visible_3d = Some(self.viewport.slice_visible());
     }
 
     fn copy_camera_3d_json(&mut self, ctx: &egui::Context) {
         let snippet = serde_json::json!({
             "camera_3d": self.viewport.workflow_camera_3d(),
             "slice_view_3d": self.viewport.workflow_slice_view_3d(&self.scene.nifti_files),
-            "slice_visible_3d": self.viewport.slice_visible,
+            "slice_visible_3d": self.viewport.slice_visible(),
         });
         match serde_json::to_string_pretty(&snippet) {
             Ok(json) => {
@@ -349,7 +349,7 @@ impl eframe::App for TrxVizApp {
             .map(|rs| rs.device.limits().max_storage_buffer_binding_size as usize);
 
         // Update slice positions if dirty
-        if self.viewport.slices_dirty {
+        if self.viewport.slices_dirty() {
             if let Some(rs) = frame.wgpu_render_state() {
                 {
                     let renderer = rs.renderer.read();
@@ -373,19 +373,19 @@ impl eframe::App for TrxVizApp {
                                 sr.update_slice(
                                     &rs.queue,
                                     SliceAxis::Axial,
-                                    self.viewport.slice_indices[0],
+                                    self.viewport.slice_index(0),
                                     vol,
                                 );
                                 sr.update_slice(
                                     &rs.queue,
                                     SliceAxis::Coronal,
-                                    self.viewport.slice_indices[1],
+                                    self.viewport.slice_index(1),
                                     vol,
                                 );
                                 sr.update_slice(
                                     &rs.queue,
                                     SliceAxis::Sagittal,
-                                    self.viewport.slice_indices[2],
+                                    self.viewport.slice_index(2),
                                     vol,
                                 );
                             }
@@ -402,7 +402,7 @@ impl eframe::App for TrxVizApp {
                     &rs.queue,
                 );
             }
-            self.viewport.slices_dirty = false;
+            self.viewport.clear_slices_dirty();
         }
 
         // ── Handle dropped files ──
@@ -480,18 +480,20 @@ impl eframe::App for TrxVizApp {
             }
         }
         if menu_action.open_3d_window {
-            self.viewport.window_3d_open = true;
+            self.viewport.set_camera_3d_window_open(true);
         }
         if menu_action.open_2d_window {
-            self.viewport.view_2d.window_open = true;
+            self.viewport.set_window_2d_open(true);
         }
         if menu_action.export_3d_view {
-            self.viewport.export_dialog.open = true;
-            self.viewport.export_dialog.target = state::ExportTarget::View3D;
+            let export_dialog = self.viewport.export_dialog_mut();
+            export_dialog.open = true;
+            export_dialog.target = state::ExportTarget::View3D;
         }
         if menu_action.export_2d_view {
-            self.viewport.export_dialog.open = true;
-            self.viewport.export_dialog.target = state::ExportTarget::View2D;
+            let export_dialog = self.viewport.export_dialog_mut();
+            export_dialog.open = true;
+            export_dialog.target = state::ExportTarget::View2D;
         }
         if menu_action.copy_camera_3d_json {
             self.copy_camera_3d_json(ctx);

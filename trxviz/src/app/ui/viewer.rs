@@ -30,49 +30,58 @@ fn export_viewport_id(target: ExportTarget) -> egui::ViewportId {
     }
 }
 
-struct ViewerRenderData {
+struct SurfaceFrameData {
     surface_draws: Vec<(usize, usize, MeshDrawStyle)>,
-    volume_draws: Vec<VolumeDrawInfo>,
-    streamline_draws: Vec<StreamlineDrawInfo>,
     bundle_draws: Vec<BundleDrawInfo>,
+}
+
+struct VolumeFrameData {
+    volume_draws: Vec<VolumeDrawInfo>,
+}
+
+struct StreamlineFrameData {
+    streamline_draws: Vec<StreamlineDrawInfo>,
     any_visible_streamlines: bool,
-    glyph_visible: bool,
-    glyph_color_mode: BoundaryGlyphColorMode,
-    glyph_density_3d_step: u32,
-    glyph_slice_density_step: u32,
-    /// Show ODF glyphs — only used in the 3D view.
-    odx_show_glyphs: bool,
-    /// Show fixel line segments — only used in the 2D slice views.
-    odx_show_fixels: bool,
-    /// Plan-driven style for the 3D ODF glyph pass.
-    odx_glyph_opacity: f32,
-    odx_glyph_gloss: f32,
-    /// Plan-driven style for the 2D fixel slice pass.
-    odx_fixel_line_width: f32,
-    odx_fixel_opacity: f32,
-    odx_fixel_slab_half_width_mm: f32,
-    /// Plan-driven multipliers for glyph scale and fixel length.
-    odx_glyph_scale: f32,
-    odx_fixel_length_scale: f32,
-    /// Per-callback fixel style (2D path uses its own plan entry).
-    odx_fixel_2d_line_width: f32,
-    odx_fixel_2d_opacity: f32,
-    odx_fixel_2d_length_scale: f32,
-    odx_fixel_2d_visible: bool,
-    odx_fixel_3d_visible: bool,
-    /// Glyph vertex colormap (Directional vs scalar LUT placeholder).
-    odx_glyph_colormap: trxviz_core::workflow::GlyphColormap,
-    /// Piecewise gate uniforms for ODX glyph opacity and size.
-    odx_opacity_gate: [f32; 4],
-    odx_size_gate: [f32; 4],
-    /// Current slice-local amplitude normalization divisor.
-    odx_amp_norm: f32,
-    /// Active fixel colormap code (0=directional, 2=plasma, 3=viridis, 4=inferno, 5=bwr)
-    /// and scalar normalization range, sourced from the Fixel display plan's field.
-    odx_fixel_colormap_code: u32,
-    odx_fixel_scalar_range: [f32; 2],
-    odx_fixel_2d_colormap_code: u32,
-    odx_fixel_2d_scalar_range: [f32; 2],
+}
+
+struct GlyphFrameData {
+    visible: bool,
+    color_mode: BoundaryGlyphColorMode,
+    density_3d_step: u32,
+    slice_density_step: u32,
+}
+
+struct OdxFrameData {
+    show_glyphs: bool,
+    show_fixels: bool,
+    glyph_opacity: f32,
+    glyph_gloss: f32,
+    fixel_line_width: f32,
+    fixel_opacity: f32,
+    fixel_slab_half_width_mm: f32,
+    glyph_scale: f32,
+    fixel_length_scale: f32,
+    fixel_2d_line_width: f32,
+    fixel_2d_opacity: f32,
+    fixel_2d_length_scale: f32,
+    fixel_2d_visible: bool,
+    fixel_3d_visible: bool,
+    glyph_colormap: trxviz_core::workflow::GlyphColormap,
+    opacity_gate: [f32; 4],
+    size_gate: [f32; 4],
+    amp_norm: f32,
+    fixel_colormap_code: u32,
+    fixel_scalar_range: [f32; 2],
+    fixel_2d_colormap_code: u32,
+    fixel_2d_scalar_range: [f32; 2],
+}
+
+struct ViewerRenderData {
+    surfaces: SurfaceFrameData,
+    volumes: VolumeFrameData,
+    streamlines: StreamlineFrameData,
+    glyphs: GlyphFrameData,
+    odx: OdxFrameData,
 }
 
 fn active_fixel_draw_3d(
@@ -121,7 +130,11 @@ impl super::super::TrxVizApp {
         ui.add_space(8.0);
 
         let available = ui.available_size();
-        let any_slice_visible = self.viewport.slice_visible.iter().any(|&visible| visible);
+        let any_slice_visible = self
+            .viewport
+            .slice_visible_ref()
+            .iter()
+            .any(|&visible| visible);
         let spacing_y = ui.spacing().item_spacing.y;
         let top_height = if any_slice_visible {
             (available.y * 0.58).max(180.0)
@@ -138,15 +151,17 @@ impl super::super::TrxVizApp {
             egui::vec2(available.x, top_height.max(120.0)),
             egui::Sense::click_and_drag(),
         );
-        self.viewport.window_3d_size = [rect_3d.width().max(320.0), rect_3d.height().max(240.0)];
+        self.viewport
+            .set_window_3d_size([rect_3d.width().max(320.0), rect_3d.height().max(240.0)]);
         self.draw_scene3d_rect(ui, rect_3d, Some(&response_3d), &render_data);
 
         if any_slice_visible && bottom_height > 0.0 {
             ui.add_space(spacing_y);
             let size = egui::vec2(available.x, bottom_height);
-            self.viewport.window_2d_size = [size.x.max(320.0), size.y.max(240.0)];
+            self.viewport
+                .set_window_2d_size([size.x.max(320.0), size.y.max(240.0)]);
             ui.allocate_ui_with_layout(size, egui::Layout::top_down(egui::Align::Min), |ui| {
-                match self.viewport.view_2d.mode {
+                match self.viewport.view_2d().mode {
                     View2DMode::Slice => self.show_2d_slice_mode(ui, &render_data, true),
                     View2DMode::Ortho => self.show_2d_ortho_mode(ui, &render_data, true),
                     View2DMode::Lightbox => self.show_2d_lightbox_mode(ui, &render_data, true),
@@ -161,61 +176,62 @@ impl super::super::TrxVizApp {
                 ui.strong("Preview");
                 ui.separator();
                 if ui.button("Pop Out 3D").clicked() {
-                    self.viewport.window_3d_open = true;
+                    self.viewport.set_camera_3d_window_open(true);
                 }
                 if ui.button("Open Inflated Stage").clicked() {
-                    self.viewport.inflated_stage_open = true;
+                    self.viewport.set_inflated_stage_open(true);
                     self.reset_inflated_stage_camera();
                 }
                 if ui.button("Pop Out 2D").clicked() {
-                    self.viewport.view_2d.window_open = true;
+                    self.viewport.set_window_2d_open(true);
                 }
                 if ui.button("Copy 3D Camera").clicked() {
                     self.copy_camera_3d_json(ui.ctx());
                 }
                 ui.separator();
                 ui.label("Slices");
-                ui.checkbox(&mut self.viewport.slice_visible[0], "Axial");
-                ui.checkbox(&mut self.viewport.slice_visible[1], "Coronal");
-                ui.checkbox(&mut self.viewport.slice_visible[2], "Sagittal");
+                {
+                    let mut axial = self.viewport.slice_visible()[0];
+                    let mut coronal = self.viewport.slice_visible()[1];
+                    let mut sagittal = self.viewport.slice_visible()[2];
+                    ui.checkbox(&mut axial, "Axial");
+                    ui.checkbox(&mut coronal, "Coronal");
+                    ui.checkbox(&mut sagittal, "Sagittal");
+                    self.viewport.set_slice_visible(0, axial);
+                    self.viewport.set_slice_visible(1, coronal);
+                    self.viewport.set_slice_visible(2, sagittal);
+                }
                 ui.separator();
                 ui.label("2D");
+                let mode_label = self.viewport.view_2d().mode.label();
                 egui::ComboBox::from_id_salt("embedded_mode_2d")
-                    .selected_text(self.viewport.view_2d.mode.label())
+                    .selected_text(mode_label)
                     .show_ui(ui, |ui| {
+                        let view_2d = self.viewport.view_2d_mut();
                         for mode in View2DMode::ALL {
-                            ui.selectable_value(
-                                &mut self.viewport.view_2d.mode,
-                                mode,
-                                mode.label(),
-                            );
+                            ui.selectable_value(&mut view_2d.mode, mode, mode.label());
                         }
                     });
 
-                match self.viewport.view_2d.mode {
+                match self.viewport.view_2d().mode {
                     View2DMode::Slice => {
-                        slice_kind_picker(
-                            ui,
-                            &mut self.viewport.view_2d.single_view,
-                            "embedded_slice_axis",
-                        );
+                        let view_2d = self.viewport.view_2d_mut();
+                        slice_kind_picker(ui, &mut view_2d.single_view, "embedded_slice_axis");
                     }
                     View2DMode::Ortho => {
-                        ui.checkbox(&mut self.viewport.view_2d.ortho_show_row, "Row layout");
+                        let view_2d = self.viewport.view_2d_mut();
+                        ui.checkbox(&mut view_2d.ortho_show_row, "Row layout");
                     }
                     View2DMode::Lightbox => {
-                        slice_kind_picker(
-                            ui,
-                            &mut self.viewport.view_2d.lightbox_axis,
-                            "embedded_lightbox_axis",
-                        );
+                        let view_2d = self.viewport.view_2d_mut();
+                        slice_kind_picker(ui, &mut view_2d.lightbox_axis, "embedded_lightbox_axis");
                         ui.add(
-                            egui::DragValue::new(&mut self.viewport.view_2d.lightbox_rows)
+                            egui::DragValue::new(&mut view_2d.lightbox_rows)
                                 .range(1..=8)
                                 .prefix("Rows "),
                         );
                         ui.add(
-                            egui::DragValue::new(&mut self.viewport.view_2d.lightbox_cols)
+                            egui::DragValue::new(&mut view_2d.lightbox_cols)
                                 .range(1..=8)
                                 .prefix("Cols "),
                         );
@@ -226,26 +242,26 @@ impl super::super::TrxVizApp {
     }
 
     fn show_3d_window(&mut self, ctx: &egui::Context) {
-        if !self.viewport.window_3d_open {
+        if !self.viewport.window_3d_open() {
             return;
         }
 
         let builder = egui::ViewportBuilder::default()
             .with_title("TRXViz: 3D")
-            .with_inner_size(self.viewport.window_3d_size);
+            .with_inner_size(self.viewport.window_3d_size());
         ctx.show_viewport_immediate(viewport_3d_id(), builder, |ctx, class| {
             if ctx.input(|i| i.viewport().close_requested()) {
-                self.viewport.window_3d_open = false;
+                self.viewport.set_camera_3d_window_open(false);
                 return;
             }
 
             if class == egui::ViewportClass::Embedded {
-                let mut open = self.viewport.window_3d_open;
+                let mut open = self.viewport.window_3d_open();
                 egui::Window::new("3D View")
                     .open(&mut open)
-                    .default_size(self.viewport.window_3d_size)
+                    .default_size(self.viewport.window_3d_size())
                     .show(ctx, |ui| self.show_3d_contents(ui.ctx(), true));
-                self.viewport.window_3d_open = open;
+                self.viewport.set_camera_3d_window_open(open);
             } else {
                 self.show_3d_contents(ctx, true);
             }
@@ -253,26 +269,26 @@ impl super::super::TrxVizApp {
     }
 
     fn show_2d_window(&mut self, ctx: &egui::Context) {
-        if !self.viewport.view_2d.window_open {
+        if !self.viewport.window_2d_open() {
             return;
         }
 
         let builder = egui::ViewportBuilder::default()
             .with_title("TRXViz: 2D")
-            .with_inner_size(self.viewport.window_2d_size);
+            .with_inner_size(self.viewport.window_2d_size());
         ctx.show_viewport_immediate(viewport_2d_id(), builder, |ctx, class| {
             if ctx.input(|i| i.viewport().close_requested()) {
-                self.viewport.view_2d.window_open = false;
+                self.viewport.set_window_2d_open(false);
                 return;
             }
 
             if class == egui::ViewportClass::Embedded {
-                let mut open = self.viewport.view_2d.window_open;
+                let mut open = self.viewport.window_2d_open();
                 egui::Window::new("2D View")
                     .open(&mut open)
-                    .default_size(self.viewport.window_2d_size)
+                    .default_size(self.viewport.window_2d_size())
                     .show(ctx, |ui| self.show_2d_contents(ui.ctx(), true));
-                self.viewport.view_2d.window_open = open;
+                self.viewport.set_window_2d_open(open);
             } else {
                 self.show_2d_contents(ctx, true);
             }
@@ -280,27 +296,27 @@ impl super::super::TrxVizApp {
     }
 
     fn show_inflated_stage_window(&mut self, ctx: &egui::Context) {
-        if !self.viewport.inflated_stage_open {
+        if !self.viewport.inflated_stage_open() {
             return;
         }
         let builder = egui::ViewportBuilder::default()
             .with_title("TRXViz: Inflated Stage")
-            .with_inner_size(self.viewport.inflated_stage_size)
+            .with_inner_size(self.viewport.inflated_stage_size())
             .with_resizable(true);
         ctx.show_viewport_immediate(viewport_stage_id(), builder, |ctx, class| {
             if ctx.input(|i| i.viewport().close_requested()) {
-                self.viewport.inflated_stage_open = false;
+                self.viewport.set_inflated_stage_open(false);
                 return;
             }
 
             if class == egui::ViewportClass::Embedded {
-                let mut open = self.viewport.inflated_stage_open;
+                let mut open = self.viewport.inflated_stage_open();
                 egui::Window::new("Inflated Stage")
                     .open(&mut open)
-                    .default_size(self.viewport.inflated_stage_size)
+                    .default_size(self.viewport.inflated_stage_size())
                     .resizable(true)
                     .show(ctx, |ui| self.show_inflated_stage_contents(ui.ctx(), true));
-                self.viewport.inflated_stage_open = open;
+                self.viewport.set_inflated_stage_open(open);
             } else {
                 self.show_inflated_stage_contents(ctx, true);
             }
@@ -308,38 +324,38 @@ impl super::super::TrxVizApp {
     }
 
     fn show_export_dialog(&mut self, ctx: &egui::Context) {
-        if !self.viewport.export_dialog.open {
+        if !self.viewport.export_dialog().open {
             return;
         }
 
-        let mut open = self.viewport.export_dialog.open;
+        let mut open = self.viewport.export_dialog().open;
         let mut start_export = false;
         egui::Window::new("Export View")
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
             .show(ctx, |ui| {
-                ui.label(self.viewport.export_dialog.target.label());
-                ui.add(
-                    egui::Slider::new(&mut self.viewport.export_dialog.scale, 1..=8).text("Scale"),
-                );
+                ui.label(self.viewport.export_dialog().target.label());
+                let export_dialog = self.viewport.export_dialog_mut();
+                ui.add(egui::Slider::new(&mut export_dialog.scale, 1..=8).text("Scale"));
                 ui.small("Scale multiplies the current viewer window resolution.");
                 ui.horizontal(|ui| {
                     if ui.button("Cancel").clicked() {
-                        self.viewport.export_dialog.open = false;
+                        self.viewport.export_dialog_mut().open = false;
                     }
                     if ui.button("Export").clicked() {
                         start_export = true;
                     }
                 });
             });
-        self.viewport.export_dialog.open = open && self.viewport.export_dialog.open;
+        let export_dialog_open = self.viewport.export_dialog().open;
+        self.viewport.export_dialog_mut().open = open && export_dialog_open;
 
         if !start_export {
             return;
         }
 
-        let default_name = match self.viewport.export_dialog.target {
+        let default_name = match self.viewport.export_dialog().target {
             ExportTarget::View3D => "trxviz-3d.png",
             ExportTarget::View2D => "trxviz-2d.png",
             ExportTarget::InflatedStage => "trxviz-stage.png",
@@ -349,26 +365,26 @@ impl super::super::TrxVizApp {
             .set_file_name(default_name)
             .save_file()
         {
-            self.viewport.pending_export = Some(crate::app::state::PendingExportRequest {
-                target: self.viewport.export_dialog.target,
+            self.viewport.set_pending_export(crate::app::state::PendingExportRequest {
+                target: self.viewport.export_dialog().target,
                 path,
-                scale: self.viewport.export_dialog.scale.max(1),
+                scale: self.viewport.export_dialog().scale.max(1),
                 requested_screenshot: false,
             });
-            self.viewport.export_dialog.open = false;
+            self.viewport.export_dialog_mut().open = false;
             ctx.request_repaint();
         }
     }
 
     fn show_export_viewport(&mut self, ctx: &egui::Context) {
-        let Some(pending) = self.viewport.pending_export.as_ref() else {
+        let Some(pending) = self.viewport.pending_export() else {
             return;
         };
 
         let base_size = match pending.target {
-            ExportTarget::View3D => self.viewport.window_3d_size,
-            ExportTarget::View2D => self.viewport.window_2d_size,
-            ExportTarget::InflatedStage => self.viewport.inflated_stage_size,
+            ExportTarget::View3D => self.viewport.window_3d_size(),
+            ExportTarget::View2D => self.viewport.window_2d_size(),
+            ExportTarget::InflatedStage => self.viewport.inflated_stage_size(),
         };
         let export_size = [
             (base_size[0] * pending.scale as f32).max(256.0),
@@ -396,7 +412,8 @@ impl super::super::TrxVizApp {
     fn show_3d_contents(&mut self, ctx: &egui::Context, interactive: bool) {
         if interactive {
             let size = ctx.input(|i| i.content_rect().size());
-            self.viewport.window_3d_size = [size.x.max(320.0), size.y.max(240.0)];
+            self.viewport
+                .set_window_3d_size([size.x.max(320.0), size.y.max(240.0)]);
         }
 
         let render_data = self.build_viewer_render_data();
@@ -405,9 +422,15 @@ impl super::super::TrxVizApp {
                 ui.small("3D window");
                 ui.separator();
                 ui.label("Slice quads");
-                ui.checkbox(&mut self.viewport.slice_visible[0], "Axial");
-                ui.checkbox(&mut self.viewport.slice_visible[1], "Coronal");
-                ui.checkbox(&mut self.viewport.slice_visible[2], "Sagittal");
+                let mut axial = self.viewport.slice_visible()[0];
+                let mut coronal = self.viewport.slice_visible()[1];
+                let mut sagittal = self.viewport.slice_visible()[2];
+                ui.checkbox(&mut axial, "Axial");
+                ui.checkbox(&mut coronal, "Coronal");
+                ui.checkbox(&mut sagittal, "Sagittal");
+                self.viewport.set_slice_visible(0, axial);
+                self.viewport.set_slice_visible(1, coronal);
+                self.viewport.set_slice_visible(2, sagittal);
                 ui.separator();
                 ui.small("Drag orbit");
                 ui.small("Shift-drag or middle-drag pan");
@@ -434,7 +457,8 @@ impl super::super::TrxVizApp {
     fn show_inflated_stage_contents(&mut self, ctx: &egui::Context, interactive: bool) {
         if interactive {
             let size = ctx.input(|i| i.content_rect().size());
-            self.viewport.inflated_stage_size = [size.x.max(320.0), size.y.max(240.0)];
+            self.viewport
+                .set_inflated_stage_size([size.x.max(320.0), size.y.max(240.0)]);
         }
 
         egui::TopBottomPanel::top("inflated_stage_toolbar").show_animated(ctx, interactive, |ui| {
@@ -446,8 +470,9 @@ impl super::super::TrxVizApp {
                 }
                 ui.menu_button("Export", |ui| {
                     if ui.button("PNG").clicked() {
-                        self.viewport.export_dialog.target = ExportTarget::InflatedStage;
-                        self.viewport.export_dialog.open = true;
+                        let export_dialog = self.viewport.export_dialog_mut();
+                        export_dialog.target = ExportTarget::InflatedStage;
+                        export_dialog.open = true;
                         ui.close();
                     }
                     if ui.button("Blender (GLB)").clicked() {
@@ -464,7 +489,7 @@ impl super::super::TrxVizApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let render_data = self.build_stage_render_data();
-            if render_data.surface_draws.is_empty() {
+            if render_data.surfaces.surface_draws.is_empty() {
                 ui.centered_and_justified(|ui| {
                     ui.label("No surfaces are routed to Stage.");
                 });
@@ -483,13 +508,13 @@ impl super::super::TrxVizApp {
             let mut camera = OrbitCamera::new(Vec3::ZERO, 250.0);
             camera.yaw = 0.0;
             camera.pitch = 0.0;
-            self.viewport.inflated_stage_camera = camera;
+            *self.viewport.inflated_stage_camera_mut() = camera;
             return;
         };
         let mut camera = OrbitCamera::new(center, (span * 1.15).max(50.0));
         camera.yaw = 0.0;
         camera.pitch = 0.0;
-        self.viewport.inflated_stage_camera = camera;
+        *self.viewport.inflated_stage_camera_mut() = camera;
     }
 
     fn inflated_stage_bounds(&self) -> Option<(Vec3, f32)> {
@@ -573,48 +598,46 @@ impl super::super::TrxVizApp {
     fn show_2d_contents(&mut self, ctx: &egui::Context, interactive: bool) {
         if interactive {
             let size = ctx.input(|i| i.content_rect().size());
-            self.viewport.window_2d_size = [size.x.max(320.0), size.y.max(240.0)];
+            self.viewport
+                .set_window_2d_size([size.x.max(320.0), size.y.max(240.0)]);
         }
 
         let render_data = self.build_viewer_render_data();
         egui::TopBottomPanel::top("window_2d_toolbar").show_animated(ctx, interactive, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Mode");
+                let mode_label = self.viewport.view_2d().mode.label();
                 egui::ComboBox::from_id_salt("mode_2d")
-                    .selected_text(self.viewport.view_2d.mode.label())
+                    .selected_text(mode_label)
                     .show_ui(ui, |ui| {
+                        let view_2d = self.viewport.view_2d_mut();
                         for mode in View2DMode::ALL {
-                            ui.selectable_value(
-                                &mut self.viewport.view_2d.mode,
-                                mode,
-                                mode.label(),
-                            );
+                            ui.selectable_value(&mut view_2d.mode, mode, mode.label());
                         }
                     });
 
-                match self.viewport.view_2d.mode {
+                match self.viewport.view_2d().mode {
                     View2DMode::Slice => {
                         ui.separator();
-                        slice_kind_picker(ui, &mut self.viewport.view_2d.single_view, "slice_axis");
+                        let view_2d = self.viewport.view_2d_mut();
+                        slice_kind_picker(ui, &mut view_2d.single_view, "slice_axis");
                     }
                     View2DMode::Ortho => {
                         ui.separator();
-                        ui.checkbox(&mut self.viewport.view_2d.ortho_show_row, "Row layout");
+                        let view_2d = self.viewport.view_2d_mut();
+                        ui.checkbox(&mut view_2d.ortho_show_row, "Row layout");
                     }
                     View2DMode::Lightbox => {
                         ui.separator();
-                        slice_kind_picker(
-                            ui,
-                            &mut self.viewport.view_2d.lightbox_axis,
-                            "lightbox_axis",
-                        );
+                        let view_2d = self.viewport.view_2d_mut();
+                        slice_kind_picker(ui, &mut view_2d.lightbox_axis, "lightbox_axis");
                         ui.add(
-                            egui::DragValue::new(&mut self.viewport.view_2d.lightbox_rows)
+                            egui::DragValue::new(&mut view_2d.lightbox_rows)
                                 .range(1..=8)
                                 .prefix("Rows "),
                         );
                         ui.add(
-                            egui::DragValue::new(&mut self.viewport.view_2d.lightbox_cols)
+                            egui::DragValue::new(&mut view_2d.lightbox_cols)
                                 .range(1..=8)
                                 .prefix("Cols "),
                         );
@@ -636,7 +659,7 @@ impl super::super::TrxVizApp {
                 return;
             }
 
-            match self.viewport.view_2d.mode {
+            match self.viewport.view_2d().mode {
                 View2DMode::Slice => self.show_2d_slice_mode(ui, &render_data, interactive),
                 View2DMode::Ortho => self.show_2d_ortho_mode(ui, &render_data, interactive),
                 View2DMode::Lightbox => self.show_2d_lightbox_mode(ui, &render_data, interactive),
@@ -654,7 +677,7 @@ impl super::super::TrxVizApp {
     ) {
         let axis_index = self
             .viewport
-            .view_2d
+            .view_2d()
             .single_view
             .slice_axis_index()
             .unwrap_or(0);
@@ -665,7 +688,7 @@ impl super::super::TrxVizApp {
             rect,
             interactive.then_some(&response),
             axis_index,
-            self.viewport.slice_indices[axis_index],
+            self.viewport.slice_index(axis_index),
             self.viewport
                 .slice_world_position(&self.scene.nifti_files, axis_index),
             render_data,
@@ -681,7 +704,7 @@ impl super::super::TrxVizApp {
     ) {
         let available = ui.available_size();
         let spacing = ui.spacing().item_spacing;
-        if self.viewport.view_2d.ortho_show_row {
+        if self.viewport.view_2d().ortho_show_row {
             let width = ((available.x - 2.0 * spacing.x) / 3.0).max(80.0);
             let height = available.y.max(80.0);
             ui.horizontal(|ui| {
@@ -695,7 +718,7 @@ impl super::super::TrxVizApp {
                         rect,
                         interactive.then_some(&response),
                         axis_index,
-                        self.viewport.slice_indices[axis_index],
+                        self.viewport.slice_index(axis_index),
                         self.viewport
                             .slice_world_position(&self.scene.nifti_files, axis_index),
                         render_data,
@@ -714,7 +737,7 @@ impl super::super::TrxVizApp {
                     rect0,
                     interactive.then_some(&response0),
                     0,
-                    self.viewport.slice_indices[0],
+                    self.viewport.slice_index(0),
                     self.viewport
                         .slice_world_position(&self.scene.nifti_files, 0),
                     render_data,
@@ -730,7 +753,7 @@ impl super::super::TrxVizApp {
                         rect1,
                         interactive.then_some(&response1),
                         1,
-                        self.viewport.slice_indices[1],
+                        self.viewport.slice_index(1),
                         self.viewport
                             .slice_world_position(&self.scene.nifti_files, 1),
                         render_data,
@@ -745,7 +768,7 @@ impl super::super::TrxVizApp {
                         rect2,
                         interactive.then_some(&response2),
                         2,
-                        self.viewport.slice_indices[2],
+                        self.viewport.slice_index(2),
                         self.viewport
                             .slice_world_position(&self.scene.nifti_files, 2),
                         render_data,
@@ -764,12 +787,12 @@ impl super::super::TrxVizApp {
     ) {
         let axis_index = self
             .viewport
-            .view_2d
+            .view_2d()
             .lightbox_axis
             .slice_axis_index()
             .unwrap_or(0);
-        let rows = self.viewport.view_2d.lightbox_rows.max(1);
-        let cols = self.viewport.view_2d.lightbox_cols.max(1);
+        let rows = self.viewport.view_2d().lightbox_rows.max(1);
+        let cols = self.viewport.view_2d().lightbox_cols.max(1);
         let total = rows * cols;
         let center_tile = total / 2;
         let available = ui.available_size();
@@ -778,7 +801,7 @@ impl super::super::TrxVizApp {
             ((available.x - spacing.x * (cols.saturating_sub(1) as f32)) / cols as f32).max(60.0);
         let tile_height =
             ((available.y - spacing.y * (rows.saturating_sub(1) as f32)) / rows as f32).max(60.0);
-        let center_index = self.viewport.slice_indices[axis_index];
+        let center_index = self.viewport.slice_index(axis_index);
         let max_index = self.max_slice_index(axis_index);
 
         for row in 0..rows {
@@ -798,8 +821,8 @@ impl super::super::TrxVizApp {
                     );
 
                     if interactive && response.clicked() {
-                        self.viewport.slice_indices[axis_index] = index;
-                        self.viewport.slices_dirty = true;
+                        self.viewport.set_slice_index(axis_index, index);
+                        self.viewport.mark_slices_dirty();
                     }
 
                     self.draw_slice_rect(
@@ -829,25 +852,25 @@ impl super::super::TrxVizApp {
             if response.dragged_by(egui::PointerButton::Primary) {
                 let delta = ui.input(|i| i.pointer.delta());
                 if modifiers.shift {
-                    self.viewport.camera_3d.pan_screen(delta.x, delta.y);
+                    self.viewport.camera_3d_mut().pan_screen(delta.x, delta.y);
                 } else {
-                    self.viewport.camera_3d.handle_drag(delta.x, delta.y);
+                    self.viewport.camera_3d_mut().handle_drag(delta.x, delta.y);
                 }
             }
             if response.dragged_by(egui::PointerButton::Middle) {
                 let delta = ui.input(|i| i.pointer.delta());
-                self.viewport.camera_3d.pan_screen(delta.x, delta.y);
+                self.viewport.camera_3d_mut().pan_screen(delta.x, delta.y);
             }
             if response.hovered() {
                 let scroll = ui.input(|i| i.smooth_scroll_delta.y);
                 if scroll.abs() > 0.0 {
-                    self.viewport.camera_3d.handle_scroll(scroll * 0.01);
+                    self.viewport.camera_3d_mut().handle_scroll(scroll * 0.01);
                 }
             }
         }
 
         let aspect = rect.width() / rect.height().max(1.0);
-        let vp = self.viewport.camera_3d.view_projection(aspect);
+        let vp = self.viewport.camera_3d().view_projection(aspect);
         let scene_plan = &self.workflow.runtime.scene_plan;
         let active_odx_scene = scene_plan
             .odf_glyph_draws
@@ -858,7 +881,7 @@ impl super::super::TrxVizApp {
             .or_else(|| active_fixel_draw_3d(self).map(|p| p.field.scene.as_ref()))
             .or(self.scene.odx_scene.as_deref());
         let (fixel_slab_center, fixel_slab_half_width) = if let Some(odx) = active_odx_scene {
-            let z = self.viewport.slice_world_offsets[0];
+            let z = self.viewport.slice_world_offsets()[0];
             (
                 glam::Vec3::new(0.0, 0.0, z),
                 (odx.glyph_scale() * 0.5).max(0.001),
@@ -866,7 +889,7 @@ impl super::super::TrxVizApp {
         } else {
             (glam::Vec3::ZERO, 0.0)
         };
-        let fog_span = (self.viewport.camera_3d.distance + self.viewport.volume_extent).max(1.0);
+        let fog_span = (self.viewport.camera_3d().distance + self.viewport.volume_extent()).max(1.0);
         let render_3d = self.viewport.workflow_render_3d();
         let fog_near = fog_span * render_3d.fog_start_fraction;
         let fog_far = fog_span * render_3d.fog_end_fraction;
@@ -874,32 +897,32 @@ impl super::super::TrxVizApp {
             rect,
             callbacks::Scene3DCallback {
                 view_proj: vp,
-                camera_pos: self.viewport.camera_3d.eye(),
-                camera_dir: self.viewport.camera_3d.view_direction(),
-                streamline_draws: render_data.streamline_draws.clone(),
-                show_streamlines: render_data.any_visible_streamlines,
-                volume_draws: render_data.volume_draws.clone(),
-                slice_visible: self.viewport.slice_visible,
-                surface_draws: render_data.surface_draws.clone(),
-                bundle_draws: render_data.bundle_draws.clone(),
-                show_boundary_glyphs: render_data.glyph_visible,
-                boundary_glyph_color_mode: render_data.glyph_color_mode,
-                boundary_glyph_draw_step: render_data.glyph_density_3d_step,
-                show_odx_glyphs: render_data.odx_show_glyphs,
-                show_odx_fixels: render_data.odx_show_fixels,
-                odx_glyph_opacity: render_data.odx_glyph_opacity,
-                odx_glyph_gloss: render_data.odx_glyph_gloss,
-                odx_glyph_scale: render_data.odx_glyph_scale,
-                odx_glyph_colormap: render_data.odx_glyph_colormap,
-                odx_opacity_gate: render_data.odx_opacity_gate,
-                odx_size_gate: render_data.odx_size_gate,
-                odx_amp_norm: render_data.odx_amp_norm,
-                odx_fixel_line_width: render_data.odx_fixel_line_width,
-                odx_fixel_opacity: render_data.odx_fixel_opacity,
-                odx_fixel_length_scale: render_data.odx_fixel_length_scale,
-                odx_fixel_visible: render_data.odx_fixel_3d_visible,
-                odx_fixel_colormap_code: render_data.odx_fixel_colormap_code,
-                odx_fixel_scalar_range: render_data.odx_fixel_scalar_range,
+                camera_pos: self.viewport.camera_3d().eye(),
+                camera_dir: self.viewport.camera_3d().view_direction(),
+                streamline_draws: render_data.streamlines.streamline_draws.clone(),
+                show_streamlines: render_data.streamlines.any_visible_streamlines,
+                volume_draws: render_data.volumes.volume_draws.clone(),
+                slice_visible: self.viewport.slice_visible(),
+                surface_draws: render_data.surfaces.surface_draws.clone(),
+                bundle_draws: render_data.surfaces.bundle_draws.clone(),
+                show_boundary_glyphs: render_data.glyphs.visible,
+                boundary_glyph_color_mode: render_data.glyphs.color_mode,
+                boundary_glyph_draw_step: render_data.glyphs.density_3d_step,
+                show_odx_glyphs: render_data.odx.show_glyphs,
+                show_odx_fixels: render_data.odx.show_fixels,
+                odx_glyph_opacity: render_data.odx.glyph_opacity,
+                odx_glyph_gloss: render_data.odx.glyph_gloss,
+                odx_glyph_scale: render_data.odx.glyph_scale,
+                odx_glyph_colormap: render_data.odx.glyph_colormap,
+                odx_opacity_gate: render_data.odx.opacity_gate,
+                odx_size_gate: render_data.odx.size_gate,
+                odx_amp_norm: render_data.odx.amp_norm,
+                odx_fixel_line_width: render_data.odx.fixel_line_width,
+                odx_fixel_opacity: render_data.odx.fixel_opacity,
+                odx_fixel_length_scale: render_data.odx.fixel_length_scale,
+                odx_fixel_visible: render_data.odx.fixel_3d_visible,
+                odx_fixel_colormap_code: render_data.odx.fixel_colormap_code,
+                odx_fixel_scalar_range: render_data.odx.fixel_scalar_range,
                 odx_fixel_3d_slab_normal: glam::Vec3::Z,
                 odx_fixel_3d_slab_center: fixel_slab_center,
                 odx_fixel_3d_slab_half_width: fixel_slab_half_width,
@@ -925,34 +948,34 @@ impl super::super::TrxVizApp {
                 let delta = ui.input(|i| i.pointer.delta());
                 if modifiers.shift {
                     self.viewport
-                        .inflated_stage_camera
+                        .inflated_stage_camera_mut()
                         .pan_screen(delta.x, delta.y);
                 } else {
                     self.viewport
-                        .inflated_stage_camera
+                        .inflated_stage_camera_mut()
                         .handle_drag(delta.x, delta.y);
                 }
             }
             if response.dragged_by(egui::PointerButton::Middle) {
                 let delta = ui.input(|i| i.pointer.delta());
                 self.viewport
-                    .inflated_stage_camera
+                    .inflated_stage_camera_mut()
                     .pan_screen(delta.x, delta.y);
             }
             if response.hovered() {
                 let scroll = ui.input(|i| i.smooth_scroll_delta.y);
                 if scroll.abs() > 0.0 {
                     self.viewport
-                        .inflated_stage_camera
+                        .inflated_stage_camera_mut()
                         .handle_scroll(scroll * 0.01);
                 }
             }
         }
 
         let aspect = rect.width() / rect.height().max(1.0);
-        let vp = self.viewport.inflated_stage_camera.view_projection(aspect);
+        let vp = self.viewport.inflated_stage_camera().view_projection(aspect);
         let fog_span =
-            (self.viewport.inflated_stage_camera.distance + self.viewport.volume_extent).max(1.0);
+            (self.viewport.inflated_stage_camera().distance + self.viewport.volume_extent()).max(1.0);
         let render_3d = self.viewport.workflow_render_3d();
         let fog_near = fog_span * render_3d.fog_start_fraction;
         let fog_far = fog_span * render_3d.fog_end_fraction;
@@ -960,13 +983,13 @@ impl super::super::TrxVizApp {
             rect,
             callbacks::Scene3DCallback {
                 view_proj: vp,
-                camera_pos: self.viewport.inflated_stage_camera.eye(),
-                camera_dir: self.viewport.inflated_stage_camera.view_direction(),
+                camera_pos: self.viewport.inflated_stage_camera().eye(),
+                camera_dir: self.viewport.inflated_stage_camera().view_direction(),
                 streamline_draws: Vec::new(),
                 show_streamlines: false,
                 volume_draws: Vec::new(),
                 slice_visible: [false; 3],
-                surface_draws: render_data.surface_draws.clone(),
+                surface_draws: render_data.surfaces.surface_draws.clone(),
                 bundle_draws: Vec::new(),
                 show_boundary_glyphs: false,
                 boundary_glyph_color_mode: BoundaryGlyphColorMode::DirectionRgb,
@@ -1010,11 +1033,13 @@ impl super::super::TrxVizApp {
     ) {
         if let Some(response) = response {
             if response.clicked() {
-                self.viewport.view_2d.active_axis = axis_index;
+                self.viewport.view_2d_mut().active_axis = axis_index;
             }
             if response.dragged_by(egui::PointerButton::Primary) {
                 let delta = ui.input(|i| i.pointer.delta());
-                self.viewport.slice_cameras[axis_index].pan_screen(delta.x, delta.y);
+                self.viewport
+                    .slice_camera_mut(axis_index)
+                    .pan_screen(delta.x, delta.y);
             }
             if response.hovered() {
                 let scroll = ui.input(|i| i.smooth_scroll_delta.y);
@@ -1033,17 +1058,20 @@ impl super::super::TrxVizApp {
                 let zoom_delta = ui.input(|i| i.zoom_delta());
                 if (zoom_delta - 1.0).abs() > 0.001 {
                     let zoom_amount = (zoom_delta - 1.0) * 10.0;
-                    self.viewport.slice_cameras[axis_index].zoom(zoom_amount);
+                    self.viewport.slice_camera_mut(axis_index).zoom(zoom_amount);
                 }
             }
         }
 
         let aspect = rect.width() / rect.height().max(1.0);
-        let vp = self.viewport.slice_cameras[axis_index].view_projection(aspect, slice_pos);
+        let vp = self
+            .viewport
+            .slice_camera(axis_index)
+            .view_projection(aspect, slice_pos);
         let glyph_slab_half_width = self
             .viewport
             .boundary_field
-            .as_ref()
+            ()
             .map(|field| 0.5 * field.grid.voxel_size_mm.0)
             .or_else(|| {
                 self.workflow
@@ -1086,31 +1114,31 @@ impl super::super::TrxVizApp {
                 view_proj: vp,
                 quad_index: axis_index,
                 viewport: ViewportIndex::from_slice_axis_index(axis_index),
-                volume_draws: render_data.volume_draws.clone(),
-                streamline_draws: render_data.streamline_draws.clone(),
-                show_streamlines: render_data.any_visible_streamlines,
+                volume_draws: render_data.volumes.volume_draws.clone(),
+                streamline_draws: render_data.streamlines.streamline_draws.clone(),
+                show_streamlines: render_data.streamlines.any_visible_streamlines,
                 slab_normal,
                 slab_center,
                 slab_half_width: glyph_slab_half_width,
-                show_boundary_glyphs: render_data.glyph_visible,
-                boundary_glyph_color_mode: render_data.glyph_color_mode,
-                boundary_glyph_draw_step: render_data.glyph_slice_density_step,
-                show_odx_glyphs: false, // glyphs are in the 3D view only
-                show_odx_fixels: render_data.odx_show_fixels,
-                odx_glyph_opacity: render_data.odx_glyph_opacity,
-                odx_glyph_gloss: render_data.odx_glyph_gloss,
-                odx_fixel_line_width: render_data.odx_fixel_2d_line_width,
-                odx_fixel_opacity: render_data.odx_fixel_2d_opacity,
-                odx_fixel_slab_half_width_mm: render_data.odx_fixel_slab_half_width_mm,
-                odx_glyph_scale: render_data.odx_glyph_scale,
-                odx_fixel_length_scale: render_data.odx_fixel_2d_length_scale,
-                odx_fixel_visible: render_data.odx_fixel_2d_visible,
-                odx_fixel_colormap_code: render_data.odx_fixel_2d_colormap_code,
-                odx_fixel_scalar_range: render_data.odx_fixel_2d_scalar_range,
-                odx_glyph_colormap: render_data.odx_glyph_colormap,
-                odx_opacity_gate: render_data.odx_opacity_gate,
-                odx_size_gate: render_data.odx_size_gate,
-                odx_amp_norm: render_data.odx_amp_norm,
+                show_boundary_glyphs: render_data.glyphs.visible,
+                boundary_glyph_color_mode: render_data.glyphs.color_mode,
+                boundary_glyph_draw_step: render_data.glyphs.slice_density_step,
+                show_odx_glyphs: false,
+                show_odx_fixels: render_data.odx.show_fixels,
+                odx_glyph_opacity: render_data.odx.glyph_opacity,
+                odx_glyph_gloss: render_data.odx.glyph_gloss,
+                odx_fixel_line_width: render_data.odx.fixel_2d_line_width,
+                odx_fixel_opacity: render_data.odx.fixel_2d_opacity,
+                odx_fixel_slab_half_width_mm: render_data.odx.fixel_slab_half_width_mm,
+                odx_glyph_scale: render_data.odx.glyph_scale,
+                odx_fixel_length_scale: render_data.odx.fixel_2d_length_scale,
+                odx_fixel_visible: render_data.odx.fixel_2d_visible,
+                odx_fixel_colormap_code: render_data.odx.fixel_2d_colormap_code,
+                odx_fixel_scalar_range: render_data.odx.fixel_2d_scalar_range,
+                odx_glyph_colormap: render_data.odx.glyph_colormap,
+                odx_opacity_gate: render_data.odx.opacity_gate,
+                odx_size_gate: render_data.odx.size_gate,
+                odx_amp_norm: render_data.odx.amp_norm,
                 scene_lighting: self.viewport.scene_lighting(),
             },
         ));
@@ -1229,124 +1257,151 @@ impl super::super::TrxVizApp {
                 .any(|p| p.visible)
             || self.scene.odx_scene.is_some();
         ViewerRenderData {
-            any_visible_streamlines: streamline_draws.iter().any(|draw| draw.visible),
-            surface_draws,
-            volume_draws,
-            streamline_draws,
-            bundle_draws,
-            glyph_visible: glyph_draw.is_some() && self.viewport.boundary_field.is_some(),
-            glyph_color_mode: glyph_draw
-                .map(|draw| draw.color_mode)
-                .unwrap_or(BoundaryGlyphColorMode::DirectionRgb),
-            glyph_density_3d_step: glyph_draw
-                .map(|draw| draw.density_3d_step as u32)
-                .unwrap_or(1),
-            glyph_slice_density_step: glyph_draw
-                .map(|draw| draw.slice_density_step as u32)
-                .unwrap_or(1),
-            odx_show_glyphs: odx_glyphs_active,
-            odx_show_fixels: odx_fixels_active,
-            odx_glyph_opacity: odf_draw.map(|p| p.opacity).unwrap_or(0.95),
-            odx_glyph_gloss: odf_draw.map(|p| p.gloss).unwrap_or(0.0),
-            odx_fixel_line_width: fixel_3d_draw.map(|p| p.line_width).unwrap_or(0.006),
-            odx_fixel_opacity: fixel_3d_draw.map(|p| p.opacity).unwrap_or(1.0),
-            odx_fixel_slab_half_width_mm: fixel_2d_draw
-                .map(|p| (p.slab_thickness_mm * 0.5).max(trxviz_core::units::Millimeters(0.0)))
-                .unwrap_or(trxviz_core::units::Millimeters(1.5))
-                .0,
-            odx_glyph_scale: odf_draw.map(|p| p.scale).unwrap_or(1.0),
-            odx_fixel_length_scale: fixel_3d_draw.map(|p| p.length_scale).unwrap_or(1.0),
-            odx_fixel_2d_line_width: fixel_2d_draw.map(|p| p.line_width).unwrap_or(0.006),
-            odx_fixel_2d_opacity: fixel_2d_draw.map(|p| p.opacity).unwrap_or(1.0),
-            odx_fixel_2d_length_scale: fixel_2d_draw.map(|p| p.length_scale).unwrap_or(1.0),
-            odx_fixel_2d_visible: fixel_2d_draw
-                .map(|p| p.visible)
-                .unwrap_or(self.scene.odx_scene.is_some()),
-            odx_fixel_3d_visible: fixel_3d_draw.map(|p| p.visible).unwrap_or(true),
-            odx_glyph_colormap: odf_draw
-                .map(|p| p.vertex_colormap)
-                .unwrap_or(trxviz_core::workflow::GlyphColormap::Directional),
-            odx_opacity_gate: odf_draw
-                .map(|p| {
-                    [
-                        p.opacity_gate.range.0,
-                        p.opacity_gate.range.1,
-                        p.opacity_gate.below,
-                        p.opacity_gate.above,
-                    ]
-                })
-                .unwrap_or([0.0, 1.0, 1.0, 1.0]),
-            odx_size_gate: odf_draw
-                .map(|p| {
-                    [
-                        p.size_gate.range.0,
-                        p.size_gate.range.1,
-                        p.size_gate.min_scale,
-                        p.size_gate.max_scale,
-                    ]
-                })
-                .unwrap_or([0.0, 1.0, 1.0, 1.0]),
-            odx_amp_norm: self.odx_amp_norm,
-            odx_fixel_colormap_code: fixel_3d_draw.map(|p| p.colormap_code).unwrap_or(0),
-            odx_fixel_scalar_range: fixel_3d_draw
-                .map(|p| [p.scalar_range.0, p.scalar_range.1])
-                .unwrap_or([0.0, 1.0]),
-            odx_fixel_2d_colormap_code: fixel_2d_draw.map(|p| p.colormap_code).unwrap_or(0),
-            odx_fixel_2d_scalar_range: fixel_2d_draw
-                .map(|p| [p.scalar_range.0, p.scalar_range.1])
-                .unwrap_or([0.0, 1.0]),
+            surfaces: SurfaceFrameData {
+                surface_draws,
+                bundle_draws,
+            },
+            volumes: VolumeFrameData { volume_draws },
+            streamlines: StreamlineFrameData {
+                any_visible_streamlines: streamline_draws.iter().any(|draw| draw.visible),
+                streamline_draws,
+            },
+            glyphs: GlyphFrameData {
+                visible: glyph_draw.is_some() && self.viewport.boundary_field().is_some(),
+                color_mode: glyph_draw
+                    .map(|draw| draw.color_mode)
+                    .unwrap_or(BoundaryGlyphColorMode::DirectionRgb),
+                density_3d_step: glyph_draw
+                    .map(|draw| draw.density_3d_step as u32)
+                    .unwrap_or(1),
+                slice_density_step: glyph_draw
+                    .map(|draw| draw.slice_density_step as u32)
+                    .unwrap_or(1),
+            },
+            odx: OdxFrameData {
+                show_glyphs: odx_glyphs_active,
+                show_fixels: odx_fixels_active,
+                glyph_opacity: odf_draw.map(|p| p.opacity).unwrap_or(0.95),
+                glyph_gloss: odf_draw.map(|p| p.gloss).unwrap_or(0.0),
+                fixel_line_width: fixel_3d_draw.map(|p| p.line_width).unwrap_or(0.006),
+                fixel_opacity: fixel_3d_draw.map(|p| p.opacity).unwrap_or(1.0),
+                fixel_slab_half_width_mm: fixel_2d_draw
+                    .map(|p| (p.slab_thickness_mm * 0.5).max(trxviz_core::units::Millimeters(0.0)))
+                    .unwrap_or(trxviz_core::units::Millimeters(1.5))
+                    .0,
+                glyph_scale: odf_draw.map(|p| p.scale).unwrap_or(1.0),
+                fixel_length_scale: fixel_3d_draw.map(|p| p.length_scale).unwrap_or(1.0),
+                fixel_2d_line_width: fixel_2d_draw.map(|p| p.line_width).unwrap_or(0.006),
+                fixel_2d_opacity: fixel_2d_draw.map(|p| p.opacity).unwrap_or(1.0),
+                fixel_2d_length_scale: fixel_2d_draw.map(|p| p.length_scale).unwrap_or(1.0),
+                fixel_2d_visible: fixel_2d_draw
+                    .map(|p| p.visible)
+                    .unwrap_or(self.scene.odx_scene.is_some()),
+                fixel_3d_visible: fixel_3d_draw.map(|p| p.visible).unwrap_or(true),
+                glyph_colormap: odf_draw
+                    .map(|p| p.vertex_colormap)
+                    .unwrap_or(trxviz_core::workflow::GlyphColormap::Directional),
+                opacity_gate: odf_draw
+                    .map(|p| {
+                        [
+                            p.opacity_gate.range.0,
+                            p.opacity_gate.range.1,
+                            p.opacity_gate.below,
+                            p.opacity_gate.above,
+                        ]
+                    })
+                    .unwrap_or([0.0, 1.0, 1.0, 1.0]),
+                size_gate: odf_draw
+                    .map(|p| {
+                        [
+                            p.size_gate.range.0,
+                            p.size_gate.range.1,
+                            p.size_gate.min_scale,
+                            p.size_gate.max_scale,
+                        ]
+                    })
+                    .unwrap_or([0.0, 1.0, 1.0, 1.0]),
+                amp_norm: self.odx_amp_norm,
+                fixel_colormap_code: fixel_3d_draw.map(|p| p.colormap_code).unwrap_or(0),
+                fixel_scalar_range: fixel_3d_draw
+                    .map(|p| [p.scalar_range.0, p.scalar_range.1])
+                    .unwrap_or([0.0, 1.0]),
+                fixel_2d_colormap_code: fixel_2d_draw.map(|p| p.colormap_code).unwrap_or(0),
+                fixel_2d_scalar_range: fixel_2d_draw
+                    .map(|p| [p.scalar_range.0, p.scalar_range.1])
+                    .unwrap_or([0.0, 1.0]),
+            },
         }
     }
 
     fn build_stage_render_data(&self) -> ViewerRenderData {
         let surface_draws = self.stage_surface_draw_instances();
         ViewerRenderData {
-            surface_draws,
-            volume_draws: Vec::new(),
-            streamline_draws: Vec::new(),
-            bundle_draws: Vec::new(),
-            any_visible_streamlines: false,
-            glyph_visible: false,
-            glyph_color_mode: BoundaryGlyphColorMode::DirectionRgb,
-            glyph_density_3d_step: 1,
-            glyph_slice_density_step: 1,
-            odx_show_glyphs: false,
-            odx_show_fixels: false,
-            odx_glyph_opacity: 0.95,
-            odx_glyph_gloss: 0.0,
-            odx_fixel_line_width: 0.006,
-            odx_fixel_opacity: 1.0,
-            odx_fixel_slab_half_width_mm: 1.5,
-            odx_glyph_scale: 1.0,
-            odx_fixel_length_scale: 1.0,
-            odx_fixel_2d_line_width: 0.006,
-            odx_fixel_2d_opacity: 1.0,
-            odx_fixel_2d_length_scale: 1.0,
-            odx_fixel_2d_visible: true,
-            odx_fixel_3d_visible: true,
-            odx_glyph_colormap: trxviz_core::workflow::GlyphColormap::Directional,
-            odx_opacity_gate: [0.0, 1.0, 1.0, 1.0],
-            odx_size_gate: [0.0, 1.0, 1.0, 1.0],
-            odx_amp_norm: 1.0,
-            odx_fixel_colormap_code: 0,
-            odx_fixel_scalar_range: [0.0, 1.0],
-            odx_fixel_2d_colormap_code: 0,
-            odx_fixel_2d_scalar_range: [0.0, 1.0],
+            surfaces: SurfaceFrameData {
+                surface_draws,
+                bundle_draws: Vec::new(),
+            },
+            volumes: VolumeFrameData {
+                volume_draws: Vec::new(),
+            },
+            streamlines: StreamlineFrameData {
+                streamline_draws: Vec::new(),
+                any_visible_streamlines: false,
+            },
+            glyphs: GlyphFrameData {
+                visible: false,
+                color_mode: BoundaryGlyphColorMode::DirectionRgb,
+                density_3d_step: 1,
+                slice_density_step: 1,
+            },
+            odx: OdxFrameData {
+                show_glyphs: false,
+                show_fixels: false,
+                glyph_opacity: 0.95,
+                glyph_gloss: 0.0,
+                fixel_line_width: 0.006,
+                fixel_opacity: 1.0,
+                fixel_slab_half_width_mm: 1.5,
+                glyph_scale: 1.0,
+                fixel_length_scale: 1.0,
+                fixel_2d_line_width: 0.006,
+                fixel_2d_opacity: 1.0,
+                fixel_2d_length_scale: 1.0,
+                fixel_2d_visible: true,
+                fixel_3d_visible: true,
+                glyph_colormap: trxviz_core::workflow::GlyphColormap::Directional,
+                opacity_gate: [0.0, 1.0, 1.0, 1.0],
+                size_gate: [0.0, 1.0, 1.0, 1.0],
+                amp_norm: 1.0,
+                fixel_colormap_code: 0,
+                fixel_scalar_range: [0.0, 1.0],
+                fixel_2d_colormap_code: 0,
+                fixel_2d_scalar_range: [0.0, 1.0],
+            },
         }
     }
 
     fn finish_export_if_ready(&mut self, ctx: &egui::Context, target: ExportTarget) {
-        let Some(pending) = self.viewport.pending_export.as_mut() else {
-            return;
-        };
-        if pending.target != target {
-            return;
-        }
-
-        if !pending.requested_screenshot {
-            pending.requested_screenshot = true;
+        let Some((path, requested_screenshot)) = ({
+            let Some(pending) = self.viewport.pending_export_mut() else {
+                return;
+            };
+            if pending.target != target {
+                return;
+            }
+            if !pending.requested_screenshot {
+                pending.requested_screenshot = true;
+                None
+            } else {
+                Some((pending.path.clone(), pending.requested_screenshot))
+            }
+        }) else {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
             ctx.request_repaint();
+            return;
+        };
+
+        if !requested_screenshot {
             return;
         }
 
@@ -1364,7 +1419,6 @@ impl super::super::TrxVizApp {
             return;
         };
 
-        let path = pending.path.clone();
         match save_color_image(image.as_ref(), &path) {
             Ok(()) => {
                 self.status_msg = Some(format!("Saved PNG to {}", path.display()));
@@ -1373,7 +1427,7 @@ impl super::super::TrxVizApp {
                 self.error_msg = Some(format!("Failed to export PNG: {err}"));
             }
         }
-        self.viewport.pending_export = None;
+        self.viewport.clear_pending_export();
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
@@ -1401,7 +1455,7 @@ impl super::super::TrxVizApp {
                 _ => (dims[0] as usize).saturating_sub(1),
             };
         }
-        self.viewport.slice_indices[axis_index].saturating_add(128)
+        self.viewport.slice_indices()[axis_index].saturating_add(128)
     }
 }
 

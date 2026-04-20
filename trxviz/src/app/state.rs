@@ -302,92 +302,335 @@ impl MergeStreamlinesDialogState {
     }
 }
 
+struct CameraViewportState {
+    camera_3d: OrbitCamera,
+    inflated_stage_camera: OrbitCamera,
+}
+
+struct SliceViewportState {
+    slice_cameras: [OrthoSliceCamera; 3],
+    slice_indices: [usize; 3],
+    slices_dirty: bool,
+    slice_visible: [bool; 3],
+    slice_world_offsets: [f32; 3],
+}
+
+struct SceneBoundsViewportState {
+    volume_center: Vec3,
+    volume_extent: f32,
+}
+
+struct RenderViewportState {
+    render_3d: WorkflowRender3D,
+    boundary_field: Option<Arc<BoundaryContactField>>,
+    boundary_field_revision: u64,
+}
+
+struct WindowViewportState {
+    window_3d_open: bool,
+    window_3d_size: [f32; 2],
+    inflated_stage_open: bool,
+    inflated_stage_size: [f32; 2],
+    window_2d_size: [f32; 2],
+}
+
+struct ExportViewportState {
+    export_dialog: ExportDialogState,
+    pending_export: Option<PendingExportRequest>,
+}
+
 pub struct ViewportState {
-    pub camera_3d: OrbitCamera,
-    pub slice_cameras: [OrthoSliceCamera; 3],
-    pub slice_indices: [usize; 3],
-    pub slices_dirty: bool,
-    pub volume_center: Vec3,
-    pub volume_extent: f32,
-    pub slice_visible: [bool; 3],
-    pub slice_world_offsets: [f32; 3],
-    pub render_3d: WorkflowRender3D,
-    pub boundary_field: Option<Arc<BoundaryContactField>>,
-    pub boundary_field_revision: u64,
-    pub window_3d_open: bool,
-    pub window_3d_size: [f32; 2],
-    pub inflated_stage_open: bool,
-    pub inflated_stage_size: [f32; 2],
-    pub inflated_stage_camera: OrbitCamera,
-    pub view_2d: View2DState,
-    pub window_2d_size: [f32; 2],
-    pub export_dialog: ExportDialogState,
-    pub pending_export: Option<PendingExportRequest>,
+    camera: CameraViewportState,
+    slices: SliceViewportState,
+    scene_bounds: SceneBoundsViewportState,
+    render: RenderViewportState,
+    windows: WindowViewportState,
+    view_2d: View2DState,
+    export: ExportViewportState,
 }
 
 impl Default for ViewportState {
     fn default() -> Self {
         Self {
-            camera_3d: OrbitCamera::new(Vec3::ZERO, 200.0),
-            slice_cameras: [
-                OrthoSliceCamera::new(SliceAxis::Axial, Vec3::ZERO, 200.0),
-                OrthoSliceCamera::new(SliceAxis::Coronal, Vec3::ZERO, 200.0),
-                OrthoSliceCamera::new(SliceAxis::Sagittal, Vec3::ZERO, 200.0),
-            ],
-            slice_indices: [0; 3],
-            slices_dirty: false,
-            volume_center: Vec3::ZERO,
-            volume_extent: 200.0,
-            slice_visible: [true; 3],
-            slice_world_offsets: [0.0; 3],
-            render_3d: WorkflowRender3D::default(),
-            boundary_field: None,
-            boundary_field_revision: 0,
-            window_3d_open: false,
-            window_3d_size: [1200.0, 900.0],
-            inflated_stage_open: false,
-            inflated_stage_size: [1200.0, 900.0],
-            inflated_stage_camera: OrbitCamera::new(Vec3::ZERO, 250.0),
+            camera: CameraViewportState {
+                camera_3d: OrbitCamera::new(Vec3::ZERO, 200.0),
+                inflated_stage_camera: OrbitCamera::new(Vec3::ZERO, 250.0),
+            },
+            slices: SliceViewportState {
+                slice_cameras: [
+                    OrthoSliceCamera::new(SliceAxis::Axial, Vec3::ZERO, 200.0),
+                    OrthoSliceCamera::new(SliceAxis::Coronal, Vec3::ZERO, 200.0),
+                    OrthoSliceCamera::new(SliceAxis::Sagittal, Vec3::ZERO, 200.0),
+                ],
+                slice_indices: [0; 3],
+                slices_dirty: false,
+                slice_visible: [true; 3],
+                slice_world_offsets: [0.0; 3],
+            },
+            scene_bounds: SceneBoundsViewportState {
+                volume_center: Vec3::ZERO,
+                volume_extent: 200.0,
+            },
+            render: RenderViewportState {
+                render_3d: WorkflowRender3D::default(),
+                boundary_field: None,
+                boundary_field_revision: 0,
+            },
+            windows: WindowViewportState {
+                window_3d_open: false,
+                window_3d_size: [1200.0, 900.0],
+                inflated_stage_open: false,
+                inflated_stage_size: [1200.0, 900.0],
+                window_2d_size: [1400.0, 900.0],
+            },
             view_2d: View2DState::default(),
-            window_2d_size: [1400.0, 900.0],
-            export_dialog: ExportDialogState::default(),
-            pending_export: None,
+            export: ExportViewportState {
+                export_dialog: ExportDialogState::default(),
+                pending_export: None,
+            },
         }
     }
 }
 
 impl ViewportState {
+    pub fn camera_3d(&self) -> &OrbitCamera {
+        &self.camera.camera_3d
+    }
+
+    pub fn camera_3d_mut(&mut self) -> &mut OrbitCamera {
+        &mut self.camera.camera_3d
+    }
+
+    pub fn inflated_stage_camera(&self) -> &OrbitCamera {
+        &self.camera.inflated_stage_camera
+    }
+
+    pub fn inflated_stage_camera_mut(&mut self) -> &mut OrbitCamera {
+        &mut self.camera.inflated_stage_camera
+    }
+
+    pub fn slice_camera(&self, axis_index: usize) -> &OrthoSliceCamera {
+        &self.slices.slice_cameras[axis_index]
+    }
+
+    pub fn slice_camera_mut(&mut self, axis_index: usize) -> &mut OrthoSliceCamera {
+        &mut self.slices.slice_cameras[axis_index]
+    }
+
+    pub fn slice_cameras_mut(&mut self) -> &mut [OrthoSliceCamera; 3] {
+        &mut self.slices.slice_cameras
+    }
+
+    pub fn slice_index(&self, axis_index: usize) -> usize {
+        self.slices.slice_indices[axis_index]
+    }
+
+    pub fn slice_indices(&self) -> [usize; 3] {
+        self.slices.slice_indices
+    }
+
+    pub fn set_slice_index(&mut self, axis_index: usize, index: usize) {
+        self.slices.slice_indices[axis_index] = index;
+    }
+
+    pub fn set_slice_indices(&mut self, indices: [usize; 3]) {
+        self.slices.slice_indices = indices;
+    }
+
+    pub fn slice_visible(&self) -> [bool; 3] {
+        self.slices.slice_visible
+    }
+
+    pub fn slice_visible_ref(&self) -> &[bool; 3] {
+        &self.slices.slice_visible
+    }
+
+    pub fn set_slice_visible(&mut self, axis_index: usize, visible: bool) {
+        self.slices.slice_visible[axis_index] = visible;
+    }
+
+    pub fn set_slice_visible_all(&mut self, visible: [bool; 3]) {
+        self.slices.slice_visible = visible;
+    }
+
+    pub fn slice_world_offsets(&self) -> [f32; 3] {
+        self.slices.slice_world_offsets
+    }
+
+    pub fn set_slice_world_offset(&mut self, axis_index: usize, value: f32) {
+        self.slices.slice_world_offsets[axis_index] = value;
+    }
+
+    pub fn set_slice_world_offsets(&mut self, offsets: [f32; 3]) {
+        self.slices.slice_world_offsets = offsets;
+    }
+
+    pub fn slices_dirty(&self) -> bool {
+        self.slices.slices_dirty
+    }
+
+    pub fn mark_slices_dirty(&mut self) {
+        self.slices.slices_dirty = true;
+    }
+
+    pub fn clear_slices_dirty(&mut self) {
+        self.slices.slices_dirty = false;
+    }
+
+    pub fn volume_center(&self) -> Vec3 {
+        self.scene_bounds.volume_center
+    }
+
+    pub fn volume_extent(&self) -> f32 {
+        self.scene_bounds.volume_extent
+    }
+
+    pub fn set_volume_bounds(&mut self, center: Vec3, extent: f32) {
+        self.scene_bounds.volume_center = center;
+        self.scene_bounds.volume_extent = extent;
+    }
+
+    pub fn render_3d(&self) -> &WorkflowRender3D {
+        &self.render.render_3d
+    }
+
+    pub fn render_3d_mut(&mut self) -> &mut WorkflowRender3D {
+        &mut self.render.render_3d
+    }
+
+    pub fn set_render_3d(&mut self, render_3d: WorkflowRender3D) {
+        self.render.render_3d = render_3d.sanitized();
+    }
+
+    pub fn boundary_field(&self) -> Option<&Arc<BoundaryContactField>> {
+        self.render.boundary_field.as_ref()
+    }
+
+    pub fn boundary_field_revision(&self) -> u64 {
+        self.render.boundary_field_revision
+    }
+
+    pub fn set_boundary_field(&mut self, field: Arc<BoundaryContactField>, revision: u64) {
+        self.render.boundary_field = Some(field);
+        self.render.boundary_field_revision = revision;
+    }
+
+    pub fn clear_boundary_field(&mut self) {
+        self.render.boundary_field = None;
+        self.render.boundary_field_revision = 0;
+    }
+
+    pub fn window_3d_open(&self) -> bool {
+        self.windows.window_3d_open
+    }
+
+    pub fn set_camera_3d_window_open(&mut self, open: bool) {
+        self.windows.window_3d_open = open;
+    }
+
+    pub fn window_3d_size(&self) -> [f32; 2] {
+        self.windows.window_3d_size
+    }
+
+    pub fn set_window_3d_size(&mut self, size: [f32; 2]) {
+        self.windows.window_3d_size = size;
+    }
+
+    pub fn inflated_stage_open(&self) -> bool {
+        self.windows.inflated_stage_open
+    }
+
+    pub fn set_inflated_stage_open(&mut self, open: bool) {
+        self.windows.inflated_stage_open = open;
+    }
+
+    pub fn inflated_stage_size(&self) -> [f32; 2] {
+        self.windows.inflated_stage_size
+    }
+
+    pub fn set_inflated_stage_size(&mut self, size: [f32; 2]) {
+        self.windows.inflated_stage_size = size;
+    }
+
+    pub fn window_2d_size(&self) -> [f32; 2] {
+        self.windows.window_2d_size
+    }
+
+    pub fn set_window_2d_size(&mut self, size: [f32; 2]) {
+        self.windows.window_2d_size = size;
+    }
+
+    pub fn window_2d_open(&self) -> bool {
+        self.view_2d.window_open
+    }
+
+    pub fn set_window_2d_open(&mut self, open: bool) {
+        self.view_2d.window_open = open;
+    }
+
+    pub fn view_2d(&self) -> &View2DState {
+        &self.view_2d
+    }
+
+    pub fn view_2d_mut(&mut self) -> &mut View2DState {
+        &mut self.view_2d
+    }
+
+    pub fn export_dialog(&self) -> &ExportDialogState {
+        &self.export.export_dialog
+    }
+
+    pub fn export_dialog_mut(&mut self) -> &mut ExportDialogState {
+        &mut self.export.export_dialog
+    }
+
+    pub fn pending_export(&self) -> Option<&PendingExportRequest> {
+        self.export.pending_export.as_ref()
+    }
+
+    pub fn pending_export_mut(&mut self) -> Option<&mut PendingExportRequest> {
+        self.export.pending_export.as_mut()
+    }
+
+    pub fn set_pending_export(&mut self, request: PendingExportRequest) {
+        self.export.pending_export = Some(request);
+    }
+
+    pub fn clear_pending_export(&mut self) {
+        self.export.pending_export = None;
+    }
+
     pub fn workflow_camera_3d(&self) -> WorkflowCamera3D {
         WorkflowCamera3D {
             target: self.viewport_target().to_array(),
-            azimuth_deg: self.camera_3d.yaw.to_degrees(),
-            elevation_deg: self.camera_3d.pitch.to_degrees(),
-            distance: self.camera_3d.distance,
+            azimuth_deg: self.camera.camera_3d.yaw.to_degrees(),
+            elevation_deg: self.camera.camera_3d.pitch.to_degrees(),
+            distance: self.camera.camera_3d.distance,
         }
     }
 
     pub fn apply_workflow_camera_3d(&mut self, camera: WorkflowCamera3D) {
-        self.camera_3d.center = Vec3::from_array(camera.target);
-        self.camera_3d.yaw = camera.azimuth_deg.to_radians();
-        self.camera_3d.pitch = camera.elevation_deg.to_radians();
-        self.camera_3d.distance = camera.distance.max(0.1);
+        self.camera.camera_3d.center = Vec3::from_array(camera.target);
+        self.camera.camera_3d.yaw = camera.azimuth_deg.to_radians();
+        self.camera.camera_3d.pitch = camera.elevation_deg.to_radians();
+        self.camera.camera_3d.distance = camera.distance.max(0.1);
     }
 
     pub fn workflow_render_3d(&self) -> WorkflowRender3D {
-        self.render_3d.clone().sanitized()
+        self.render.render_3d.clone().sanitized()
     }
 
     pub fn apply_workflow_render_3d(&mut self, render_3d: WorkflowRender3D) {
-        self.render_3d = render_3d.sanitized();
+        self.render.render_3d = render_3d.sanitized();
     }
 
     pub fn scene_lighting(&self) -> SceneLightingParams {
-        self.render_3d.scene_lighting()
+        self.render.render_3d.scene_lighting()
     }
 
     pub fn workflow_slice_view_3d(&self, nifti_files: &[LoadedNifti]) -> WorkflowSliceView3D {
         WorkflowSliceView3D {
-            visible: self.slice_visible,
+            visible: self.slices.slice_visible,
             positions_ras: [
                 self.slice_world_position(nifti_files, 0),
                 self.slice_world_position(nifti_files, 1),
@@ -401,10 +644,10 @@ impl ViewportState {
         slice_view: WorkflowSliceView3D,
         nifti_files: &[LoadedNifti],
     ) {
-        self.slice_visible = slice_view.visible;
-        self.slice_world_offsets = slice_view.positions_ras;
+        self.slices.slice_visible = slice_view.visible;
+        self.slices.slice_world_offsets = slice_view.positions_ras;
         if let Some(nf) = nifti_files.first() {
-            self.slice_indices = [
+            self.slices.slice_indices = [
                 nf.volume
                     .nearest_slice_index(0, slice_view.positions_ras[0]),
                 nf.volume
@@ -412,12 +655,12 @@ impl ViewportState {
                 nf.volume
                     .nearest_slice_index(2, slice_view.positions_ras[2]),
             ];
-            self.slices_dirty = true;
+            self.slices.slices_dirty = true;
         }
     }
 
     fn viewport_target(&self) -> Vec3 {
-        self.camera_3d.center
+        self.camera.camera_3d.center
     }
 
     fn gifti_axis_bounds(
@@ -467,12 +710,16 @@ impl ViewportState {
                 _ => 0.0,
             }
         } else {
-            self.slice_world_offsets[axis_index]
+            self.slices.slice_world_offsets[axis_index]
         }
     }
 
     pub fn slice_world_position(&self, nifti_files: &[LoadedNifti], axis_index: usize) -> f32 {
-        self.slice_world_position_for_index(nifti_files, axis_index, self.slice_indices[axis_index])
+        self.slice_world_position_for_index(
+            nifti_files,
+            axis_index,
+            self.slices.slice_indices[axis_index],
+        )
     }
 
     pub fn step_slice(
@@ -491,11 +738,11 @@ impl ViewportState {
                 1 => vol.dims[1].saturating_sub(1),
                 _ => vol.dims[0].saturating_sub(1),
             };
-            let new_idx = (self.slice_indices[axis_index] as isize + delta)
+            let new_idx = (self.slices.slice_indices[axis_index] as isize + delta)
                 .clamp(0, max_idx as isize) as usize;
-            if new_idx != self.slice_indices[axis_index] {
-                self.slice_indices[axis_index] = new_idx;
-                self.slices_dirty = true;
+            if new_idx != self.slices.slice_indices[axis_index] {
+                self.slices.slice_indices[axis_index] = new_idx;
+                self.slices.slices_dirty = true;
                 return true;
             }
             return false;
@@ -508,10 +755,10 @@ impl ViewportState {
                 1 => dims[1].saturating_sub(1) as usize,
                 _ => dims[0].saturating_sub(1) as usize,
             };
-            let new_idx = (self.slice_indices[axis_index] as isize + delta)
+            let new_idx = (self.slices.slice_indices[axis_index] as isize + delta)
                 .clamp(0, max_idx as isize) as usize;
-            if new_idx != self.slice_indices[axis_index] {
-                self.slice_indices[axis_index] = new_idx;
+            if new_idx != self.slices.slice_indices[axis_index] {
+                self.slices.slice_indices[axis_index] = new_idx;
                 if let Some(affine) = odx_voxel_to_ras {
                     let v = match axis_index {
                         0 => glam::Vec3::new(0.0, 0.0, new_idx as f32),
@@ -519,29 +766,29 @@ impl ViewportState {
                         _ => glam::Vec3::new(new_idx as f32, 0.0, 0.0),
                     };
                     let world = affine.transform_point3(v);
-                    self.slice_world_offsets[axis_index] = match axis_index {
+                    self.slices.slice_world_offsets[axis_index] = match axis_index {
                         0 => world.z,
                         1 => world.y,
                         _ => world.x,
                     };
                 }
-                self.slices_dirty = true;
+                self.slices.slices_dirty = true;
                 return true;
             }
             return false;
         }
 
-        let Some(field) = self.boundary_field.as_ref() else {
+        let Some(field) = self.render.boundary_field.as_ref() else {
             let Some((min_pos, max_pos)) = self.gifti_axis_bounds(gifti_surfaces, axis_index)
             else {
                 return false;
             };
             let span = (max_pos - min_pos).abs();
             let step = (span / 256.0).max(0.5);
-            let new_pos = (self.slice_world_offsets[axis_index] + delta as f32 * step)
+            let new_pos = (self.slices.slice_world_offsets[axis_index] + delta as f32 * step)
                 .clamp(min_pos, max_pos);
-            if (new_pos - self.slice_world_offsets[axis_index]).abs() > f32::EPSILON {
-                self.slice_world_offsets[axis_index] = new_pos;
+            if (new_pos - self.slices.slice_world_offsets[axis_index]).abs() > f32::EPSILON {
+                self.slices.slice_world_offsets[axis_index] = new_pos;
                 return true;
             }
             return false;
@@ -564,9 +811,10 @@ impl ViewportState {
             _ => field.grid.origin_ras.x + (dims[0] as f32 - 0.5) * voxel,
         };
         let new_pos =
-            (self.slice_world_offsets[axis_index] + delta as f32 * voxel).clamp(min_pos, max_pos);
-        if (new_pos - self.slice_world_offsets[axis_index]).abs() > f32::EPSILON {
-            self.slice_world_offsets[axis_index] = new_pos;
+            (self.slices.slice_world_offsets[axis_index] + delta as f32 * voxel)
+                .clamp(min_pos, max_pos);
+        if (new_pos - self.slices.slice_world_offsets[axis_index]).abs() > f32::EPSILON {
+            self.slices.slice_world_offsets[axis_index] = new_pos;
             return true;
         }
         false

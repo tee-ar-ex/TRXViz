@@ -81,16 +81,17 @@ fn from_core_view_mode(mode: WorkflowView2DMode) -> View2DMode {
 }
 
 pub fn capture_gui_slice_view_state(viewport: &ViewportState) -> WorkflowSliceViewUi {
+    let view_2d = viewport.view_2d();
     WorkflowSliceViewUi {
-        mode: into_core_view_mode(viewport.view_2d.mode),
-        single_view: into_core_slice_kind(viewport.view_2d.single_view),
-        lightbox_axis: into_core_slice_kind(viewport.view_2d.lightbox_axis),
-        lightbox_rows: viewport.view_2d.lightbox_rows,
-        lightbox_cols: viewport.view_2d.lightbox_cols,
-        active_axis: viewport.view_2d.active_axis,
-        ortho_show_row: viewport.view_2d.ortho_show_row,
+        mode: into_core_view_mode(view_2d.mode),
+        single_view: into_core_slice_kind(view_2d.single_view),
+        lightbox_axis: into_core_slice_kind(view_2d.lightbox_axis),
+        lightbox_rows: view_2d.lightbox_rows,
+        lightbox_cols: view_2d.lightbox_cols,
+        active_axis: view_2d.active_axis,
+        ortho_show_row: view_2d.ortho_show_row,
         slice_cameras: std::array::from_fn(|idx| {
-            let camera = &viewport.slice_cameras[idx];
+            let camera = viewport.slice_camera(idx);
             WorkflowOrthoSliceCamera {
                 center: camera.center,
                 half_extent: camera.half_extent,
@@ -101,14 +102,15 @@ pub fn capture_gui_slice_view_state(viewport: &ViewportState) -> WorkflowSliceVi
 }
 
 pub fn apply_gui_slice_view_state(viewport: &mut ViewportState, state: WorkflowSliceViewUi) {
-    viewport.view_2d.mode = from_core_view_mode(state.mode);
-    viewport.view_2d.single_view = from_core_slice_kind(state.single_view);
-    viewport.view_2d.lightbox_axis = from_core_slice_kind(state.lightbox_axis);
-    viewport.view_2d.lightbox_rows = state.lightbox_rows.max(1);
-    viewport.view_2d.lightbox_cols = state.lightbox_cols.max(1);
-    viewport.view_2d.active_axis = state.active_axis.min(2);
-    viewport.view_2d.ortho_show_row = state.ortho_show_row;
-    for (camera, saved) in viewport.slice_cameras.iter_mut().zip(state.slice_cameras) {
+    let view_2d = viewport.view_2d_mut();
+    view_2d.mode = from_core_view_mode(state.mode);
+    view_2d.single_view = from_core_slice_kind(state.single_view);
+    view_2d.lightbox_axis = from_core_slice_kind(state.lightbox_axis);
+    view_2d.lightbox_rows = state.lightbox_rows.max(1);
+    view_2d.lightbox_cols = state.lightbox_cols.max(1);
+    view_2d.active_axis = state.active_axis.min(2);
+    view_2d.ortho_show_row = state.ortho_show_row;
+    for (camera, saved) in viewport.slice_cameras_mut().iter_mut().zip(state.slice_cameras) {
         camera.center = saved.center;
         camera.half_extent = saved.half_extent.max(0.001);
         camera.rotation = saved.rotation;

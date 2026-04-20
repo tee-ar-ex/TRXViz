@@ -11,8 +11,8 @@ impl crate::app::TrxVizApp {
         _axis_index: usize,
         view_proj: glam::Mat4,
     ) {
-        let center = self.viewport.volume_center;
-        let axis_len = (self.viewport.volume_extent * 0.2).max(10.0);
+        let center = self.viewport.volume_center();
+        let axis_len = (self.viewport.volume_extent() * 0.2).max(10.0);
 
         // Define the 6 anatomical directions as offsets from center.
         let directions: &[(Vec3, &str)] = &[
@@ -498,7 +498,7 @@ impl crate::app::TrxVizApp {
             let Some(slice_index) = parcellation.asset.data.nearest_slice_index(
                 axis_index,
                 slice_pos,
-                self.viewport.volume_center,
+                self.viewport.volume_center(),
             ) else {
                 continue;
             };
