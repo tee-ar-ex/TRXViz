@@ -159,6 +159,8 @@ jobs:
       - name: Build in Debian 11 container
         run: |
           docker run --rm \
+            -e HOST_UID="$(id -u)" \
+            -e HOST_GID="$(id -g)" \
             -v "$GITHUB_WORKSPACE/trxviz:/work" \
             -w /work \
             debian:11 \
@@ -190,6 +192,7 @@ jobs:
               . "$HOME/.cargo/env"
               export PATH="$HOME/.local/bin:$PATH"
               cargo build -p trxviz -p trxviz-cli --release
+              chown -R "$HOST_UID:$HOST_GID" /work/target
             '
 
       - name: Package Linux legacy .tar.gz
