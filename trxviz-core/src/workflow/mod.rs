@@ -3,6 +3,9 @@
 pub use crate::error::{WorkflowError, WorkflowResult};
 
 mod evaluate;
+mod eval_inputs;
+mod eval_streamlines;
+mod eval_surface;
 mod fingerprint;
 mod graph;
 mod jobs;
@@ -14,6 +17,8 @@ mod seed;
 mod seed_odx;
 mod simple_workflow;
 mod types;
+#[cfg(test)]
+mod evaluate_tests;
 
 pub use evaluate::{evaluate_scene_plan, evaluate_scene_plan_with_mode, save_streamline_plan};
 pub use fingerprint::{
