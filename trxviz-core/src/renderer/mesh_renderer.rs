@@ -6,6 +6,7 @@ use wgpu::util::DeviceExt;
 use crate::data::bundle_mesh::{BundleMesh, BundleMeshVertex};
 use crate::data::gifti_data::GiftiSurfaceData;
 use crate::lighting::{SceneLightingParams, WorkflowRender3D};
+use crate::renderer::viewport::ViewportUniformSet;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -106,8 +107,7 @@ struct GpuSurface {
     transparent_index_buffers: [wgpu::Buffer; 6],
     num_indices: u32,
     centroid: [f32; 3],
-    uniform_buffers: [wgpu::Buffer; 4],
-    bind_groups: [wgpu::BindGroup; 4],
+    viewports: ViewportUniformSet<MeshUniforms>,
 }
 
 impl MeshResources {
@@ -380,20 +380,13 @@ impl MeshResources {
             post_params: [1.0, 1.0, 0.12, 0.0],
         };
 
-        let uniform_buffers: [wgpu::Buffer; 4] = std::array::from_fn(|i| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("mesh_uniforms_{i}")),
-                contents: bytemuck::bytes_of(&default_uniforms),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            })
-        });
-        let bind_groups: [wgpu::BindGroup; 4] = std::array::from_fn(|i| {
+        let viewports = ViewportUniformSet::new(device, "mesh_uniforms", &default_uniforms, |i, buffer| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(&format!("mesh_bind_group_{i}")),
                 layout: &bind_group_layout,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: uniform_buffers[i].as_entire_binding(),
+                    resource: buffer.as_entire_binding(),
                 }],
             })
         });
@@ -408,8 +401,7 @@ impl MeshResources {
                 transparent_index_buffers,
                 num_indices: surface.indices.len() as u32,
                 centroid: compute_centroid(&surface.vertices),
-                uniform_buffers,
-                bind_groups,
+                viewports,
             },
         );
     }
@@ -462,11 +454,7 @@ impl MeshResources {
                     0.0,
                 ],
             };
-            queue.write_buffer(
-                &surface.uniform_buffers[viewport],
-                0,
-                bytemuck::bytes_of(&uniforms),
-            );
+            surface.viewports.update(queue, viewport, &uniforms);
         }
     }
 
@@ -503,7 +491,7 @@ impl MeshResources {
                 if style.color[3] <= 0.999 {
                     continue;
                 }
-                render_pass.set_bind_group(0, &surface.bind_groups[*viewport], &[]);
+                render_pass.set_bind_group(0, surface.viewports.bind_group(*viewport), &[]);
                 render_pass.set_vertex_buffer(0, surface.vertex_buffer.slice(..));
                 render_pass.set_vertex_buffer(1, surface.scalar_buffer.slice(..));
                 render_pass.set_vertex_buffer(2, surface.color_buffer.slice(..));
@@ -591,7 +579,7 @@ impl MeshResources {
                     } else if !using_bundle_pipeline {
                         render_pass.set_pipeline(&self.transparent_pipeline);
                     }
-                    render_pass.set_bind_group(0, &surface.bind_groups[viewport], &[]);
+                    render_pass.set_bind_group(0, surface.viewports.bind_group(viewport), &[]);
                     render_pass.set_vertex_buffer(0, surface.vertex_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, surface.scalar_buffer.slice(..));
                     render_pass.set_vertex_buffer(2, surface.color_buffer.slice(..));

@@ -5,6 +5,7 @@ use wgpu::util::DeviceExt;
 use crate::data::odx_data::{OdfChunkWorklist, OdxGlyphSourceKind};
 use crate::data::orientation_field::{BoundaryContactField, BoundaryGlyphColorMode};
 use crate::lighting::{SceneLightingParams, WorkflowRender3D};
+use crate::renderer::viewport::ViewportUniformSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum OdxGpuGlyphMode {
@@ -37,8 +38,7 @@ pub struct GlyphResources {
     amplitude_buffer: Option<wgpu::Buffer>,
     opacity_buffer: Option<wgpu::Buffer>,
     size_buffer: Option<wgpu::Buffer>,
-    uniform_buffers: [wgpu::Buffer; 4],
-    bind_groups: [wgpu::BindGroup; 4],
+    viewports: ViewportUniformSet<GlyphUniforms>,
     buffer_capacities: GlyphBufferCapacities,
     odx_static_geometry_key: Option<(usize, usize, usize)>,
     odx_mode: Option<OdxGpuGlyphMode>,
@@ -358,22 +358,14 @@ impl GlyphResources {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        let uniform_buffers: [wgpu::Buffer; 4] = std::array::from_fn(|i| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("glyph_uniform_{i}")),
-                contents: bytemuck::bytes_of(&uniforms),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            })
-        });
-
-        let bind_groups: [wgpu::BindGroup; 4] = std::array::from_fn(|i| {
+        let viewports = ViewportUniformSet::new(device, "glyph_uniform", &uniforms, |i, buffer| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(&format!("glyph_bg_{i}")),
                 layout: &bgl,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: uniform_buffers[i].as_entire_binding(),
+                        resource: buffer.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -476,8 +468,7 @@ impl GlyphResources {
             amplitude_buffer: Some(amplitude_buffer),
             opacity_buffer: Some(opacity_buffer),
             size_buffer: Some(size_buffer),
-            uniform_buffers,
-            bind_groups,
+            viewports,
             buffer_capacities: GlyphBufferCapacities {
                 instance_bytes: 0,
                 amplitude_bytes: 16,
@@ -1277,56 +1268,37 @@ impl GlyphResources {
             opacity_gate: [0.0, 1.0, 1.0, 1.0],
             size_gate: [0.0, 1.0, 1.0, 1.0],
         };
-        queue.write_buffer(
-            &self.uniform_buffers[viewport],
-            0,
-            bytemuck::bytes_of(&uniforms),
-        );
+        self.viewports.update(queue, viewport, &uniforms);
     }
 
     pub fn update_amp_norm(&self, queue: &wgpu::Queue, viewport: usize, amp_norm: f32) {
         const OFFSET: u64 = 176 + 12;
-        queue.write_buffer(
-            &self.uniform_buffers[viewport],
-            OFFSET,
-            bytemuck::bytes_of(&amp_norm),
-        );
+        self.viewports
+            .write(queue, viewport, OFFSET, bytemuck::bytes_of(&amp_norm));
     }
 
     pub fn update_color_mode(&self, queue: &wgpu::Queue, viewport: usize, mode: u32) {
         const OFFSET: u64 = 92;
-        queue.write_buffer(
-            &self.uniform_buffers[viewport],
-            OFFSET,
-            bytemuck::bytes_of(&mode),
-        );
+        self.viewports
+            .write(queue, viewport, OFFSET, bytemuck::bytes_of(&mode));
     }
 
     pub fn update_scale_mul(&self, queue: &wgpu::Queue, viewport: usize, scale_mul: f32) {
         const OFFSET: u64 = 140;
-        queue.write_buffer(
-            &self.uniform_buffers[viewport],
-            OFFSET,
-            bytemuck::bytes_of(&scale_mul),
-        );
+        self.viewports
+            .write(queue, viewport, OFFSET, bytemuck::bytes_of(&scale_mul));
     }
 
     pub fn update_opacity_gate(&self, queue: &wgpu::Queue, viewport: usize, params: [f32; 4]) {
         const OFFSET: u64 = 192;
-        queue.write_buffer(
-            &self.uniform_buffers[viewport],
-            OFFSET,
-            bytemuck::bytes_of(&params),
-        );
+        self.viewports
+            .write(queue, viewport, OFFSET, bytemuck::bytes_of(&params));
     }
 
     pub fn update_size_gate(&self, queue: &wgpu::Queue, viewport: usize, params: [f32; 4]) {
         const OFFSET: u64 = 208;
-        queue.write_buffer(
-            &self.uniform_buffers[viewport],
-            OFFSET,
-            bytemuck::bytes_of(&params),
-        );
+        self.viewports
+            .write(queue, viewport, OFFSET, bytemuck::bytes_of(&params));
     }
 
     pub fn has_geometry(&self) -> bool {
@@ -1349,7 +1321,7 @@ impl GlyphResources {
         } else {
             &self.pipeline
         });
-        render_pass.set_bind_group(0, &self.bind_groups[viewport], &[]);
+        render_pass.set_bind_group(0, self.viewports.bind_group(viewport), &[]);
         render_pass.set_vertex_buffer(0, vb.slice(..));
         render_pass.set_vertex_buffer(1, inst.slice(..));
         render_pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
@@ -1360,14 +1332,15 @@ impl GlyphResources {
         let amplitude = self.amplitude_buffer.as_ref().expect("amplitude buffer");
         let opacity = self.opacity_buffer.as_ref().expect("opacity gate buffer");
         let size = self.size_buffer.as_ref().expect("size gate buffer");
-        for i in 0..4 {
-            self.bind_groups[i] = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let layout = self.pipeline.get_bind_group_layout(0);
+        self.viewports.rebuild_bind_groups(|_, buffer| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(label),
-                layout: &self.pipeline.get_bind_group_layout(0),
+                layout: &layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: self.uniform_buffers[i].as_entire_binding(),
+                        resource: buffer.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -1382,8 +1355,8 @@ impl GlyphResources {
                         resource: size.as_entire_binding(),
                     },
                 ],
-            });
-        }
+            })
+        });
     }
 
     fn rebuild_odx_sh_bind_group(&mut self, device: &wgpu::Device) {

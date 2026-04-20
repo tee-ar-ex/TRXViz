@@ -10,6 +10,7 @@ use super::{
 use crate::data::trx_data::RenderStyle;
 use crate::lighting::WorkflowRender3D;
 use crate::renderer::camera::OrbitCamera;
+use crate::renderer::viewport::ViewportIndex;
 
 #[cfg(feature = "png-export")]
 pub(super) fn render_scene3d_to_png(
@@ -24,6 +25,7 @@ pub(super) fn render_scene3d_to_png(
     height: u32,
     output_path: &Path,
 ) -> anyhow::Result<()> {
+    let viewport_3d: usize = ViewportIndex::Perspective3D.into();
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("trxviz_headless_color"),
         size: wgpu::Extent3d {
@@ -83,7 +85,7 @@ pub(super) fn render_scene3d_to_png(
         {
             slice.update_uniforms(
                 queue,
-                0,
+                viewport_3d,
                 view_proj,
                 volume.window_center,
                 volume.window_width,
@@ -109,7 +111,7 @@ pub(super) fn render_scene3d_to_png(
             };
             resource.update_uniforms(
                 queue,
-                0,
+                viewport_3d,
                 view_proj,
                 camera_pos,
                 streamline.render_style as u32,
@@ -154,7 +156,7 @@ pub(super) fn render_scene3d_to_png(
     if render_data.glyph_visible || render_data.odx_visible {
         resources.glyphs.update_uniforms(
             queue,
-            0,
+            viewport_3d,
             view_proj,
             camera_pos,
             glam::Vec3::Z,
@@ -173,7 +175,7 @@ pub(super) fn render_scene3d_to_png(
     if render_data.odx_visible && render_data.odx_fixel_3d_visible {
         resources.fixels_3d.update_uniforms(
             queue,
-            0,
+            viewport_3d,
             view_proj,
             camera_pos,
             glam::Vec3::Z,
@@ -189,7 +191,7 @@ pub(super) fn render_scene3d_to_png(
         );
         resources.fixels_3d.update_colormap(
             queue,
-            0,
+            viewport_3d,
             render_data.fixel_3d_colormap_code,
             (
                 render_data.fixel_3d_scalar_range[0],
@@ -243,7 +245,7 @@ pub(super) fn render_scene3d_to_png(
                 .find(|(id, _)| *id == volume.file_id)
             {
                 render_pass.set_pipeline(&slice.pipeline);
-                render_pass.set_bind_group(0, slice.bind_group(0), &[]);
+                render_pass.set_bind_group(0, slice.bind_group(viewport_3d), &[]);
                 render_pass
                     .set_index_buffer(slice.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 for i in 0..3 {
@@ -267,7 +269,7 @@ pub(super) fn render_scene3d_to_png(
                     .iter()
                     .find(|(id, _)| *id == streamline.file_id)
                 {
-                    render_pass.set_bind_group(0, resource.bind_group(0), &[]);
+                    render_pass.set_bind_group(0, resource.bind_group(viewport_3d), &[]);
                     if streamline.render_style == RenderStyle::Tubes {
                         if let (Some(vertices), Some(indices)) =
                             (&resource.tube_vertex_buffer, &resource.tube_index_buffer)
@@ -324,10 +326,10 @@ pub(super) fn render_scene3d_to_png(
             );
         }
         if render_data.glyph_visible || render_data.odx_visible {
-            resources.glyphs.paint(render_pass, 0, false);
+            resources.glyphs.paint(render_pass, viewport_3d, false);
         }
         if render_data.odx_visible && render_data.odx_fixel_3d_visible {
-            resources.fixels_3d.paint(render_pass, 0, false);
+            resources.fixels_3d.paint(render_pass, viewport_3d, false);
         }
     }
 

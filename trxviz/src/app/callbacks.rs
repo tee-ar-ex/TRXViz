@@ -7,6 +7,7 @@ use trxviz_core::renderer::glyph_renderer::GlyphResources;
 use trxviz_core::renderer::mesh_renderer::{MeshDrawStyle, MeshResources};
 use trxviz_core::renderer::slice_renderer::AllSliceResources;
 use trxviz_core::renderer::streamline_renderer::AllStreamlineResources;
+use trxviz_core::renderer::viewport::ViewportIndex;
 
 fn glyph_colormap_code(cm: trxviz_core::workflow::GlyphColormap) -> u32 {
     use trxviz_core::workflow::GlyphColormap as G;
@@ -195,6 +196,7 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
         }
         if self.show_boundary_glyphs || self.show_odx_glyphs {
             if let Some(gr) = callback_resources.get_mut::<GlyphResources>() {
+                let viewport_3d: usize = ViewportIndex::Perspective3D.into();
                 let color_mode = if self.show_odx_glyphs {
                     BoundaryGlyphColorMode::DirectionRgb
                 } else {
@@ -212,7 +214,7 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                 };
                 gr.update_uniforms(
                     queue,
-                    0,
+                    viewport_3d,
                     self.view_proj,
                     self.camera_pos,
                     glam::Vec3::Z,    // slab_normal (irrelevant — slab disabled)
@@ -232,20 +234,25 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                 } else {
                     0.0
                 };
-                gr.update_scale_mul(queue, 0, scale_mul);
+                gr.update_scale_mul(queue, viewport_3d, scale_mul);
                 if self.show_odx_glyphs {
-                    gr.update_color_mode(queue, 0, glyph_colormap_code(self.odx_glyph_colormap));
-                    gr.update_amp_norm(queue, 0, self.odx_amp_norm);
-                    gr.update_opacity_gate(queue, 0, self.odx_opacity_gate);
-                    gr.update_size_gate(queue, 0, self.odx_size_gate);
+                    gr.update_color_mode(
+                        queue,
+                        viewport_3d,
+                        glyph_colormap_code(self.odx_glyph_colormap),
+                    );
+                    gr.update_amp_norm(queue, viewport_3d, self.odx_amp_norm);
+                    gr.update_opacity_gate(queue, viewport_3d, self.odx_opacity_gate);
+                    gr.update_size_gate(queue, viewport_3d, self.odx_size_gate);
                 }
             }
         }
         if self.show_odx_fixels && self.odx_fixel_visible {
             if let Some(fr) = callback_resources.get_mut::<OdxFixelResources>() {
+                let viewport_3d: usize = ViewportIndex::Perspective3D.into();
                 fr.resources_3d.update_uniforms(
                     queue,
-                    0,
+                    viewport_3d,
                     self.view_proj,
                     self.camera_pos,
                     self.odx_fixel_3d_slab_normal,
@@ -260,10 +267,10 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                     self.fog_far,
                 );
                 fr.resources_3d
-                    .update_length_mul(queue, 0, self.odx_fixel_length_scale);
+                    .update_length_mul(queue, viewport_3d, self.odx_fixel_length_scale);
                 fr.resources_3d.update_colormap(
                     queue,
-                    0,
+                    viewport_3d,
                     self.odx_fixel_colormap_code,
                     (
                         self.odx_fixel_scalar_range[0],
@@ -299,10 +306,11 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
         }
 
         if let Some(all) = callback_resources.get::<AllSliceResources>() {
+            let viewport_3d: usize = ViewportIndex::Perspective3D.into();
             for vd in &self.volume_draws {
                 if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.file_id) {
                     render_pass.set_pipeline(&sr.pipeline);
-                    render_pass.set_bind_group(0, sr.bind_group(0), &[]);
+                    render_pass.set_bind_group(0, sr.bind_group(viewport_3d), &[]);
                     render_pass.set_index_buffer(
                         sr.quad_index_buffer.slice(..),
                         wgpu::IndexFormat::Uint16,
@@ -320,12 +328,13 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
 
         if self.show_streamlines && !self.streamline_draws.is_empty() {
             if let Some(all) = callback_resources.get::<AllStreamlineResources>() {
+                let viewport_3d: usize = ViewportIndex::Perspective3D.into();
                 for sd in &self.streamline_draws {
                     if !sd.visible {
                         continue;
                     }
                     if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == sd.file_id) {
-                        render_pass.set_bind_group(0, sr.bind_group(0), &[]);
+                        render_pass.set_bind_group(0, sr.bind_group(viewport_3d), &[]);
                         if sd.render_style == RenderStyle::Tubes {
                             if sr.num_tube_indices == 0 {
                                 continue;
@@ -388,12 +397,13 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
         }
         if self.show_boundary_glyphs || self.show_odx_glyphs {
             if let Some(gr) = callback_resources.get::<GlyphResources>() {
-                gr.paint(render_pass, 0, false);
+                gr.paint(render_pass, ViewportIndex::Perspective3D.into(), false);
             }
         }
         if self.show_odx_fixels && self.odx_fixel_visible {
             if let Some(fr) = callback_resources.get::<OdxFixelResources>() {
-                fr.resources_3d.paint(render_pass, 0, false);
+                fr.resources_3d
+                    .paint(render_pass, ViewportIndex::Perspective3D.into(), false);
             }
         }
     }
