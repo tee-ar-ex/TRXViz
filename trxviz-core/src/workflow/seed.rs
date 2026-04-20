@@ -11,7 +11,7 @@ use super::*;
 /// Allocate a fresh UUID and insert a new node at the given canvas position.
 pub fn make_node(
     document: &mut WorkflowDocument,
-    kind: WorkflowNodeKind,
+    op: WorkflowNodeKind,
     pos: GraphPos,
 ) -> WorkflowNodeUuid {
     let uuid = WorkflowNodeUuid(document.next_node_uuid);
@@ -19,8 +19,8 @@ pub fn make_node(
     document.graph.insert_node(
         WorkflowNode {
             uuid,
-            label: kind.title().to_string(),
-            kind,
+            label: op.title().to_string(),
+            op,
         },
         pos,
     );

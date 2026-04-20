@@ -54,7 +54,7 @@ pub fn classify_workflow_editability(document: &WorkflowDocument) -> WorkflowEdi
     let mut kinds = HashMap::<WorkflowNodeUuid, &WorkflowNodeKind>::new();
 
     for (uuid, node) in document.graph.nodes() {
-        kinds.insert(uuid, &node.kind);
+        kinds.insert(uuid, &node.op);
     }
 
     for wire in document.graph.wires() {
@@ -401,7 +401,7 @@ mod tests {
             .nodes()
             .find_map(|(id, node)| {
                 matches!(
-                    node.kind,
+                    node.op,
                     WorkflowNodeKind::VolumeSource { source_id } if source_id == 3
                 )
                 .then_some(id)

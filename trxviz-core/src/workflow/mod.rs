@@ -72,5 +72,6 @@ pub use ops::{
     SurfaceDisplayOp, SurfaceOverlayStackOp, SurfaceProjectionDensityOp,
     SurfaceProjectionMeanDpsOp, SurfaceSourceOp, UniformColorOp, VolumeDisplayOp,
     VolumeScalarsDisplayOp, VolumeSourceOp,
+    WorkflowNodeKind,
 };
 pub(crate) use types::{EvaluatedValue, WorkflowValue};

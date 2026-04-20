@@ -11,7 +11,7 @@ pub fn set_default_odx_fixel_3d_visibility(
     let source_nodes: Vec<_> = document
         .graph
         .nodes()
-        .filter_map(|(uuid, node)| match node.kind {
+        .filter_map(|(uuid, node)| match node.op {
             WorkflowNodeKind::OdxSource { source_id } if source_id == asset_id => Some(uuid),
             _ => None,
         })
@@ -32,7 +32,7 @@ pub fn set_default_odx_fixel_3d_visibility(
         let WorkflowNodeKind::Fixel3DDisplay {
             visible: node_visible,
             ..
-        } = &mut node.kind
+        } = &mut node.op
         else {
             continue;
         };
@@ -88,7 +88,7 @@ pub fn set_default_odx_volume_dpv(
     let source_nodes: Vec<_> = document
         .graph
         .nodes()
-        .filter_map(|(uuid, node)| match node.kind {
+        .filter_map(|(uuid, node)| match node.op {
             WorkflowNodeKind::OdxSource { source_id } if source_id == asset_id => Some(uuid),
             _ => None,
         })
@@ -106,7 +106,7 @@ pub fn set_default_odx_volume_dpv(
         let Some(node) = document.graph.get_mut(uuid) else {
             continue;
         };
-        let WorkflowNodeKind::OdxVolumeSelect { dpv_name } = &mut node.kind else {
+        let WorkflowNodeKind::OdxVolumeSelect { dpv_name } = &mut node.op else {
             continue;
         };
         if dpv_name.is_empty() {
@@ -130,7 +130,7 @@ pub fn set_default_odx_fixel_dpf(
     let Some(source_uuid) = document
         .graph
         .nodes()
-        .find_map(|(uuid, node)| match node.kind {
+        .find_map(|(uuid, node)| match node.op {
             WorkflowNodeKind::OdxSource { source_id } if source_id == asset_id => Some(uuid),
             _ => None,
         })
@@ -155,7 +155,7 @@ fn ensure_default_odx_fixel_scalar_branch(
         if wire.from.node != source_uuid || wire.from.output != 0 || wire.to.input != 0 {
             return None;
         }
-        match document.graph.get(wire.to.node).map(|node| &node.kind) {
+        match document.graph.get(wire.to.node).map(|node| &node.op) {
             Some(WorkflowNodeKind::Fixel3DDisplay { .. }) if is_3d => Some(wire.to.node),
             Some(WorkflowNodeKind::Fixel2DDisplay { .. }) if !is_3d => Some(wire.to.node),
             _ => None,
@@ -322,7 +322,7 @@ mod tests {
         let selector_names: Vec<_> = document
             .graph
             .nodes()
-            .filter_map(|(_, node)| match &node.kind {
+            .filter_map(|(_, node)| match &node.op {
                 WorkflowNodeKind::OdxFixelScalarSelect { dpf_name } => Some(dpf_name.clone()),
                 _ => None,
             })
@@ -336,7 +336,7 @@ mod tests {
                 .graph
                 .nodes()
                 .filter(|(_, node)| matches!(
-                    node.kind,
+                    node.op,
                     WorkflowNodeKind::ColorByFixelScalars { .. }
                 ))
                 .count(),
@@ -362,7 +362,7 @@ mod tests {
                 .graph
                 .nodes()
                 .filter(|(_, node)| matches!(
-                    node.kind,
+                    node.op,
                     WorkflowNodeKind::OdxFixelScalarSelect { .. }
                 ))
                 .count(),
@@ -453,7 +453,7 @@ mod tests {
         let source = document
             .graph
             .nodes()
-            .find_map(|(uuid, node)| match node.kind {
+            .find_map(|(uuid, node)| match node.op {
                 WorkflowNodeKind::OdxSource { source_id } if source_id == asset_id => Some(uuid),
                 _ => None,
             })?;
@@ -463,7 +463,7 @@ mod tests {
             .wires()
             .find(|wire| wire.from.node == source)
             .and_then(|wire| document.graph.get(wire.to.node))
-            .and_then(|node| match &node.kind {
+            .and_then(|node| match &node.op {
                 WorkflowNodeKind::Fixel3DDisplay { visible, .. } => Some(*visible),
                 _ => None,
             })
@@ -476,7 +476,7 @@ mod tests {
         let source = document
             .graph
             .nodes()
-            .find_map(|(uuid, node)| match node.kind {
+            .find_map(|(uuid, node)| match node.op {
                 WorkflowNodeKind::OdxSource { source_id } if source_id == asset_id => Some(uuid),
                 _ => None,
             })?;
@@ -486,7 +486,7 @@ mod tests {
             .wires()
             .find(|wire| wire.from.node == source && wire.from.output == 2)
             .and_then(|wire| document.graph.get(wire.to.node))
-            .and_then(|node| match &node.kind {
+            .and_then(|node| match &node.op {
                 WorkflowNodeKind::OdxVolumeSelect { dpv_name } => Some(dpv_name.clone()),
                 _ => None,
             })

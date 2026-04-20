@@ -402,14 +402,14 @@ impl super::super::TrxVizApp {
         };
 
         // Snapshot any ODX names for the selected node before taking a mutable graph borrow.
-        let odx_selector_names = match &original_node.kind {
+        let odx_selector_names = match &original_node.op {
             workflow::WorkflowNodeKind::OdxFixelScalarSelect { .. }
             | workflow::WorkflowNodeKind::OdxVolumeSelect { .. } => {
                 self.resolve_odx_selector_names(node_uuid)
             }
             _ => None,
         };
-        let sh_detail_limit = match &original_node.kind {
+        let sh_detail_limit = match &original_node.op {
             workflow::WorkflowNodeKind::OdfGlyphRenderer { .. } => {
                 self.max_safe_sh_detail_for_node(node_uuid)
             }
@@ -437,10 +437,10 @@ impl super::super::TrxVizApp {
                 .expect("node must still exist while inspector is open");
             ui.text_edit_singleline(&mut node.label);
             ui.separator();
-            let edit_result = workflow::edit_node_kind(
+            let edit_result = workflow::edit_node_op(
                 ui,
                 node_uuid,
-                &mut node.kind,
+                &mut node.op,
                 workflow::NodeEditorContext {
                     available_groups: &available_groups,
                     odx_selector_names: odx_selector_names.as_ref(),
@@ -494,7 +494,7 @@ impl super::super::TrxVizApp {
             {
                 info.value = node_copy.clone();
             }
-            if workflow::is_render_only_change(&original_node.kind, &node_copy.kind) {
+            if workflow::is_render_only_change(&original_node.op, &node_copy.op) {
                 self.mark_render_only_edit();
             } else {
                 self.mark_workflow_semantic_edit(ui.ctx().input(|input| input.time));
@@ -515,7 +515,7 @@ impl super::super::TrxVizApp {
                 .document
                 .graph
                 .get(wire.from.node)
-                .map(|node| &node.kind)
+                .map(|node| &node.op)
             {
                 Some(workflow::WorkflowNodeKind::OdxSource { source_id }) => Some(*source_id),
                 _ => None,

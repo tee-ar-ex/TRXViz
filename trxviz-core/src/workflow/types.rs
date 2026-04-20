@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::error::WorkflowResult;
 
 use super::graph::{GraphRect, WorkflowGraph};
+use super::ops::WorkflowNodeKind;
 use crate::data::bundle_mesh::BundleMesh;
 use crate::data::cifti::{CiftiIntent, CiftiStructure, SurfaceScalars, VolumeScalars};
 use crate::data::gifti_data::GiftiSurfaceData;
@@ -27,7 +28,7 @@ pub struct WorkflowNodeUuid(pub u64);
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WorkflowNode {
     pub uuid: WorkflowNodeUuid,
-    pub kind: WorkflowNodeKind,
+    pub op: WorkflowNodeKind,
     pub label: String,
 }
 
@@ -160,231 +161,6 @@ impl From<&str> for DpsFieldName {
     fn from(value: &str) -> Self {
         Self(value.to_string())
     }
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum WorkflowNodeKind {
-    StreamlineSource {
-        source_id: FileId,
-    },
-    VolumeSource {
-        source_id: FileId,
-    },
-    CiftiSource {
-        source_id: FileId,
-    },
-    SurfaceSource {
-        source_id: FileId,
-    },
-    CiftiStructure {
-        structure: CiftiStructure,
-        map_index: usize,
-    },
-    ParcellationSource {
-        source_id: FileId,
-    },
-    LimitStreamlines {
-        limit: usize,
-        randomize: bool,
-        seed: u64,
-    },
-    GroupSelect {
-        groups: GroupFilter,
-    },
-    RandomSubset {
-        limit: usize,
-        seed: u64,
-    },
-    SphereQuery {
-        center: [f32; 3],
-        radius_mm: Millimeters,
-    },
-    SurfaceDepthQuery {
-        depth_mm: Millimeters,
-    },
-    RemoveDuplicates {
-        params: DuplicateRemovalParams,
-    },
-    Merge,
-    AddGroupsFromParcellation,
-    ParcelSelect {
-        labels: ParcelIdSet,
-    },
-    ParcelROI,
-    ParcelROA,
-    ParcelEnd {
-        endpoint_count: usize,
-    },
-    ParcelLimiting,
-    ParcelTerminative,
-    ParcelSurfaceBuild,
-    ColorByDirection,
-    ColorByGroup,
-    ColorByDPV {
-        field: DpvFieldName,
-    },
-    ColorByDPS {
-        field: DpsFieldName,
-    },
-    UniformColor {
-        color: [f32; 4],
-    },
-    SurfaceProjectionDensity {
-        depth_mm: Millimeters,
-    },
-    SurfaceProjectionMeanDps {
-        depth_mm: Millimeters,
-        field: DpsFieldName,
-    },
-    SurfaceOverlayStack {
-        #[serde(default = "default_surface_overlay_layers")]
-        layers: Vec<SurfaceOverlayLayerConfig>,
-    },
-    BundleSurfaceBuild {
-        #[serde(default)]
-        per_group: bool,
-        build_mode: BundleSurfaceBuildMode,
-        voxel_size_mm: Millimeters,
-        threshold: f32,
-        smooth_sigma: f32,
-        #[serde(default = "default_bundle_surface_min_component_volume_mm3")]
-        min_component_volume_mm3: Millimeters,
-        tube_radius_mm: Millimeters,
-        tube_sides: u32,
-        opacity: f32,
-    },
-    BoundaryFieldBuild {
-        #[serde(default = "default_boundary_field_voxel_size_mm")]
-        voxel_size_mm: Millimeters,
-        #[serde(default = "default_boundary_field_sphere_lod")]
-        sphere_lod: u32,
-        #[serde(default = "default_boundary_field_normalization")]
-        normalization: BoundaryGlyphNormalization,
-    },
-    StreamlineDisplay {
-        #[serde(default = "default_enabled")]
-        enabled: bool,
-        render_style: RenderStyle,
-        tube_radius_mm: Millimeters,
-        tube_sides: u32,
-        slab_half_width_mm: Millimeters,
-    },
-    VolumeDisplay {
-        colormap: VolumeColormap,
-        opacity: f32,
-        window_center: f32,
-        window_width: f32,
-    },
-    SurfaceDisplay {
-        color: [f32; 3],
-        opacity: f32,
-        outline_color: [f32; 3],
-        outline_thickness: f32,
-        show_projection_map: bool,
-        map_opacity: f32,
-        map_threshold: f32,
-        gloss: f32,
-        projection_colormap: SurfaceColormap,
-        range_min: f32,
-        range_max: f32,
-        space: SurfaceDisplaySpace,
-    },
-    VolumeScalarsDisplay {
-        colormap: VolumeColormap,
-        opacity: f32,
-    },
-    BundleSurfaceDisplay {
-        #[serde(default)]
-        color_mode: BundleSurfaceColorMode,
-        #[serde(default = "default_bundle_surface_outline_thickness")]
-        outline_thickness: f32,
-    },
-    BoundaryGlyphDisplay {
-        #[serde(default = "default_enabled")]
-        enabled: bool,
-        #[serde(default = "default_boundary_glyph_scale")]
-        scale: f32,
-        #[serde(default = "default_boundary_glyph_density_3d_step")]
-        density_3d_step: usize,
-        #[serde(default = "default_boundary_glyph_slice_density_step")]
-        slice_density_step: usize,
-        #[serde(default = "default_boundary_glyph_color_mode")]
-        color_mode: BoundaryGlyphColorMode,
-        #[serde(default = "default_boundary_glyph_min_contacts")]
-        min_contacts: u32,
-    },
-    ParcellationDisplay {
-        labels: ParcelIdSet,
-        opacity: f32,
-    },
-    SaveStreamlines {
-        output_path: String,
-    },
-    OdxSource {
-        source_id: FileId,
-    },
-    OdxFixelScalarSelect {
-        #[serde(default)]
-        dpf_name: String,
-    },
-    OdxVolumeSelect {
-        #[serde(default)]
-        dpv_name: String,
-    },
-    ColorByFixelScalars {
-        #[serde(default = "default_fixel_colormap")]
-        colormap: SurfaceColormap,
-        #[serde(default)]
-        range: Option<(f32, f32)>,
-        #[serde(default)]
-        length_scale_by_scalar: bool,
-    },
-    Fixel3DDisplay {
-        #[serde(default = "default_fixel_line_width")]
-        line_width: f32,
-        #[serde(default = "default_fixel_length_scale")]
-        length_scale: f32,
-        #[serde(default = "default_full_opacity")]
-        opacity: f32,
-        #[serde(default)]
-        offset_from_slice: f32,
-        #[serde(default = "default_enabled")]
-        visible: bool,
-    },
-    Fixel2DDisplay {
-        #[serde(default = "default_fixel_line_width")]
-        line_width: f32,
-        #[serde(default = "default_full_opacity")]
-        opacity: f32,
-        #[serde(default = "default_fixel_slab_thickness_mm")]
-        slab_thickness_mm: Millimeters,
-        #[serde(default = "default_fixel_length_scale")]
-        length_scale: f32,
-        #[serde(default = "default_enabled")]
-        visible: bool,
-    },
-    OdfGlyphRenderer {
-        #[serde(default = "default_odf_glyph_scale")]
-        scale: f32,
-        #[serde(default = "default_full_opacity")]
-        opacity: f32,
-        #[serde(default)]
-        offset_from_slice: f32,
-        #[serde(default)]
-        gloss: f32,
-        #[serde(default)]
-        vertex_colormap: GlyphColormap,
-        #[serde(default = "default_workflow_slice_view_kind")]
-        slice_axis: WorkflowSliceViewKind,
-        #[serde(default)]
-        opacity_gate: OpacityGate,
-        #[serde(default)]
-        size_gate: SizeGate,
-        #[serde(default = "default_odf_glyph_detail")]
-        detail: u32,
-        #[serde(default = "default_enabled")]
-        visible: bool,
-    },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1349,30 +1125,6 @@ impl Default for WorkflowProject {
             document: default_document(),
             slice_view_ui: None,
         }
-    }
-}
-
-impl WorkflowNodeKind {
-    pub fn title(&self) -> &'static str {
-        super::ops::title(self)
-    }
-
-    pub fn inputs(&self) -> Vec<PortKind> {
-        match self {
-            Self::SurfaceOverlayStack { layers } => {
-                let mut ports = Vec::with_capacity(layers.len() + 1);
-                ports.push(PortKind::Surface);
-                ports.extend(std::iter::repeat(PortKind::SurfaceScalars).take(layers.len()));
-                ports
-            }
-            _ => super::ops::input_ports(self)
-                .expect("handled by workflow op registry")
-                .to_vec(),
-        }
-    }
-
-    pub fn outputs(&self) -> Vec<PortKind> {
-        super::ops::output_ports(self).to_vec()
     }
 }
 

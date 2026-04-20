@@ -223,12 +223,12 @@ impl super::super::TrxVizApp {
                     return;
                 }
 
-                let original_kind = self.workflow_node_kind(binding.display).cloned();
+                let original_op = self.workflow_node_op(binding.display).cloned();
                 if let Some(WorkflowNodeKind::StreamlineDisplay {
                     enabled,
                     slab_half_width_mm,
                     ..
-                }) = self.workflow_node_kind_mut(binding.display)
+                }) = self.workflow_node_op_mut(binding.display)
                 {
                     ui.checkbox(enabled, "Visible");
                     ui.add(
@@ -236,8 +236,8 @@ impl super::super::TrxVizApp {
                             .text("Slice slab half-width"),
                     );
                 }
-                if let Some(original_kind) = original_kind {
-                    self.finish_simple_render_only_edit(binding.display, original_kind);
+                if let Some(original_op) = original_op {
+                    self.finish_simple_render_only_edit(binding.display, original_op);
                 }
             });
     }
@@ -264,13 +264,13 @@ impl super::super::TrxVizApp {
                     return;
                 }
 
-                let original_kind = self.workflow_node_kind(binding.display).cloned();
+                let original_op = self.workflow_node_op(binding.display).cloned();
                 if let Some(WorkflowNodeKind::VolumeDisplay {
                     colormap,
                     opacity,
                     window_center,
                     window_width,
-                }) = self.workflow_node_kind_mut(binding.display)
+                }) = self.workflow_node_op_mut(binding.display)
                 {
                     opacity_checkbox(ui, opacity, "Visible");
                     egui::ComboBox::from_id_salt(("simple_volume_colormap", binding.display.0))
@@ -284,8 +284,8 @@ impl super::super::TrxVizApp {
                     ui.add(egui::Slider::new(window_center, 0.0..=1.0).text("Window center"));
                     ui.add(egui::Slider::new(window_width, 0.01..=2.0).text("Window width"));
                 }
-                if let Some(original_kind) = original_kind {
-                    self.finish_simple_render_only_edit(binding.display, original_kind);
+                if let Some(original_op) = original_op {
+                    self.finish_simple_render_only_edit(binding.display, original_op);
                 }
             });
     }
@@ -322,19 +322,19 @@ impl super::super::TrxVizApp {
                     return;
                 }
 
-                let original_display = self.workflow_node_kind(binding.display).cloned();
+                let original_display = self.workflow_node_op(binding.display).cloned();
                 let original_overlay = binding
                     .overlay_stack
-                    .and_then(|uuid| self.workflow_node_kind(uuid).cloned());
+                    .and_then(|uuid| self.workflow_node_op(uuid).cloned());
                 if let Some(WorkflowNodeKind::SurfaceDisplay { opacity, .. }) =
-                    self.workflow_node_kind_mut(binding.display)
+                    self.workflow_node_op_mut(binding.display)
                 {
                     ui.label("Shared");
                     opacity_checkbox(ui, opacity, "Visible");
                 }
                 let mesh_style_uses_overlay = if let Some(overlay_uuid) = binding.overlay_stack {
                     if let Some(WorkflowNodeKind::SurfaceOverlayStack { layers }) =
-                        self.workflow_node_kind_mut(overlay_uuid)
+                        self.workflow_node_op_mut(overlay_uuid)
                     {
                         if let Some(base) = layers.first_mut() {
                             ui.separator();
@@ -365,7 +365,7 @@ impl super::super::TrxVizApp {
                 };
                 if !mesh_style_uses_overlay
                     && let Some(WorkflowNodeKind::SurfaceDisplay { color, opacity, .. }) =
-                        self.workflow_node_kind_mut(binding.display)
+                        self.workflow_node_op_mut(binding.display)
                 {
                     ui.separator();
                     ui.label("3D Mesh");
@@ -377,7 +377,7 @@ impl super::super::TrxVizApp {
                     outline_thickness,
                     opacity,
                     ..
-                }) = self.workflow_node_kind_mut(binding.display)
+                }) = self.workflow_node_op_mut(binding.display)
                 {
                     ui.separator();
                     ui.label("2D Slice Outline");
@@ -434,33 +434,33 @@ impl super::super::TrxVizApp {
                     return;
                 }
 
-                let original_kind = self.workflow_node_kind(binding.display).cloned();
+                let original_op = self.workflow_node_op(binding.display).cloned();
                 if let Some(WorkflowNodeKind::ParcellationDisplay { opacity, .. }) =
-                    self.workflow_node_kind_mut(binding.display)
+                    self.workflow_node_op_mut(binding.display)
                 {
                     opacity_checkbox(ui, opacity, "Visible");
                     ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
                 }
-                if let Some(original_kind) = original_kind {
-                    self.finish_simple_render_only_edit(binding.display, original_kind);
+                if let Some(original_op) = original_op {
+                    self.finish_simple_render_only_edit(binding.display, original_op);
                 }
             });
     }
 
-    fn workflow_node_kind_mut(&mut self, uuid: WorkflowNodeUuid) -> Option<&mut WorkflowNodeKind> {
+    fn workflow_node_op_mut(&mut self, uuid: WorkflowNodeUuid) -> Option<&mut WorkflowNodeKind> {
         self.workflow
             .document
             .graph
             .get_mut(uuid)
-            .map(|node| &mut node.kind)
+            .map(|node| &mut node.op)
     }
 
-    fn workflow_node_kind(&self, uuid: WorkflowNodeUuid) -> Option<&WorkflowNodeKind> {
+    fn workflow_node_op(&self, uuid: WorkflowNodeUuid) -> Option<&WorkflowNodeKind> {
         self.workflow
             .document
             .graph
             .get(uuid)
-            .map(|node| &node.kind)
+            .map(|node| &node.op)
     }
 
     fn sync_editor_node_from_document(&mut self, node_uuid: WorkflowNodeUuid) {
@@ -481,15 +481,15 @@ impl super::super::TrxVizApp {
     fn finish_simple_render_only_edit(
         &mut self,
         node_uuid: WorkflowNodeUuid,
-        original_kind: WorkflowNodeKind,
+        original_op: WorkflowNodeKind,
     ) {
-        let Some(current_kind) = self.workflow_node_kind(node_uuid).cloned() else {
+        let Some(current_op) = self.workflow_node_op(node_uuid).cloned() else {
             return;
         };
-        if current_kind == original_kind {
+        if current_op == original_op {
             return;
         }
-        if !workflow::is_render_only_change(&original_kind, &current_kind) {
+        if !workflow::is_render_only_change(&original_op, &current_op) {
             return;
         }
         self.sync_editor_node_from_document(node_uuid);

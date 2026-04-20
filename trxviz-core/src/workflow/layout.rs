@@ -64,20 +64,20 @@ impl Default for WorkflowLayoutResult {
 }
 
 pub fn estimate_workflow_node_size(node: &WorkflowNode) -> NodeSize {
-    let title_width = node.kind.title().chars().count() as f32 * TITLE_CHAR_WIDTH;
+    let title_width = node.op.title().chars().count() as f32 * TITLE_CHAR_WIDTH;
     let max_input_label = node
-        .kind
+        .op
         .inputs()
         .iter()
         .map(|port| port_kind_label(*port).chars().count() as f32 * APPROX_CHAR_WIDTH)
         .fold(0.0, f32::max);
     let max_output_label = node
-        .kind
+        .op
         .outputs()
         .iter()
         .map(|port| port_kind_label(*port).chars().count() as f32 * APPROX_CHAR_WIDTH)
         .fold(0.0, f32::max);
-    let rows = node.kind.inputs().len().max(node.kind.outputs().len()) as f32;
+    let rows = node.op.inputs().len().max(node.op.outputs().len()) as f32;
     let width = (title_width.max(max_input_label + max_output_label)
         + NODE_FRAME_HORIZONTAL_PADDING)
         .max(NODE_MIN_WIDTH);
@@ -502,12 +502,12 @@ mod tests {
     use super::*;
     use crate::workflow::{InPort, OutPort, WorkflowNode, WorkflowNodeKind};
 
-    fn make_node(uuid: u64, x: f32, y: f32, kind: WorkflowNodeKind) -> WorkflowNodeEntry {
+    fn make_node(uuid: u64, x: f32, y: f32, op: WorkflowNodeKind) -> WorkflowNodeEntry {
         WorkflowNodeEntry {
             node: WorkflowNode {
                 uuid: WorkflowNodeUuid(uuid),
-                label: kind.title().to_string(),
-                kind,
+                label: op.title().to_string(),
+                op,
             },
             pos: GraphPos::new(x, y),
         }
@@ -657,7 +657,7 @@ mod tests {
             WorkflowNode {
                 uuid: WorkflowNodeUuid(10),
                 label: "Display".into(),
-                kind: WorkflowNodeKind::VolumeDisplay {
+                op: WorkflowNodeKind::VolumeDisplay {
                     colormap: crate::data::loaded_files::VolumeColormap::Grayscale,
                     opacity: 1.0,
                     window_center: 0.5,
@@ -743,11 +743,11 @@ mod tests {
         assert_eq!(
             original
                 .nodes()
-                .map(|(uuid, node)| (uuid, node.kind.clone()))
+                .map(|(uuid, node)| (uuid, node.op.clone()))
                 .collect::<Vec<_>>(),
             graph
                 .nodes()
-                .map(|(uuid, node)| (uuid, node.kind.clone()))
+                .map(|(uuid, node)| (uuid, node.op.clone()))
                 .collect::<Vec<_>>()
         );
         assert!(

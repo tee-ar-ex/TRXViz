@@ -25,15 +25,15 @@ pub(crate) struct NodeEditorResult {
     pub(crate) save_now: bool,
 }
 
-pub(crate) fn edit_node_kind(
+pub(crate) fn edit_node_op(
     ui: &mut egui::Ui,
     node_uuid: workflow::WorkflowNodeUuid,
-    kind: &mut workflow::WorkflowNodeKind,
+    op: &mut workflow::WorkflowNodeKind,
     ctx: NodeEditorContext<'_>,
 ) -> NodeEditorResult {
     let mut result = NodeEditorResult::default();
 
-    match kind {
+    match op {
         workflow::WorkflowNodeKind::LimitStreamlines {
             limit,
             randomize,

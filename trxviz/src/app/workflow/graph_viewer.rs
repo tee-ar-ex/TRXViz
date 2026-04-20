@@ -197,11 +197,11 @@ pub struct WorkflowGraphViewer<'a> {
 impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
     fn title(&mut self, node: &WorkflowNode) -> String {
         let base = if node.label.is_empty() {
-            node.kind.title().to_string()
+            node.op.title().to_string()
         } else {
             node.label.clone()
         };
-        match &node.kind {
+        match &node.op {
             WorkflowNodeKind::SurfaceSource { source_id } => {
                 let guess = self.assets.iter().find_map(|asset| match asset {
                     WorkflowAssetDocument::Surface { id, path } if id == source_id => {
@@ -220,11 +220,11 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
     }
 
     fn inputs(&mut self, node: &WorkflowNode) -> usize {
-        node.kind.inputs().len()
+        node.op.inputs().len()
     }
 
     fn outputs(&mut self, node: &WorkflowNode) -> usize {
-        node.kind.outputs().len()
+        node.op.outputs().len()
     }
 
     fn show_input(
@@ -233,9 +233,9 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
         ui: &mut egui::Ui,
         snarl: &mut Snarl<WorkflowNode>,
     ) -> impl egui_snarl::ui::SnarlPin + 'static {
-        let node_kind = &snarl[pin.id.node].kind;
-        let port = node_kind.inputs()[pin.id.input];
-        ui.label(input_port_label(node_kind, pin.id.input, port));
+        let node_op = &snarl[pin.id.node].op;
+        let port = node_op.inputs()[pin.id.input];
+        ui.label(input_port_label(node_op, pin.id.input, port));
         pin_info_for_port(port)
     }
 
@@ -245,10 +245,10 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
         ui: &mut egui::Ui,
         snarl: &mut Snarl<WorkflowNode>,
     ) -> impl egui_snarl::ui::SnarlPin + 'static {
-        let port = snarl[pin.id.node].kind.outputs()[pin.id.output];
+        let port = snarl[pin.id.node].op.outputs()[pin.id.output];
         ui.horizontal(|ui| {
             ui.label(output_port_label(
-                &snarl[pin.id.node].kind,
+                &snarl[pin.id.node].op,
                 pin.id.output,
                 port,
             ));
@@ -270,7 +270,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
         ui: &mut egui::Ui,
         snarl: &mut Snarl<WorkflowNode>,
     ) {
-        ui.small(match &snarl[node].kind {
+        ui.small(match &snarl[node].op {
             WorkflowNodeKind::LimitStreamlines {
                 limit,
                 randomize,
@@ -343,14 +343,14 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
 
     fn connect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<WorkflowNode>) {
         let Some(out_kind) = snarl[from.id.node]
-            .kind
+            .op
             .outputs()
             .get(from.id.output)
             .copied()
         else {
             return;
         };
-        let Some(in_kind) = snarl[to.id.node].kind.inputs().get(to.id.input).copied() else {
+        let Some(in_kind) = snarl[to.id.node].op.inputs().get(to.id.input).copied() else {
             return;
         };
         if out_kind != in_kind {
@@ -793,14 +793,14 @@ fn add_node_button(
     ui: &mut egui::Ui,
     snarl: &mut Snarl<WorkflowNode>,
     pos: Pos2,
-    kind: WorkflowNodeKind,
+    op: WorkflowNodeKind,
     measured_node_sizes: &HashMap<WorkflowNodeUuid, NodeSize>,
 ) {
-    if ui.button(kind.title()).clicked() {
+    if ui.button(op.title()).clicked() {
         let node = WorkflowNode {
             uuid: WorkflowNodeUuid(0),
-            label: kind.title().to_string(),
-            kind,
+            label: op.title().to_string(),
+            op,
         };
         let insert_pos = find_nearest_free_node_position(snarl, pos, &node, measured_node_sizes);
         snarl.insert_node(insert_pos, node);
@@ -998,7 +998,7 @@ mod tests {
             WorkflowNode {
                 uuid: WorkflowNodeUuid(1),
                 label: "Existing".into(),
-                kind: WorkflowNodeKind::LimitStreamlines {
+                op: WorkflowNodeKind::LimitStreamlines {
                     limit: 10,
                     randomize: false,
                     seed: 1,
@@ -1008,7 +1008,7 @@ mod tests {
         let new_node = WorkflowNode {
             uuid: WorkflowNodeUuid(0),
             label: "Display".into(),
-            kind: WorkflowNodeKind::StreamlineDisplay {
+            op: WorkflowNodeKind::StreamlineDisplay {
                 enabled: true,
                 render_style: trxviz_core::data::trx_data::RenderStyle::Flat,
                 tube_radius_mm: trxviz_core::units::Millimeters(0.4),
