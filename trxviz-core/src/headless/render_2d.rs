@@ -4,7 +4,8 @@ use anyhow::anyhow;
 use glam::Vec3;
 
 use super::gpu_context::{GpuSceneResources, TARGET_FORMAT};
-use super::{HeadlessRenderData, readback_texture_to_png};
+use super::readback::readback_texture_to_png;
+use super::HeadlessRenderData;
 use crate::lighting::{SceneLightingParams, WorkflowRender3D};
 use crate::renderer::camera::OrthoSliceCamera;
 use crate::renderer::slice_renderer::SliceAxis;

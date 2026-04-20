@@ -5,9 +5,10 @@ use glam::{Mat4, Vec3};
 use super::gpu_context::{
     GpuSceneResources, TARGET_FORMAT, active_fixel_draw_2d, active_fixel_draw_3d,
 };
+use super::readback::readback_texture_to_png;
 use super::{
     BoundaryGlyphColorMode, BundleDrawInfo, HeadlessRenderData, HeadlessRenderOptions,
-    HeadlessView, SceneBounds, StreamlineDrawInfo, VolumeDrawInfo, readback_texture_to_png,
+    HeadlessView, SceneBounds, StreamlineDrawInfo, VolumeDrawInfo,
 };
 use crate::data::cifti::CiftiStructure;
 use crate::data::trx_data::RenderStyle;
