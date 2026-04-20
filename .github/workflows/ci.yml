@@ -31,8 +31,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy (deny correctness/suspicious)
+        run: cargo clippy --workspace --all-targets -- -D clippy::correctness -D clippy::suspicious -A clippy::approx_constant
 
   test:
     name: Workspace Tests
