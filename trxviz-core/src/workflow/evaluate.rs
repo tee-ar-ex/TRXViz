@@ -177,20 +177,21 @@ pub fn evaluate_scene_plan_with_mode(
         runtime.node_state.insert(node.uuid, node_state);
     }
 
-    runtime
-        .scene_plan
-        .surface_draws
-        .iter_mut()
-        .for_each(|draw| {
-            if draw.show_projection_map {
-                if let Some(projection) = projection_by_surface.get(&draw.source_id) {
-                    let range = projection.metadata.suggested_range.unwrap_or((0.0, 1.0));
-                    draw.range_min = range.0;
-                    draw.range_max = range.1;
-                    draw.projection_scalars = Some(projection.values.clone());
-                }
+    for draws in [
+        &mut runtime.scene_plan.surface_draws,
+        &mut runtime.scene_plan.stage_surface_draws,
+    ] {
+        draws.iter_mut().for_each(|draw| {
+            if draw.show_projection_map
+                && let Some(projection) = projection_by_surface.get(&draw.source_id)
+            {
+                let range = projection.metadata.suggested_range.unwrap_or((0.0, 1.0));
+                draw.range_min = range.0;
+                draw.range_max = range.1;
+                draw.projection_scalars = Some(projection.values.clone());
             }
         });
+    }
 
     runtime
 }

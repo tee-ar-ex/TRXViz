@@ -880,6 +880,10 @@ impl crate::app::TrxVizApp {
             self.workflow.last_interactive_revision = self.workflow.document_revision;
             self.workflow.render_only_changed = false;
             self.workflow.pending_job_completion = false;
+            if self.workflow.pending_stage_camera_fit {
+                self.reset_inflated_stage_camera();
+                self.workflow.pending_stage_camera_fit = false;
+            }
         }
 
         let should_run_settled = self.workflow.run_expensive_requested
@@ -1391,6 +1395,7 @@ impl crate::app::TrxVizApp {
         self.workflow.next_draw_id = 1_000_000;
         self.workflow.run_expensive_requested = false;
         self.workflow.run_session_active = false;
+        self.workflow.pending_stage_camera_fit = false;
         self.workflow.render_only_changed = false;
         self.workflow.pending_job_completion = false;
         self.workflow.jobs_in_flight.clear();
@@ -1744,6 +1749,7 @@ impl crate::app::TrxVizApp {
         self.workflow.selection = self.workflow.document.selection;
         ensure_node_uuids(&mut self.workflow.document);
         self.rebuild_workflow_editor_from_document();
+        self.workflow.pending_stage_camera_fit = true;
         self.workflow.project_path = Some(path.clone());
         self.status_msg = Some(format!("Opened workflow project {}", path.display()));
         self.error_msg = None;

@@ -109,6 +109,11 @@ fn active_fixel_draw_2d(
 }
 
 impl super::super::TrxVizApp {
+    fn apply_default_stage_camera_angles(camera: &mut OrbitCamera) {
+        camera.yaw = 0.0;
+        camera.pitch = 0.0;
+    }
+
     pub(in crate::app) fn show_viewports(&mut self, ctx: &egui::Context) {
         self.show_export_dialog(ctx);
         self.show_3d_window(ctx);
@@ -512,17 +517,15 @@ impl super::super::TrxVizApp {
         self.finish_export_if_ready(ctx, ExportTarget::InflatedStage);
     }
 
-    fn reset_inflated_stage_camera(&mut self) {
+    pub(in crate::app) fn reset_inflated_stage_camera(&mut self) {
         let Some((center, span)) = self.inflated_stage_bounds() else {
             let mut camera = OrbitCamera::new(Vec3::ZERO, 250.0);
-            camera.yaw = 0.0;
-            camera.pitch = 0.0;
+            Self::apply_default_stage_camera_angles(&mut camera);
             *self.viewport.inflated_stage_camera_mut() = camera;
             return;
         };
         let mut camera = OrbitCamera::new(center, (span * 1.15).max(50.0));
-        camera.yaw = 0.0;
-        camera.pitch = 0.0;
+        Self::apply_default_stage_camera_angles(&mut camera);
         *self.viewport.inflated_stage_camera_mut() = camera;
     }
 

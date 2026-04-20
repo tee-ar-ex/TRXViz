@@ -6,9 +6,12 @@ use glam::Vec3;
 use trx_rs::Tractogram;
 
 use super::*;
-use crate::data::cifti::{CiftiStructure, ScalarKind, SurfaceScalars};
+use crate::data::cifti::{
+    CiftiIntent, CiftiStructure, LoadedCifti as LoadedCiftiData, ScalarKind, ScalarMetadata,
+    SurfaceScalars,
+};
 use crate::data::gifti_data::GiftiSurfaceData;
-use crate::data::loaded_files::{LoadedTrx, StreamlineBacking};
+use crate::data::loaded_files::{LoadedCifti, LoadedTrx, StreamlineBacking};
 use crate::data::trx_data::{ColorMode, TrxGpuData};
 use crate::renderer::mesh_renderer::SurfaceColormap;
 use crate::scene::LoadedGiftiSurface;
@@ -221,6 +224,373 @@ fn test_streamline_flow() -> StreamlineFlow {
         scalar_range_min: 0.0,
         scalar_range_max: 1.0,
     }
+}
+
+fn test_surface_asset(id: usize) -> LoadedGiftiSurface {
+    LoadedGiftiSurface {
+        id,
+        name: format!("surface_{id}"),
+        path: PathBuf::from(format!("surface_{id}.gii")),
+        data: Arc::new(GiftiSurfaceData {
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 2],
+            indices: vec![0, 1, 1],
+            bbox_min: Vec3::ZERO,
+            bbox_max: Vec3::new(1.0, 0.0, 0.0),
+        }),
+        visible: true,
+        opacity: 1.0,
+        color: [0.72, 0.72, 0.72],
+        outline_color: [0.0, 0.0, 0.0],
+        outline_thickness: 1.0,
+        show_projection_map: false,
+        map_opacity: 1.0,
+        map_threshold: 0.0,
+        surface_gloss: 0.25,
+        projection_colormap: SurfaceColormap::Inferno,
+        auto_range: false,
+        range_min: 0.0,
+        range_max: 1.0,
+    }
+}
+
+fn test_surface_scalar_metadata(
+    map_name: &str,
+    suggested_range: Option<(f32, f32)>,
+) -> ScalarMetadata {
+    ScalarMetadata {
+        map_name: map_name.to_string(),
+        suggested_range,
+        series_index: None,
+        series_value: None,
+        label_table: Vec::new(),
+    }
+}
+
+fn test_cifti_asset(id: usize, left_scalars: SurfaceScalars) -> LoadedCifti {
+    LoadedCifti {
+        id,
+        name: format!("cifti_{id}"),
+        path: PathBuf::from(format!("cifti_{id}.dscalar.nii")),
+        data: Arc::new(LoadedCiftiData {
+            intent: CiftiIntent::DenseScalar,
+            map_count: 1,
+            left_scalars: vec![Some(left_scalars)],
+            right_scalars: vec![None],
+            subcortical_scalars: vec![None],
+        }),
+        visible: true,
+    }
+}
+
+fn test_surface_display_node(
+    space: SurfaceDisplaySpace,
+    show_projection_map: bool,
+) -> WorkflowNodeKind {
+    let op = SurfaceDisplayOp {
+        show_projection_map,
+        space,
+        ..SurfaceDisplayOp::default()
+    };
+    WorkflowNodeKind::SurfaceDisplay {
+        color: op.color,
+        opacity: op.opacity,
+        outline_color: op.outline_color,
+        outline_thickness: op.outline_thickness,
+        show_projection_map: op.show_projection_map,
+        map_opacity: op.map_opacity,
+        map_threshold: op.map_threshold,
+        gloss: op.gloss,
+        projection_colormap: op.projection_colormap,
+        range_min: op.range_min,
+        range_max: op.range_max,
+        space: op.space,
+    }
+}
+
+fn evaluate_surface_overlay_runtime(space: SurfaceDisplaySpace) -> WorkflowRuntime {
+    let surface_id = 7;
+    let cifti_id = 11;
+    let surface = test_surface_asset(surface_id);
+    let scalars = SurfaceScalars {
+        structure: Some(CiftiStructure::CortexLeft),
+        source_surface_id: None,
+        vertex_count: surface.data.vertices.len(),
+        values: vec![1.0, 1.0],
+        kind: ScalarKind::Continuous,
+        metadata: test_surface_scalar_metadata("left cortex", Some((0.0, 1.0))),
+    };
+    let cifti = test_cifti_asset(cifti_id, scalars);
+
+    let mut document = default_document();
+    let surface_source = make_node(
+        &mut document,
+        WorkflowNodeKind::SurfaceSource {
+            source_id: surface_id,
+        },
+        GraphPos::new(0.0, 0.0),
+    );
+    let overlay = make_node(
+        &mut document,
+        WorkflowNodeKind::SurfaceOverlayStack {
+            layers: default_surface_overlay_layers(),
+        },
+        GraphPos::new(200.0, 0.0),
+    );
+    let display = make_node(
+        &mut document,
+        test_surface_display_node(space, false),
+        GraphPos::new(400.0, 0.0),
+    );
+    let cifti_source = make_node(
+        &mut document,
+        WorkflowNodeKind::CiftiSource {
+            source_id: cifti_id,
+        },
+        GraphPos::new(0.0, 160.0),
+    );
+    let left_cortex = make_node(
+        &mut document,
+        WorkflowNodeKind::CiftiStructure {
+            structure: CiftiStructure::CortexLeft,
+            map_index: 0,
+        },
+        GraphPos::new(200.0, 160.0),
+    );
+
+    document.graph.connect(
+        OutPort {
+            node: surface_source,
+            output: 0,
+        },
+        InPort {
+            node: overlay,
+            input: 0,
+        },
+    );
+    document.graph.connect(
+        OutPort {
+            node: overlay,
+            output: 0,
+        },
+        InPort {
+            node: display,
+            input: 0,
+        },
+    );
+    document.graph.connect(
+        OutPort {
+            node: cifti_source,
+            output: 0,
+        },
+        InPort {
+            node: left_cortex,
+            input: 0,
+        },
+    );
+    document.graph.connect(
+        OutPort {
+            node: left_cortex,
+            output: 0,
+        },
+        InPort {
+            node: overlay,
+            input: 1,
+        },
+    );
+
+    evaluate_scene_plan_with_mode(
+        &document,
+        &[],
+        &[],
+        &[cifti],
+        &[surface],
+        &[],
+        &[],
+        &mut HashMap::new(),
+        &mut 1_000_000usize,
+        &mut WorkflowExecutionCache::default(),
+        WorkflowEvalMode::Interactive,
+    )
+}
+
+#[test]
+fn stage_surface_draw_receives_late_bound_projection_scalars() {
+    let surface_id = 7;
+    let streamline_id = 5;
+    let surface = test_surface_asset(surface_id);
+    let flow = test_streamline_flow();
+    let streamline = LoadedTrx {
+        id: streamline_id,
+        name: "streamlines".to_string(),
+        path: PathBuf::from("streamlines.trx"),
+        data: flow.dataset.gpu_data.clone(),
+        backing: Some(flow.dataset.backing.clone()),
+        import_warnings: Vec::new(),
+    };
+
+    let mut document = default_document();
+    let streamline_source = make_node(
+        &mut document,
+        WorkflowNodeKind::StreamlineSource {
+            source_id: streamline_id,
+        },
+        GraphPos::new(0.0, 160.0),
+    );
+    let surface_source = make_node(
+        &mut document,
+        WorkflowNodeKind::SurfaceSource {
+            source_id: surface_id,
+        },
+        GraphPos::new(0.0, 0.0),
+    );
+    let projection = make_node(
+        &mut document,
+        WorkflowNodeKind::SurfaceProjectionDensity {
+            depth_mm: Millimeters(2.0),
+        },
+        GraphPos::new(200.0, 160.0),
+    );
+    let overlay = make_node(
+        &mut document,
+        WorkflowNodeKind::SurfaceOverlayStack {
+            layers: default_surface_overlay_layers(),
+        },
+        GraphPos::new(200.0, 0.0),
+    );
+    let display = make_node(
+        &mut document,
+        test_surface_display_node(SurfaceDisplaySpace::Stage, true),
+        GraphPos::new(400.0, 0.0),
+    );
+
+    document.graph.connect(
+        OutPort {
+            node: streamline_source,
+            output: 0,
+        },
+        InPort {
+            node: projection,
+            input: 0,
+        },
+    );
+    document.graph.connect(
+        OutPort {
+            node: surface_source,
+            output: 0,
+        },
+        InPort {
+            node: projection,
+            input: 1,
+        },
+    );
+    document.graph.connect(
+        OutPort {
+            node: surface_source,
+            output: 0,
+        },
+        InPort {
+            node: overlay,
+            input: 0,
+        },
+    );
+    document.graph.connect(
+        OutPort {
+            node: projection,
+            output: 0,
+        },
+        InPort {
+            node: overlay,
+            input: 1,
+        },
+    );
+    document.graph.connect(
+        OutPort {
+            node: overlay,
+            output: 0,
+        },
+        InPort {
+            node: display,
+            input: 0,
+        },
+    );
+
+    let mut execution_cache = WorkflowExecutionCache::default();
+    execution_cache.surface_streamline_map_cache.insert(
+        projection,
+        CachedSurfaceStreamlineMap {
+            map: SurfaceScalars {
+                structure: None,
+                source_surface_id: Some(surface_id),
+                vertex_count: surface.data.vertices.len(),
+                values: vec![2.0, 5.0],
+                kind: ScalarKind::Continuous,
+                metadata: test_surface_scalar_metadata("density", Some((2.0, 5.0))),
+            },
+        },
+    );
+
+    let runtime = evaluate_scene_plan_with_mode(
+        &document,
+        &[streamline],
+        &[],
+        &[],
+        &[surface],
+        &[],
+        &[],
+        &mut HashMap::new(),
+        &mut 1_000_000usize,
+        &mut execution_cache,
+        WorkflowEvalMode::Interactive,
+    );
+
+    assert!(runtime.scene_plan.surface_draws.is_empty());
+    assert_eq!(runtime.scene_plan.stage_surface_draws.len(), 1);
+    assert!(
+        runtime
+            .node_state
+            .values()
+            .all(|state| state.error.is_none()),
+        "unexpected workflow error: {:?}",
+        runtime
+            .node_state
+            .values()
+            .find_map(|state| state.error.as_deref())
+    );
+    let draw = &runtime.scene_plan.stage_surface_draws[0];
+    assert_eq!(draw.source_id, surface_id);
+    assert_eq!(draw.projection_scalars.as_deref(), Some(&[2.0, 5.0][..]));
+    assert_eq!((draw.range_min, draw.range_max), (2.0, 5.0));
+}
+
+#[test]
+fn stage_surface_draw_preserves_cifti_structure_and_vertex_colors() {
+    let runtime = evaluate_surface_overlay_runtime(SurfaceDisplaySpace::Stage);
+
+    assert!(runtime.scene_plan.surface_draws.is_empty());
+    assert_eq!(runtime.scene_plan.stage_surface_draws.len(), 1);
+    let draw = &runtime.scene_plan.stage_surface_draws[0];
+    assert_eq!(draw.structure, Some(CiftiStructure::CortexLeft));
+    assert!(
+        draw.vertex_rgba
+            .iter()
+            .any(|rgba| *rgba != DEFAULT_SURFACE_BASE_RGBA)
+    );
+}
+
+#[test]
+fn anatomical_surface_draw_preserves_cifti_structure_and_vertex_colors() {
+    let runtime = evaluate_surface_overlay_runtime(SurfaceDisplaySpace::Anatomical);
+
+    assert!(runtime.scene_plan.stage_surface_draws.is_empty());
+    assert_eq!(runtime.scene_plan.surface_draws.len(), 1);
+    let draw = &runtime.scene_plan.surface_draws[0];
+    assert_eq!(draw.structure, Some(CiftiStructure::CortexLeft));
+    assert!(
+        draw.vertex_rgba
+            .iter()
+            .any(|rgba| *rgba != DEFAULT_SURFACE_BASE_RGBA)
+    );
 }
 
 fn evaluate_streamline_op(

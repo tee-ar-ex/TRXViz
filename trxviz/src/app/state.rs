@@ -772,6 +772,7 @@ pub struct WorkflowState {
     pub execution_cache: WorkflowExecutionCache,
     pub run_expensive_requested: bool,
     pub run_session_active: bool,
+    pub pending_stage_camera_fit: bool,
     /// Set when a render-only parameter changes (color, opacity, visibility toggle).
     /// Triggers an immediate graph re-evaluation without incrementing document_revision,
     /// so no fingerprints become stale and no expensive jobs are triggered.
@@ -820,6 +821,7 @@ impl WorkflowState {
             execution_cache: WorkflowExecutionCache::default(),
             run_expensive_requested: false,
             run_session_active: false,
+            pending_stage_camera_fit: false,
             render_only_changed: false,
             pending_job_completion: false,
             document_revision: 1,
