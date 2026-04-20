@@ -726,7 +726,7 @@ impl Default for SceneFramePlan {
 #[derive(Clone)]
 pub struct StreamlineFlow {
     pub dataset: Arc<StreamlineDataset>,
-    pub selected_streamlines: Arc<Vec<StreamlineIndex>>,
+    pub selected_streamlines: Vec<StreamlineIndex>,
     pub color_mode: ColorMode,
     pub scalar_auto_range: bool,
     pub scalar_range_min: f32,

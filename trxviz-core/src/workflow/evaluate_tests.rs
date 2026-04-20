@@ -9,10 +9,10 @@ use super::*;
 use crate::data::cifti::{CiftiStructure, ScalarKind, SurfaceScalars};
 use crate::data::gifti_data::GiftiSurfaceData;
 use crate::data::loaded_files::{LoadedTrx, StreamlineBacking};
-use crate::data::trx_data::TrxGpuData;
+use crate::data::trx_data::{ColorMode, TrxGpuData};
 use crate::renderer::mesh_renderer::SurfaceColormap;
 use crate::scene::LoadedGiftiSurface;
-use crate::units::Millimeters;
+use crate::units::{Millimeters, StreamlineIndex};
 
 #[test]
 fn group_filter_empty_means_all() {
@@ -199,4 +199,127 @@ fn first_surface_overlay_input_uses_base_layer_config() {
             .any(|rgba| *rgba != DEFAULT_SURFACE_BASE_RGBA)
     );
     assert_eq!(appearance.legend_labels, vec!["Base".to_string()]);
+}
+
+fn test_streamline_flow() -> StreamlineFlow {
+    let mut tractogram = Tractogram::new();
+    for start in [0.0, 2.0, 4.0, 6.0] {
+        tractogram
+            .push_streamline(&[[start, 0.0, 0.0], [start + 1.0, 0.5, 0.25]])
+            .expect("streamline");
+    }
+    let gpu_data = Arc::new(TrxGpuData::from_tractogram(&tractogram).expect("gpu data"));
+    StreamlineFlow {
+        dataset: Arc::new(StreamlineDataset {
+            name: "test".to_string(),
+            gpu_data,
+            backing: StreamlineBacking::Imported(Arc::new(tractogram)),
+        }),
+        selected_streamlines: (0..4).map(StreamlineIndex).collect(),
+        color_mode: ColorMode::DirectionRgb,
+        scalar_auto_range: true,
+        scalar_range_min: 0.0,
+        scalar_range_max: 1.0,
+    }
+}
+
+fn evaluate_streamline_op(op: &impl WorkflowOp, node_op: WorkflowNodeKind, flow: StreamlineFlow) -> StreamlineFlow {
+    let node = WorkflowNode {
+        uuid: WorkflowNodeUuid(1),
+        label: op.title().to_string(),
+        op: node_op,
+    };
+    let inputs = vec![Some(EvaluatedValue {
+        value: WorkflowValue::Streamline(flow),
+        stale: false,
+    })];
+    let streamline_assets = HashMap::new();
+    let volume_assets = HashMap::new();
+    let cifti_assets = HashMap::new();
+    let surface_assets = HashMap::new();
+    let parcellation_assets = HashMap::new();
+    let odx_assets = HashMap::new();
+    let mut display_ids = HashMap::new();
+    let mut next_draw_id = 1;
+    let mut scene_plan = SceneFramePlan::default();
+    let mut projection_by_surface = HashMap::new();
+    let mut save_targets = HashMap::new();
+    let mut execution_cache = WorkflowExecutionCache::default();
+    let mut node_state = NodeEvalState::default();
+    let mut ctx = EvalCtx {
+        node: &node,
+        inputs: &inputs,
+        streamline_assets: &streamline_assets,
+        volume_assets: &volume_assets,
+        cifti_assets: &cifti_assets,
+        surface_assets: &surface_assets,
+        parcellation_assets: &parcellation_assets,
+        odx_assets: &odx_assets,
+        display_ids: &mut display_ids,
+        next_draw_id: &mut next_draw_id,
+        scene_plan: &mut scene_plan,
+        projection_by_surface: &mut projection_by_surface,
+        save_targets: &mut save_targets,
+        execution_cache: &mut execution_cache,
+        node_state: &mut node_state,
+    };
+    let outputs = op.evaluate(&mut ctx).expect("streamline op output");
+    match outputs.into_iter().next().expect("first output").value {
+        WorkflowValue::Streamline(flow) => flow,
+        _ => panic!("expected streamline output"),
+    }
+}
+
+#[test]
+fn limit_streamlines_preserves_order_with_owned_selection_vec() {
+    let flow = evaluate_streamline_op(
+        &LimitStreamlinesOp {
+            limit: 2,
+            randomize: false,
+            seed: 99,
+        },
+        WorkflowNodeKind::LimitStreamlines {
+            limit: 2,
+            randomize: false,
+            seed: 99,
+        },
+        test_streamline_flow(),
+    );
+
+    assert_eq!(
+        flow.selected_streamlines,
+        vec![StreamlineIndex(0), StreamlineIndex(1)]
+    );
+}
+
+#[test]
+fn random_subset_is_deterministic_and_reuses_dataset_boundary() {
+    let upstream = evaluate_streamline_op(
+        &LimitStreamlinesOp {
+            limit: 3,
+            randomize: false,
+            seed: 1,
+        },
+        WorkflowNodeKind::LimitStreamlines {
+            limit: 3,
+            randomize: false,
+            seed: 1,
+        },
+        test_streamline_flow(),
+    );
+    let first = evaluate_streamline_op(
+        &RandomSubsetOp { limit: 2, seed: 17 },
+        WorkflowNodeKind::RandomSubset { limit: 2, seed: 17 },
+        upstream.clone(),
+    );
+    let second = evaluate_streamline_op(
+        &RandomSubsetOp { limit: 2, seed: 17 },
+        WorkflowNodeKind::RandomSubset { limit: 2, seed: 17 },
+        upstream.clone(),
+    );
+
+    assert_eq!(first.selected_streamlines, second.selected_streamlines);
+    assert_eq!(first.selected_streamlines.len(), 2);
+    assert!(Arc::ptr_eq(&first.dataset, &upstream.dataset));
+    assert!(Arc::ptr_eq(&second.dataset, &upstream.dataset));
 }

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use glam::Vec3;
 
 use super::super::{
@@ -56,7 +54,7 @@ impl WorkflowOp for SphereQueryOp {
             .collect();
         Ok(vec![
             WorkflowValue::Streamline(super::super::StreamlineFlow {
-                selected_streamlines: Arc::new(selected),
+                selected_streamlines: selected,
                 ..flow
             })
             .into(),

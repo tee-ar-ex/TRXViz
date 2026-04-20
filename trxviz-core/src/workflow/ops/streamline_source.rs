@@ -57,7 +57,7 @@ impl WorkflowOp for StreamlineSourceOp {
         Ok(vec![
             WorkflowValue::Streamline(StreamlineFlow {
                 dataset,
-                selected_streamlines: Arc::new(selected),
+                selected_streamlines: selected,
                 color_mode: ColorMode::DirectionRgb,
                 scalar_auto_range: true,
                 scalar_range_min: 0.0,

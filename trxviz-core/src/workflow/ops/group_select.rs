@@ -1,6 +1,4 @@
 use std::collections::HashSet;
-use std::sync::Arc;
-
 use crate::units::StreamlineIndex;
 
 use super::super::{
@@ -47,7 +45,7 @@ impl WorkflowOp for GroupSelectOp {
             GroupFilter::All => Ok(vec![WorkflowValue::Streamline(flow).into()]),
             GroupFilter::None => Ok(vec![
                 WorkflowValue::Streamline(super::super::StreamlineFlow {
-                    selected_streamlines: Arc::new(Vec::new()),
+                    selected_streamlines: Vec::new(),
                     ..flow
                 })
                 .into(),
@@ -77,7 +75,7 @@ impl WorkflowOp for GroupSelectOp {
                     .collect();
                 Ok(vec![
                     WorkflowValue::Streamline(super::super::StreamlineFlow {
-                        selected_streamlines: Arc::new(selected),
+                        selected_streamlines: selected,
                         ..flow
                     })
                     .into(),

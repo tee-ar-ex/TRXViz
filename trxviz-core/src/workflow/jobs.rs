@@ -43,7 +43,7 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
                 .filter(|index| hits.contains(index))
                 .collect();
             Ok(WorkflowJobOutput::SurfaceQuery(StreamlineFlow {
-                selected_streamlines: Arc::new(selected),
+                selected_streamlines: selected,
                 ..plan.flow
             }))
         }
@@ -52,7 +52,7 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
                 .flow
                 .dataset
                 .gpu_data
-                .subset_streamlines(plan.flow.selected_streamlines.as_ref());
+                .subset_streamlines(&plan.flow.selected_streamlines);
             let dps_storage;
             let dps_values = if let Some(field) = &plan.dps_field {
                 dps_storage = subset
@@ -190,7 +190,7 @@ pub fn materialize_flow_gpu(flow: StreamlineFlow) -> TrxGpuData {
     let mut subset = flow
         .dataset
         .gpu_data
-        .subset_streamlines(flow.selected_streamlines.as_ref());
+        .subset_streamlines(&flow.selected_streamlines);
     let scalar_range = if flow.scalar_auto_range {
         None
     } else {
@@ -228,7 +228,7 @@ pub fn bundle_surface_component_flows(plan: &BundleSurfacePlan) -> Vec<(String, 
             group_name.clone(),
             StreamlineFlow {
                 dataset: plan.flow.dataset.clone(),
-                selected_streamlines: Arc::new(group_selected),
+                selected_streamlines: group_selected,
                 color_mode: plan.flow.color_mode.clone(),
                 scalar_auto_range: plan.flow.scalar_auto_range,
                 scalar_range_min: plan.flow.scalar_range_min,

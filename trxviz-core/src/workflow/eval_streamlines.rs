@@ -179,7 +179,7 @@ pub(crate) fn add_groups_from_parcellation_from_label(
             gpu_data,
             backing: StreamlineBacking::Derived(Arc::new(grouped)),
         }),
-        selected_streamlines: Arc::new(selected),
+        selected_streamlines: selected,
         color_mode: flow.color_mode.clone(),
         scalar_auto_range: flow.scalar_auto_range,
         scalar_range_min: flow.scalar_range_min,
@@ -248,6 +248,7 @@ pub(crate) fn materialize_reactive_streamline_flow(
             parcellation,
             labels,
         } => {
+            let left = &plan.left;
             let selected = plan
                 .left
                 .selected_streamlines
@@ -260,14 +261,19 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 })
                 .collect();
             Ok(StreamlineFlow {
-                selected_streamlines: Arc::new(selected),
-                ..plan.left.clone()
+                dataset: left.dataset.clone(),
+                selected_streamlines: selected,
+                color_mode: left.color_mode.clone(),
+                scalar_auto_range: left.scalar_auto_range,
+                scalar_range_min: left.scalar_range_min,
+                scalar_range_max: left.scalar_range_max,
             })
         }
         ReactiveStreamlineOp::ParcelROA {
             parcellation,
             labels,
         } => {
+            let left = &plan.left;
             let selected = plan
                 .left
                 .selected_streamlines
@@ -280,8 +286,12 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 })
                 .collect();
             Ok(StreamlineFlow {
-                selected_streamlines: Arc::new(selected),
-                ..plan.left.clone()
+                dataset: left.dataset.clone(),
+                selected_streamlines: selected,
+                color_mode: left.color_mode.clone(),
+                scalar_auto_range: left.scalar_auto_range,
+                scalar_range_min: left.scalar_range_min,
+                scalar_range_max: left.scalar_range_max,
             })
         }
         ReactiveStreamlineOp::ParcelEnd {
@@ -289,6 +299,7 @@ pub(crate) fn materialize_reactive_streamline_flow(
             labels,
             endpoint_count,
         } => {
+            let left = &plan.left;
             let selected = plan
                 .left
                 .selected_streamlines
@@ -301,8 +312,12 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 })
                 .collect();
             Ok(StreamlineFlow {
-                selected_streamlines: Arc::new(selected),
-                ..plan.left.clone()
+                dataset: left.dataset.clone(),
+                selected_streamlines: selected,
+                color_mode: left.color_mode.clone(),
+                scalar_auto_range: left.scalar_auto_range,
+                scalar_range_min: left.scalar_range_min,
+                scalar_range_max: left.scalar_range_max,
             })
         }
         ReactiveStreamlineOp::ParcelCrop {
@@ -340,7 +355,7 @@ fn streamline_flow_from_tractogram(
             gpu_data,
             backing: StreamlineBacking::Derived(Arc::new(tractogram)),
         }),
-        selected_streamlines: Arc::new(selected),
+        selected_streamlines: selected,
         color_mode: source_flow.color_mode.clone(),
         scalar_auto_range: true,
         scalar_range_min: 0.0,

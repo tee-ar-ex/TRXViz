@@ -1,6 +1,4 @@
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
-
 use crate::units::StreamlineIndex;
 
 use super::super::{
@@ -45,24 +43,17 @@ impl WorkflowOp for LimitStreamlinesOp {
         &self,
         ctx: &mut EvalCtx<'_, '_>,
     ) -> crate::error::WorkflowResult<Vec<super::super::EvaluatedValue>> {
-        let flow = expect_streamline_input(ctx.inputs, self.title())?;
-        let mut selected = flow.selected_streamlines.as_ref().clone();
+        let mut flow = expect_streamline_input(ctx.inputs, self.title())?;
         if self.randomize {
-            selected.sort_by_key(|index: &StreamlineIndex| {
+            flow.selected_streamlines.sort_by_key(|index: &StreamlineIndex| {
                 let mut hasher = std::collections::hash_map::DefaultHasher::new();
                 self.seed.hash(&mut hasher);
                 index.hash(&mut hasher);
                 hasher.finish()
             });
         }
-        selected.truncate(self.limit);
-        Ok(vec![
-            WorkflowValue::Streamline(super::super::StreamlineFlow {
-                selected_streamlines: Arc::new(selected),
-                ..flow
-            })
-            .into(),
-        ])
+        flow.selected_streamlines.truncate(self.limit);
+        Ok(vec![WorkflowValue::Streamline(flow).into()])
     }
 }
 
