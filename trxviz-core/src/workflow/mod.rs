@@ -2,7 +2,6 @@
 
 pub use crate::error::{WorkflowError, WorkflowResult};
 
-mod defaults;
 mod evaluate;
 mod fingerprint;
 mod graph;
@@ -11,10 +10,11 @@ mod layout;
 mod op;
 mod ops;
 mod project_io;
+mod seed;
+mod seed_odx;
 mod simple_workflow;
 mod types;
 
-pub use defaults::*;
 pub use evaluate::{evaluate_scene_plan, evaluate_scene_plan_with_mode, save_streamline_plan};
 pub use fingerprint::{
     workflow_boundary_plan_fingerprint, workflow_bundle_display_fingerprint,
@@ -37,6 +37,8 @@ pub use project_io::{
     load_workflow_project_from_path, relativized_document, resolve_document_asset_paths,
     save_workflow_project_to_path,
 };
+pub use seed::*;
+pub use seed_odx::*;
 pub use simple_workflow::*;
 pub use types::*;
 
