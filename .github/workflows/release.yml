@@ -167,13 +167,14 @@ jobs:
               apt-get update
               apt-get install -y \
                 ca-certificates \
-                cmake \
                 curl \
                 gcc \
                 g++ \
                 git \
                 make \
                 pkg-config \
+                python3 \
+                python3-pip \
                 libglib2.0-dev \
                 libgtk-3-dev \
                 libwayland-dev \
@@ -184,8 +185,10 @@ jobs:
                 libxkbcommon-dev \
                 libxkbcommon-x11-dev \
                 libxext-dev
+              python3 -m pip install --no-cache-dir cmake
               curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
               . "$HOME/.cargo/env"
+              export PATH="$HOME/.local/bin:$PATH"
               cargo build -p trxviz -p trxviz-cli --release
             '
 
