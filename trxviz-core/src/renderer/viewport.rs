@@ -19,6 +19,17 @@ impl From<ViewportIndex> for usize {
     }
 }
 
+impl ViewportIndex {
+    pub fn from_slice_axis_index(axis_index: usize) -> Self {
+        match axis_index {
+            0 => Self::SliceAxial,
+            1 => Self::SliceCoronal,
+            2 => Self::SliceSagittal,
+            _ => panic!("invalid slice axis index: {axis_index}"),
+        }
+    }
+}
+
 pub struct ViewportUniformSet<U> {
     buffers: [wgpu::Buffer; NUM_VIEWPORTS],
     bind_groups: [wgpu::BindGroup; NUM_VIEWPORTS],

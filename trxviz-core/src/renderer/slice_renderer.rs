@@ -316,11 +316,10 @@ impl SliceResources {
     }
 
     /// Update the view-projection uniform for a specific viewport context.
-    /// bind_group_index: 0=3D, 1=axial, 2=coronal, 3=sagittal
     pub fn update_uniforms(
         &self,
         queue: &wgpu::Queue,
-        bind_group_index: usize,
+        viewport: usize,
         view_proj: glam::Mat4,
         window_center: f32,
         window_width: f32,
@@ -334,7 +333,7 @@ impl SliceResources {
             colormap,
             opacity,
         };
-        self.viewports.update(queue, bind_group_index, &uniforms);
+        self.viewports.update(queue, viewport, &uniforms);
     }
 
     pub fn bind_group(&self, viewport: usize) -> &wgpu::BindGroup {

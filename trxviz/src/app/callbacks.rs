@@ -412,7 +412,7 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
 pub(super) struct SliceViewCallback {
     pub(super) view_proj: glam::Mat4,
     pub(super) quad_index: usize,
-    pub(super) bind_group_index: usize,
+    pub(super) viewport: ViewportIndex,
     pub(super) volume_draws: Vec<VolumeDrawInfo>,
     pub(super) streamline_draws: Vec<StreamlineDrawInfo>,
     pub(super) show_streamlines: bool,
@@ -462,7 +462,7 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                 if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.file_id) {
                     sr.update_uniforms(
                         queue,
-                        self.bind_group_index,
+                        self.viewport.into(),
                         self.view_proj,
                         vd.window_center,
                         vd.window_width,
@@ -483,7 +483,7 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                     // Slice views always render flat lines regardless of 3D render style.
                     res.update_uniforms(
                         queue,
-                        self.bind_group_index,
+                        self.viewport.into(),
                         self.view_proj,
                         glam::Vec3::ZERO,
                         0, // flat
@@ -518,7 +518,7 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                 };
                 gr.update_uniforms(
                     queue,
-                    self.bind_group_index,
+                    self.viewport.into(),
                     self.view_proj,
                     glam::Vec3::ZERO,
                     self.slab_normal,
@@ -538,16 +538,16 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                 } else {
                     0.0
                 };
-                gr.update_scale_mul(queue, self.bind_group_index, scale_mul);
+                gr.update_scale_mul(queue, self.viewport.into(), scale_mul);
                 if self.show_odx_glyphs {
                     gr.update_color_mode(
                         queue,
-                        self.bind_group_index,
+                        self.viewport.into(),
                         glyph_colormap_code(self.odx_glyph_colormap),
                     );
-                    gr.update_amp_norm(queue, self.bind_group_index, self.odx_amp_norm);
-                    gr.update_opacity_gate(queue, self.bind_group_index, self.odx_opacity_gate);
-                    gr.update_size_gate(queue, self.bind_group_index, self.odx_size_gate);
+                    gr.update_amp_norm(queue, self.viewport.into(), self.odx_amp_norm);
+                    gr.update_opacity_gate(queue, self.viewport.into(), self.odx_opacity_gate);
+                    gr.update_size_gate(queue, self.viewport.into(), self.odx_size_gate);
                 }
             }
         }
@@ -555,7 +555,7 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
             if let Some(fr) = callback_resources.get_mut::<OdxFixelResources>() {
                 fr.resources_2d.update_uniforms(
                     queue,
-                    self.bind_group_index,
+                    self.viewport.into(),
                     self.view_proj,
                     glam::Vec3::ZERO,
                     self.slab_normal,
@@ -576,12 +576,12 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                 );
                 fr.resources_2d.update_length_mul(
                     queue,
-                    self.bind_group_index,
+                    self.viewport.into(),
                     self.odx_fixel_length_scale,
                 );
                 fr.resources_2d.update_colormap(
                     queue,
-                    self.bind_group_index,
+                    self.viewport.into(),
                     self.odx_fixel_colormap_code,
                     (
                         self.odx_fixel_scalar_range[0],
@@ -616,7 +616,7 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
             for vd in &self.volume_draws {
                 if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.file_id) {
                     render_pass.set_pipeline(&sr.pipeline);
-                    render_pass.set_bind_group(0, sr.bind_group(self.bind_group_index), &[]);
+                    render_pass.set_bind_group(0, sr.bind_group(self.viewport.into()), &[]);
                     render_pass.set_index_buffer(
                         sr.quad_index_buffer.slice(..),
                         wgpu::IndexFormat::Uint16,
@@ -638,7 +638,7 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                             continue;
                         }
                         render_pass.set_pipeline(&sr.slice_pipeline);
-                        render_pass.set_bind_group(0, sr.bind_group(self.bind_group_index), &[]);
+                        render_pass.set_bind_group(0, sr.bind_group(self.viewport.into()), &[]);
                         render_pass.set_vertex_buffer(0, sr.position_buffer.slice(..));
                         render_pass.set_vertex_buffer(1, sr.color_buffer.slice(..));
                         render_pass.set_vertex_buffer(2, sr.tangent_buffer.slice(..));
@@ -651,13 +651,13 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
         }
         if self.show_boundary_glyphs || self.show_odx_glyphs {
             if let Some(gr) = callback_resources.get::<GlyphResources>() {
-                gr.paint(render_pass, self.bind_group_index, true);
+                gr.paint(render_pass, self.viewport.into(), true);
             }
         }
         if self.show_odx_fixels && self.odx_fixel_visible {
             if let Some(fr) = callback_resources.get::<OdxFixelResources>() {
                 fr.resources_2d
-                    .paint(render_pass, self.bind_group_index, true);
+                    .paint(render_pass, self.viewport.into(), true);
             }
         }
     }

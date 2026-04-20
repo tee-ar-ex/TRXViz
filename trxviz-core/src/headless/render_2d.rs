@@ -9,6 +9,7 @@ use super::HeadlessRenderData;
 use crate::lighting::{SceneLightingParams, WorkflowRender3D};
 use crate::renderer::camera::OrthoSliceCamera;
 use crate::renderer::slice_renderer::SliceAxis;
+use crate::renderer::viewport::ViewportIndex;
 use crate::scene::HeadlessScene;
 use crate::workflow::{
     WorkflowOrthoSliceCamera, WorkflowSliceViewKind, WorkflowSliceViewUi, WorkflowView2DMode,
@@ -88,7 +89,7 @@ pub(super) fn render_scene2d_to_png(
     };
 
     for panel in &panels {
-        let bind_group_index = panel.axis_index + 1;
+        let viewport = ViewportIndex::from_slice_axis_index(panel.axis_index);
         let aspect = panel.rect.width as f32 / panel.rect.height.max(1) as f32;
         let camera = &slice_view_ui.slice_cameras[panel.axis_index];
         let view_proj =
@@ -103,7 +104,7 @@ pub(super) fn render_scene2d_to_png(
             {
                 slice.update_uniforms(
                     queue,
-                    bind_group_index,
+                    viewport.into(),
                     view_proj,
                     volume.window_center,
                     volume.window_width,
@@ -126,7 +127,7 @@ pub(super) fn render_scene2d_to_png(
                 let hw = streamline.tube_radius.max(0.5);
                 resource.update_uniforms(
                     queue,
-                    bind_group_index,
+                    viewport.into(),
                     view_proj,
                     Vec3::ZERO,
                     0,
@@ -144,7 +145,7 @@ pub(super) fn render_scene2d_to_png(
         if render_data.glyph_visible || render_data.odx_visible {
             resources.glyphs.update_uniforms(
                 queue,
-                bind_group_index,
+                viewport.into(),
                 view_proj,
                 Vec3::ZERO,
                 slab_normal,
@@ -163,7 +164,7 @@ pub(super) fn render_scene2d_to_png(
         if render_data.odx_visible && render_data.odx_fixel_2d_visible {
             resources.fixels_2d.update_uniforms(
                 queue,
-                bind_group_index,
+                viewport.into(),
                 view_proj,
                 Vec3::ZERO,
                 slab_normal,
@@ -179,7 +180,7 @@ pub(super) fn render_scene2d_to_png(
             );
             resources.fixels_2d.update_colormap(
                 queue,
-                bind_group_index,
+                viewport.into(),
                 render_data.fixel_2d_colormap_code,
                 (
                     render_data.fixel_2d_scalar_range[0],
@@ -224,7 +225,7 @@ pub(super) fn render_scene2d_to_png(
             unsafe { std::mem::transmute(&mut render_pass) };
 
         for panel in &panels {
-            let bind_group_index = panel.axis_index + 1;
+            let viewport = ViewportIndex::from_slice_axis_index(panel.axis_index);
             render_pass.set_viewport(
                 panel.rect.x as f32,
                 panel.rect.y as f32,
@@ -248,7 +249,7 @@ pub(super) fn render_scene2d_to_png(
                     .find(|(id, _)| *id == volume.file_id)
                 {
                     render_pass.set_pipeline(&slice.pipeline);
-                    render_pass.set_bind_group(0, slice.bind_group(bind_group_index), &[]);
+                    render_pass.set_bind_group(0, slice.bind_group(viewport.into()), &[]);
                     render_pass.set_index_buffer(
                         slice.quad_index_buffer.slice(..),
                         wgpu::IndexFormat::Uint16,
@@ -271,7 +272,7 @@ pub(super) fn render_scene2d_to_png(
                         .find(|(id, _)| *id == streamline.file_id)
                     {
                         render_pass.set_pipeline(&resource.slice_pipeline);
-                        render_pass.set_bind_group(0, resource.bind_group(bind_group_index), &[]);
+                        render_pass.set_bind_group(0, resource.bind_group(viewport.into()), &[]);
                         render_pass.set_vertex_buffer(0, resource.position_buffer.slice(..));
                         render_pass.set_vertex_buffer(1, resource.color_buffer.slice(..));
                         render_pass.set_vertex_buffer(2, resource.tangent_buffer.slice(..));
@@ -284,10 +285,10 @@ pub(super) fn render_scene2d_to_png(
                 }
             }
             if render_data.glyph_visible || render_data.odx_visible {
-                resources.glyphs.paint(render_pass, bind_group_index, true);
+                resources.glyphs.paint(render_pass, viewport.into(), true);
             }
             if render_data.odx_visible && render_data.odx_fixel_2d_visible {
-                resources.fixels_2d.paint(render_pass, bind_group_index, true);
+                resources.fixels_2d.paint(render_pass, viewport.into(), true);
             }
         }
     }

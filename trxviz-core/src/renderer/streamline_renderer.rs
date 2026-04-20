@@ -340,7 +340,6 @@ impl StreamlineResources {
     }
 
     /// Update uniforms for a specific viewport.
-    /// `viewport`: 0=3D, 1=axial, 2=coronal, 3=sagittal.
     pub fn update_uniforms(
         &self,
         queue: &wgpu::Queue,

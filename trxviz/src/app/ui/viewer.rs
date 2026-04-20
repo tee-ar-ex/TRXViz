@@ -8,6 +8,7 @@ use trxviz_core::data::orientation_field::BoundaryGlyphColorMode;
 use trxviz_core::headless::HeadlessView;
 use trxviz_core::renderer::camera::OrbitCamera;
 use trxviz_core::renderer::mesh_renderer::MeshDrawStyle;
+use trxviz_core::renderer::viewport::ViewportIndex;
 
 fn viewport_3d_id() -> egui::ViewportId {
     egui::ViewportId::from_hash_of("trxviz_3d_window")
@@ -1084,7 +1085,7 @@ impl super::super::TrxVizApp {
             callbacks::SliceViewCallback {
                 view_proj: vp,
                 quad_index: axis_index,
-                bind_group_index: axis_index + 1,
+                viewport: ViewportIndex::from_slice_axis_index(axis_index),
                 volume_draws: render_data.volume_draws.clone(),
                 streamline_draws: render_data.streamline_draws.clone(),
                 show_streamlines: render_data.any_visible_streamlines,
