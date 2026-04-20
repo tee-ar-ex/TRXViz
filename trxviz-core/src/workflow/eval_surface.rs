@@ -1,6 +1,6 @@
 use crate::data::cifti::{CiftiStructure, ScalarKind, ScalarMetadata, SurfaceScalars};
 use crate::data::loaded_files::FileId;
-use crate::renderer::mesh_renderer::SurfaceColormap;
+use crate::renderer::colormap::surface_colormap_rgb;
 use crate::scene::LoadedGiftiSurface;
 
 use super::*;
@@ -154,62 +154,4 @@ fn alpha_blend(dst: &mut [f32; 4], src: [f32; 4]) {
     dst[1] = dst[1] * inv + src[1] * src_a;
     dst[2] = dst[2] * inv + src[2] * src_a;
     dst[3] = (dst[3] + src_a).clamp(0.0, 1.0);
-}
-
-fn surface_colormap_rgb(t: f32, colormap: SurfaceColormap) -> [f32; 3] {
-    match colormap {
-        SurfaceColormap::BlueWhiteRed => {
-            if t < 0.5 {
-                let s = t * 2.0;
-                [s, s, 1.0]
-            } else {
-                let s = (1.0 - t) * 2.0;
-                [1.0, s, s]
-            }
-        }
-        SurfaceColormap::Viridis => {
-            let anchors = [
-                [0.267, 0.005, 0.329],
-                [0.283, 0.141, 0.458],
-                [0.254, 0.265, 0.530],
-                [0.207, 0.372, 0.553],
-                [0.164, 0.471, 0.558],
-                [0.128, 0.567, 0.551],
-                [0.135, 0.659, 0.518],
-                [0.267, 0.749, 0.441],
-                [0.478, 0.821, 0.318],
-                [0.741, 0.873, 0.150],
-            ];
-            lerp_colormap(&anchors, t)
-        }
-        SurfaceColormap::Inferno => {
-            let anchors = [
-                [0.001, 0.000, 0.014],
-                [0.125, 0.047, 0.290],
-                [0.302, 0.073, 0.488],
-                [0.511, 0.121, 0.561],
-                [0.709, 0.212, 0.486],
-                [0.865, 0.316, 0.347],
-                [0.962, 0.471, 0.212],
-                [0.988, 0.683, 0.139],
-                [0.978, 0.893, 0.306],
-            ];
-            lerp_colormap(&anchors, t)
-        }
-    }
-}
-
-fn lerp_colormap(anchors: &[[f32; 3]], t: f32) -> [f32; 3] {
-    if anchors.len() == 1 {
-        return anchors[0];
-    }
-    let x = t.clamp(0.0, 1.0) * (anchors.len() as f32 - 1.0);
-    let i = x.floor() as usize;
-    let j = (i + 1).min(anchors.len() - 1);
-    let f = x - i as f32;
-    [
-        anchors[i][0] * (1.0 - f) + anchors[j][0] * f,
-        anchors[i][1] * (1.0 - f) + anchors[j][1] * f,
-        anchors[i][2] * (1.0 - f) + anchors[j][2] * f,
-    ]
 }
