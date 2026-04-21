@@ -120,6 +120,21 @@ pub struct OdfSliceMetadata {
     pub amp_norm: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OdfAmplitudeConditioning {
+    pub subtract_iso: bool,
+    pub norm_within_voxel: bool,
+}
+
+impl OdfAmplitudeConditioning {
+    pub const fn new(subtract_iso: bool, norm_within_voxel: bool) -> Self {
+        Self {
+            subtract_iso,
+            norm_within_voxel,
+        }
+    }
+}
+
 #[derive(Default)]
 struct OdfSliceMetadataCache {
     order: VecDeque<(usize, u32, usize)>,
@@ -378,6 +393,26 @@ impl OdxScene {
         Some(out)
     }
 
+    pub fn conditioned_odf_amplitudes_full_sphere(
+        &self,
+        conditioning: OdfAmplitudeConditioning,
+    ) -> Option<Vec<f32>> {
+        let source = self.odf_source.as_ref()?;
+        let view = self.odf_view_f32()?;
+        let peak_target = self.default_normalized_peak_length_mm();
+        let mut out = Vec::with_capacity(view.nrows() * source.render_vertices.len());
+        for row in view.rows() {
+            let row_start = out.len();
+            if source.sample_domain.is_hemisphere() {
+                append_mirrored_hemisphere_row(row, &mut out);
+            } else {
+                out.extend_from_slice(row);
+            }
+            condition_odf_amplitudes_in_place(&mut out[row_start..], conditioning, peak_target);
+        }
+        Some(out)
+    }
+
     pub fn odf_amplitudes_for_slice(&self, axis: usize, slice_idx: u32) -> Option<Vec<f32>> {
         let source = self.odf_source.as_ref()?;
         let view = self.odf_view_f32()?;
@@ -390,6 +425,30 @@ impl OdxScene {
             } else {
                 out.extend_from_slice(row);
             }
+        }
+        Some(out)
+    }
+
+    pub fn conditioned_odf_amplitudes_for_slice(
+        &self,
+        axis: usize,
+        slice_idx: u32,
+        conditioning: OdfAmplitudeConditioning,
+    ) -> Option<Vec<f32>> {
+        let source = self.odf_source.as_ref()?;
+        let view = self.odf_view_f32()?;
+        let slice_indices = self.slice_compact_indices(axis, slice_idx);
+        let peak_target = self.default_normalized_peak_length_mm();
+        let mut out = Vec::with_capacity(slice_indices.len() * source.render_vertices.len());
+        for &compact_idx in slice_indices {
+            let row_start = out.len();
+            let row = view.row(compact_idx);
+            if source.sample_domain.is_hemisphere() {
+                append_mirrored_hemisphere_row(row, &mut out);
+            } else {
+                out.extend_from_slice(row);
+            }
+            condition_odf_amplitudes_in_place(&mut out[row_start..], conditioning, peak_target);
         }
         Some(out)
     }
@@ -892,6 +951,10 @@ impl OdxScene {
             .sqrt() as f32;
         dx.min(dy).min(dz)
     }
+
+    pub fn default_normalized_peak_length_mm(&self) -> f32 {
+        self.default_glyph_scale() * 0.45
+    }
 }
 
 impl OdxScene {
@@ -1235,6 +1298,65 @@ fn append_mirrored_hemisphere_row(row: &[f32], out: &mut Vec<f32>) {
     out.extend_from_slice(row);
 }
 
+pub fn condition_odf_amplitudes_in_place(
+    values: &mut [f32],
+    conditioning: OdfAmplitudeConditioning,
+    target_peak_length_mm: f32,
+) {
+    if values.is_empty() || (!conditioning.subtract_iso && !conditioning.norm_within_voxel) {
+        return;
+    }
+
+    let min_amp = if conditioning.subtract_iso {
+        values
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .reduce(f32::min)
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
+    if conditioning.subtract_iso {
+        for value in values.iter_mut() {
+            if value.is_finite() {
+                *value -= min_amp;
+            }
+        }
+    }
+
+    if !conditioning.norm_within_voxel {
+        return;
+    }
+
+    let peak = values.iter().copied().fold(0.0f32, |acc, value| {
+        if value.is_finite() {
+            acc.max(value)
+        } else {
+            acc
+        }
+    });
+    if !peak.is_finite()
+        || peak <= 0.0
+        || !target_peak_length_mm.is_finite()
+        || target_peak_length_mm <= 0.0
+    {
+        return;
+    }
+
+    let scale = target_peak_length_mm / peak;
+    for value in values.iter().copied() {
+        if !value.is_finite() {
+            return;
+        }
+    }
+
+    for value in values.iter_mut() {
+        *value *= scale;
+    }
+}
+
 fn promote_odf_slice_cache_key(cache: &mut OdfSliceMetadataCache, key: (usize, u32, usize)) {
     if let Some(position) = cache.order.iter().position(|entry| *entry == key) {
         cache.order.remove(position);
@@ -1405,6 +1527,86 @@ mod tests {
             DType::Float32,
         );
         builder.finalize().unwrap()
+    }
+
+    #[test]
+    fn condition_odf_amplitudes_noop_when_disabled() {
+        let mut values = vec![1.0, 3.0, 5.0];
+        condition_odf_amplitudes_in_place(
+            &mut values,
+            OdfAmplitudeConditioning::new(false, false),
+            1.0,
+        );
+        assert_eq!(values, vec![1.0, 3.0, 5.0]);
+    }
+
+    #[test]
+    fn condition_odf_amplitudes_subtracts_minimum() {
+        let mut values = vec![2.0, 5.0, 7.0];
+        condition_odf_amplitudes_in_place(
+            &mut values,
+            OdfAmplitudeConditioning::new(true, false),
+            1.0,
+        );
+        assert_eq!(values, vec![0.0, 3.0, 5.0]);
+    }
+
+    #[test]
+    fn condition_odf_amplitudes_scales_peak_only() {
+        let mut values = vec![2.0, 3.0, 5.0];
+        condition_odf_amplitudes_in_place(
+            &mut values,
+            OdfAmplitudeConditioning::new(false, true),
+            4.5,
+        );
+        assert!((values[0] - 1.8).abs() < 1e-6);
+        assert!((values[1] - 2.7).abs() < 1e-6);
+        assert!((values[2] - 4.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn condition_odf_amplitudes_subtracts_then_scales_peak() {
+        let mut values = vec![2.0, 5.0, 7.0];
+        condition_odf_amplitudes_in_place(
+            &mut values,
+            OdfAmplitudeConditioning::new(true, true),
+            4.5,
+        );
+        assert!((values[0] - 0.0).abs() < 1e-6);
+        assert!((values[1] - 2.7).abs() < 1e-6);
+        assert!((values[2] - 4.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn condition_odf_amplitudes_skips_invalid_or_zero_peak_normalization() {
+        let mut zero_sum = vec![4.0, 4.0, 4.0];
+        condition_odf_amplitudes_in_place(
+            &mut zero_sum,
+            OdfAmplitudeConditioning::new(true, true),
+            4.5,
+        );
+        assert_eq!(zero_sum, vec![0.0, 0.0, 0.0]);
+
+        let mut invalid = vec![1.0, f32::NAN, 3.0];
+        condition_odf_amplitudes_in_place(
+            &mut invalid,
+            OdfAmplitudeConditioning::new(false, true),
+            4.5,
+        );
+        assert!(invalid[0] == 1.0 && invalid[2] == 3.0 && invalid[1].is_nan());
+    }
+
+    #[test]
+    fn conditioned_hemisphere_slice_scales_peak_after_expansion() {
+        let scene = OdxScene::from_dataset(build_test_dataset_with_odf(true)).unwrap();
+        let values = scene
+            .conditioned_odf_amplitudes_for_slice(2, 0, OdfAmplitudeConditioning::new(false, true))
+            .unwrap();
+        assert_eq!(values.len(), dsistudio_odf8::full_vertices_ras().len());
+        let peak = values.iter().copied().fold(0.0f32, f32::max);
+        assert!((peak - scene.default_normalized_peak_length_mm()).abs() < 1e-6);
+        let hemi_len = dsistudio_odf8::hemisphere_vertices_ras().len();
+        assert_eq!(&values[..hemi_len], &values[hemi_len..]);
     }
 
     #[test]

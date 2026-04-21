@@ -239,6 +239,14 @@ pub fn default_odf_glyph_detail() -> u32 {
     3
 }
 
+pub fn default_true() -> bool {
+    true
+}
+
+pub fn default_false() -> bool {
+    false
+}
+
 pub fn default_workflow_slice_view_kind() -> WorkflowSliceViewKind {
     WorkflowSliceViewKind::Axial
 }
@@ -687,6 +695,8 @@ pub struct OdfGlyphDrawPlan {
     pub node_uuid: WorkflowNodeUuid,
     pub field: crate::data::odx_data::OdfField,
     pub scale: f32,
+    pub subtract_iso: bool,
+    pub norm_within_voxel: bool,
     pub opacity: f32,
     pub offset_from_slice: f32,
     pub gloss: f32,
@@ -1303,7 +1313,16 @@ mod tests {
         }"#;
         let restored: WorkflowNodeKind = serde_json::from_str(json).unwrap();
         match restored {
-            WorkflowNodeKind::OdfGlyphRenderer { detail, .. } => assert_eq!(detail, 3),
+            WorkflowNodeKind::OdfGlyphRenderer {
+                detail,
+                subtract_iso,
+                norm_within_voxel,
+                ..
+            } => {
+                assert_eq!(detail, 3);
+                assert!(subtract_iso);
+                assert!(!norm_within_voxel);
+            }
             _ => panic!("expected OdfGlyphRenderer"),
         }
     }

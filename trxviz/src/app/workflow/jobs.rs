@@ -169,8 +169,21 @@ fn active_odx_glyph_resource_key(
 ) -> Option<OdxGlyphResourceKey> {
     let scene = active_odx_glyph_scene(app)?;
     let plan = active_odx_glyph_plan(app);
+    make_odx_glyph_resource_key(
+        scene,
+        plan,
+        active_odx_slice_state(app),
+        app.max_storage_buffer_binding_size,
+    )
+}
+
+fn make_odx_glyph_resource_key(
+    scene: &Arc<trxviz_core::data::odx_data::OdxScene>,
+    plan: Option<&trxviz_core::workflow::OdfGlyphDrawPlan>,
+    slice_state: Option<(usize, u32)>,
+    max_storage_buffer_binding_size: Option<usize>,
+) -> Option<OdxGlyphResourceKey> {
     let source_kind = scene.glyph_source_kind()?;
-    let slice_state = active_odx_slice_state(app);
     let mode = match source_kind {
         trxviz_core::data::odx_data::OdxGlyphSourceKind::Odf => OdxGpuGlyphMode::OdfSliceGather,
         trxviz_core::data::odx_data::OdxGlyphSourceKind::Sh => OdxGpuGlyphMode::ShCompute,
@@ -181,7 +194,15 @@ fn active_odx_glyph_resource_key(
             (vertices.len(), indices.len(), None)
         }
         trxviz_core::data::odx_data::OdxGlyphSourceKind::Sh => {
-            let detail = clamped_active_odx_sh_detail(app, scene, slice_state);
+            let requested = plan
+                .map(|draw| draw.detail)
+                .unwrap_or(trxviz_core::workflow::default_odf_glyph_detail());
+            let detail = match (slice_state, max_storage_buffer_binding_size) {
+                (Some((axis, slice_idx)), Some(limit)) => {
+                    scene.clamp_sh_detail_for_slice(axis, slice_idx, requested, limit)
+                }
+                _ => requested,
+            };
             let mesh = scene.sh_render_mesh(detail)?;
             (mesh.vertices().len(), mesh.indices().len(), Some(detail))
         }
@@ -206,6 +227,8 @@ fn active_odx_glyph_resource_key(
         sh_detail,
         slice_axis: slice_state.map(|(axis, _)| axis as u8),
         slice_index: slice_state.map(|(_, slice_idx)| slice_idx),
+        subtract_iso: plan.map(|draw| draw.subtract_iso).unwrap_or(true),
+        norm_within_voxel: plan.map(|draw| draw.norm_within_voxel).unwrap_or(false),
         opacity_gate_fingerprint: opacity_hasher.finish(),
         size_gate_fingerprint: size_hasher.finish(),
     })
@@ -372,6 +395,9 @@ impl crate::app::TrxVizApp {
                     rows_per_chunk,
                     &metadata.chunk_worklists,
                     metadata.amp_norm,
+                    scene.default_normalized_peak_length_mm(),
+                    resource_key.subtract_iso,
+                    resource_key.norm_within_voxel,
                     opacity_samples.as_deref(),
                     size_samples.as_deref(),
                 );
@@ -415,6 +441,9 @@ impl crate::app::TrxVizApp {
                     mesh.transform_flat(),
                     mesh.source_dir_count(),
                     mesh.row_width(),
+                    scene.default_normalized_peak_length_mm(),
+                    resource_key.subtract_iso,
+                    resource_key.norm_within_voxel,
                     opacity_samples.as_deref(),
                     size_samples.as_deref(),
                 );
@@ -1811,4 +1840,40 @@ fn should_queue_expensive_job(
 fn mark_expensive_failure(record: &mut ExpensiveNodeRunRecord, fingerprint: u64, error: &str) {
     record.current_fingerprint = Some(fingerprint);
     record.status = WorkflowExecutionStatus::Failed(error.to_string());
+}
+
+#[cfg(test)]
+mod tests {
+    use trxviz_core::data::odx_data::OdxGlyphSourceKind;
+    use trxviz_core::renderer::glyph_renderer::{OdxGlyphResourceKey, OdxGpuGlyphMode};
+
+    #[test]
+    fn odx_glyph_resource_key_changes_when_conditioning_flags_change() {
+        let key_a = OdxGlyphResourceKey {
+            scene_ptr: 1,
+            source_kind: OdxGlyphSourceKind::Odf,
+            mode: OdxGpuGlyphMode::OdfSliceGather,
+            sphere_vertex_count: 642,
+            sphere_index_count: 3840,
+            sh_order: None,
+            sh_detail: None,
+            slice_axis: Some(2),
+            slice_index: Some(0),
+            subtract_iso: true,
+            norm_within_voxel: false,
+            opacity_gate_fingerprint: 0,
+            size_gate_fingerprint: 0,
+        };
+        let key_b = OdxGlyphResourceKey {
+            subtract_iso: false,
+            ..key_a
+        };
+        let key_c = OdxGlyphResourceKey {
+            norm_within_voxel: true,
+            ..key_a
+        };
+
+        assert_ne!(key_a, key_b);
+        assert_ne!(key_a, key_c);
+    }
 }

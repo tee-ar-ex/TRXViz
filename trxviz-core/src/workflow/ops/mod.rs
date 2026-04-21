@@ -78,9 +78,10 @@ use super::{
     default_boundary_glyph_density_3d_step, default_boundary_glyph_min_contacts,
     default_boundary_glyph_scale, default_boundary_glyph_slice_density_step,
     default_bundle_surface_min_component_volume_mm3, default_bundle_surface_outline_thickness,
-    default_enabled, default_fixel_colormap, default_fixel_length_scale, default_fixel_line_width,
-    default_fixel_slab_thickness_mm, default_full_opacity, default_odf_glyph_detail,
-    default_odf_glyph_scale, default_surface_overlay_layers, default_workflow_slice_view_kind,
+    default_enabled, default_false, default_fixel_colormap, default_fixel_length_scale,
+    default_fixel_line_width, default_fixel_slab_thickness_mm, default_full_opacity,
+    default_odf_glyph_detail, default_odf_glyph_scale, default_surface_overlay_layers,
+    default_true, default_workflow_slice_view_kind,
 };
 use crate::data::cifti::CiftiStructure;
 use crate::data::loaded_files::{FileId, VolumeColormap};
@@ -295,6 +296,10 @@ pub enum WorkflowNodeKind {
     OdfGlyphRenderer {
         #[serde(default = "default_odf_glyph_scale")]
         scale: f32,
+        #[serde(default = "default_true")]
+        subtract_iso: bool,
+        #[serde(default = "default_false")]
+        norm_within_voxel: bool,
         #[serde(default = "default_full_opacity")]
         opacity: f32,
         #[serde(default)]
@@ -718,6 +723,8 @@ macro_rules! with_workflow_op {
             }
             WorkflowNodeKind::OdfGlyphRenderer {
                 scale,
+                subtract_iso,
+                norm_within_voxel,
                 opacity,
                 offset_from_slice,
                 gloss,
@@ -730,6 +737,8 @@ macro_rules! with_workflow_op {
             } => {
                 let $op = odf_glyph_renderer::OdfGlyphRendererOp {
                     scale: *scale,
+                    subtract_iso: *subtract_iso,
+                    norm_within_voxel: *norm_within_voxel,
                     opacity: *opacity,
                     offset_from_slice: *offset_from_slice,
                     gloss: *gloss,
@@ -880,6 +889,8 @@ pub(super) fn validate_registry() -> WorkflowResult<()> {
         .tag(),
         odf_glyph_renderer::OdfGlyphRendererOp {
             scale: 1.0,
+            subtract_iso: true,
+            norm_within_voxel: false,
             opacity: 1.0,
             offset_from_slice: 0.0,
             gloss: 0.0,

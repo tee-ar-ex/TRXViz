@@ -25,6 +25,8 @@ pub struct OdxGlyphResourceKey {
     pub sh_detail: Option<u32>,
     pub slice_axis: Option<u8>,
     pub slice_index: Option<u32>,
+    pub subtract_iso: bool,
+    pub norm_within_voxel: bool,
     pub opacity_gate_fingerprint: u64,
     pub size_gate_fingerprint: u64,
 }
@@ -58,6 +60,8 @@ pub struct GlyphResources {
     odx_sh_params_buffer: Option<wgpu::Buffer>,
     odx_sh_source_bins: u32,
     odx_sh_ncoeffs: u32,
+    odx_sh_flags: [u32; 4],
+    odx_sh_scales: [f32; 4],
     num_indices: u32,
     num_instances: u32,
     current_bins: u32,
@@ -109,6 +113,8 @@ struct OdxShComputeParams {
     source_bins: u32,
     ncoeffs: u32,
     slice_count: u32,
+    flags: [u32; 4],
+    scales: [f32; 4],
 }
 
 #[repr(C)]
@@ -116,6 +122,7 @@ struct OdxShComputeParams {
 struct OdxOdfComputeParams {
     counts: [u32; 4],
     scales: [f32; 4],
+    flags: [u32; 4],
 }
 
 #[repr(C)]
@@ -129,17 +136,10 @@ pub struct GlyphInstance {
     pub _pad: u32,
 }
 
-const COMPUTE_WORKGROUP_SIZE_X: u32 = 64;
 const MAX_COMPUTE_WORKGROUPS_PER_DIMENSION: u32 = 65_535;
-const MAX_COMPUTE_INVOCATIONS_PER_DISPATCH: usize =
-    (COMPUTE_WORKGROUP_SIZE_X as usize) * (MAX_COMPUTE_WORKGROUPS_PER_DIMENSION as usize);
 
-fn max_rows_per_dispatch(row_width: usize) -> usize {
-    if row_width == 0 {
-        1
-    } else {
-        (MAX_COMPUTE_INVOCATIONS_PER_DISPATCH / row_width).max(1)
-    }
+fn max_row_workgroups_per_dispatch() -> usize {
+    MAX_COMPUTE_WORKGROUPS_PER_DIMENSION as usize
 }
 
 impl GlyphResources {
@@ -493,6 +493,8 @@ impl GlyphResources {
             odx_sh_params_buffer: None,
             odx_sh_source_bins: 0,
             odx_sh_ncoeffs: 0,
+            odx_sh_flags: [0, 0, 0, 0],
+            odx_sh_scales: [0.0, 0.0, 0.0, 0.0],
             num_indices: 0,
             num_instances: 0,
             current_bins: 0,
@@ -717,6 +719,9 @@ impl GlyphResources {
         rows_per_chunk: usize,
         chunk_worklists: &[OdfChunkWorklist],
         amp_norm: f32,
+        target_peak_length_mm: f32,
+        subtract_iso: bool,
+        norm_within_voxel: bool,
         opacity_samples: Option<&[f32]>,
         size_samples: Option<&[f32]>,
     ) {
@@ -779,7 +784,15 @@ impl GlyphResources {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("interactive_odx_odf_slice_encoder"),
         });
-        self.dispatch_odx_odf_slice_gather(device, &mut encoder, chunk_worklists, amp_norm);
+        self.dispatch_odx_odf_slice_gather(
+            device,
+            &mut encoder,
+            chunk_worklists,
+            amp_norm,
+            target_peak_length_mm,
+            subtract_iso,
+            norm_within_voxel,
+        );
         queue.submit(std::iter::once(encoder.finish()));
     }
 
@@ -795,6 +808,9 @@ impl GlyphResources {
         transform: &[f32],
         source_bins: usize,
         full_bins: usize,
+        target_peak_length_mm: f32,
+        subtract_iso: bool,
+        norm_within_voxel: bool,
         opacity_samples: Option<&[f32]>,
         size_samples: Option<&[f32]>,
     ) {
@@ -878,7 +894,11 @@ impl GlyphResources {
             source_bins: source_bins as u32,
             ncoeffs: ncoeffs as u32,
             slice_count: 0,
+            flags: [u32::from(subtract_iso), u32::from(norm_within_voxel), 0, 0],
+            scales: [target_peak_length_mm.max(0.0), 0.0, 0.0, 0.0],
         };
+        self.odx_sh_flags = params.flags;
+        self.odx_sh_scales = params.scales;
         self.odx_sh_params_buffer = Some(device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("odx_sh_compute_params"),
@@ -916,7 +936,7 @@ impl GlyphResources {
             return;
         }
 
-        let rows_per_dispatch = max_rows_per_dispatch(full_bins);
+        let rows_per_dispatch = max_row_workgroups_per_dispatch();
         let (Some(coeffs), Some(transform), Some(amplitudes)) = (
             self.odx_sh_coeff_buffer.as_ref(),
             self.odx_sh_transform_buffer.as_ref(),
@@ -930,6 +950,8 @@ impl GlyphResources {
                 source_bins: stored.source_bins,
                 ncoeffs: stored.ncoeffs,
                 slice_count: slice_chunk.len() as u32,
+                flags: stored.flags,
+                scales: stored.scales,
             };
             let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("odx_sh_compute_params_chunk"),
@@ -968,7 +990,7 @@ impl GlyphResources {
                 ],
             });
 
-            let total = (slice_chunk.len() * full_bins) as u32;
+            let total = slice_chunk.len() as u32;
             if total == 0 {
                 continue;
             }
@@ -978,7 +1000,7 @@ impl GlyphResources {
             });
             pass.set_pipeline(&self.odx_sh_pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups(total.div_ceil(COMPUTE_WORKGROUP_SIZE_X), 1, 1);
+            pass.dispatch_workgroups(total, 1, 1);
         }
     }
 
@@ -1122,6 +1144,9 @@ impl GlyphResources {
         encoder: &mut wgpu::CommandEncoder,
         chunk_worklists: &[OdfChunkWorklist],
         amp_norm: f32,
+        target_peak_length_mm: f32,
+        subtract_iso: bool,
+        norm_within_voxel: bool,
     ) {
         let Some(output_buffer) = self.amplitude_buffer.as_ref() else {
             return;
@@ -1137,7 +1162,7 @@ impl GlyphResources {
             let Some(source_buffer) = self.odx_odf_source_chunks.get(chunk.chunk_index) else {
                 continue;
             };
-            let rows_per_dispatch = max_rows_per_dispatch(self.current_bins as usize);
+            let rows_per_dispatch = max_row_workgroups_per_dispatch();
             for work_item_chunk in chunk.work_items.chunks(rows_per_dispatch) {
                 let params = OdxOdfComputeParams {
                     counts: [
@@ -1146,7 +1171,13 @@ impl GlyphResources {
                         work_item_chunk.len() as u32,
                         0,
                     ],
-                    scales: [if amp_norm > 0.0 { amp_norm } else { 1.0 }, 0.0, 0.0, 0.0],
+                    scales: [
+                        if amp_norm > 0.0 { amp_norm } else { 1.0 },
+                        target_peak_length_mm.max(0.0),
+                        0.0,
+                        0.0,
+                    ],
+                    flags: [u32::from(subtract_iso), u32::from(norm_within_voxel), 0, 0],
                 };
                 let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("odx_odf_compute_params"),
@@ -1183,7 +1214,7 @@ impl GlyphResources {
                     ],
                 });
 
-                let total = (work_item_chunk.len() * self.current_bins as usize) as u32;
+                let total = work_item_chunk.len() as u32;
                 if total == 0 {
                     continue;
                 }
@@ -1193,7 +1224,7 @@ impl GlyphResources {
                 });
                 pass.set_pipeline(&self.odx_odf_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups(total.div_ceil(COMPUTE_WORKGROUP_SIZE_X), 1, 1);
+                pass.dispatch_workgroups(total, 1, 1);
             }
         }
     }
@@ -1414,6 +1445,8 @@ impl GlyphResources {
         self.odx_sh_params_buffer = None;
         self.odx_sh_source_bins = 0;
         self.odx_sh_ncoeffs = 0;
+        self.odx_sh_flags = [0, 0, 0, 0];
+        self.odx_sh_scales = [0.0, 0.0, 0.0, 0.0];
     }
 
     fn current_odx_sh_params(&self) -> OdxShComputeParams {
@@ -1422,6 +1455,8 @@ impl GlyphResources {
             source_bins: self.odx_sh_source_bins,
             ncoeffs: self.odx_sh_ncoeffs,
             slice_count: 0,
+            flags: self.odx_sh_flags,
+            scales: self.odx_sh_scales,
         }
     }
 }

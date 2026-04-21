@@ -487,6 +487,8 @@ pub(crate) fn edit_node_op(
         }
         workflow::WorkflowNodeKind::OdfGlyphRenderer {
             scale,
+            subtract_iso,
+            norm_within_voxel,
             opacity,
             offset_from_slice,
             gloss,
@@ -503,6 +505,8 @@ pub(crate) fn edit_node_op(
             }
             ui.checkbox(visible, "Visible");
             ui.add(egui::Slider::new(scale, 0.1..=5.0).text("Scale"));
+            ui.checkbox(subtract_iso, "Subtract iso");
+            ui.checkbox(norm_within_voxel, "Normalize within voxel");
             ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
             ui.add(egui::Slider::new(gloss, 0.0..=1.0).text("Gloss"));
             ui.add(egui::Slider::new(detail, 1..=max_safe_detail).text("SH detail"));

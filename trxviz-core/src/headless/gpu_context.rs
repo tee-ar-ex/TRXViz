@@ -4,7 +4,7 @@ use pollster::block_on;
 
 use super::SceneBounds;
 use crate::data::odx_data::OdxScene;
-use crate::data::odx_data::{FixelScalarValues, OdxGlyphSourceKind};
+use crate::data::odx_data::{FixelScalarValues, OdfAmplitudeConditioning, OdxGlyphSourceKind};
 use crate::data::trx_data::RenderStyle;
 use crate::renderer::background_renderer::BackgroundResources;
 use crate::renderer::fixel_renderer::FixelResources;
@@ -236,6 +236,7 @@ pub(super) fn build_gpu_resources(
         .or_else(|| workflow.runtime.scene_plan.odf_glyph_draws.first());
     if let Some(plan) = odf_plan {
         let odx = &plan.field.scene;
+        let conditioning = OdfAmplitudeConditioning::new(plan.subtract_iso, plan.norm_within_voxel);
         match odx.glyph_source_kind() {
             Some(OdxGlyphSourceKind::Odf) => {
                 let (sphere_vertices, sphere_indices) = odx
@@ -259,7 +260,11 @@ pub(super) fn build_gpu_resources(
                 if !instances.is_empty() {
                     if use_slice_local {
                         let amplitudes = odx
-                            .odf_amplitudes_for_slice(plan.slice_axis.odx_axis(), slice_index)
+                            .conditioned_odf_amplitudes_for_slice(
+                                plan.slice_axis.odx_axis(),
+                                slice_index,
+                                conditioning,
+                            )
                             .expect("ODF amplitudes should exist for slice-local ODF mode");
                         glyphs.set_odx_slice_odf(
                             device,
@@ -272,7 +277,7 @@ pub(super) fn build_gpu_resources(
                         );
                     } else {
                         let amplitudes = odx
-                            .odf_amplitudes_full_sphere()
+                            .conditioned_odf_amplitudes_full_sphere(conditioning)
                             .expect("ODF amplitudes should exist for ODF glyph mode");
                         glyphs.set_odx_odf_volume(
                             device,
@@ -319,6 +324,9 @@ pub(super) fn build_gpu_resources(
                         mesh.transform_flat(),
                         mesh.source_dir_count(),
                         mesh.row_width(),
+                        odx.default_normalized_peak_length_mm(),
+                        plan.subtract_iso,
+                        plan.norm_within_voxel,
                         None,
                         None,
                     );
@@ -337,6 +345,7 @@ pub(super) fn build_gpu_resources(
             expand(Vec3::from(center));
         }
     } else if let Some(odx) = &scene.odx_scene {
+        let conditioning = OdfAmplitudeConditioning::new(true, false);
         match odx.glyph_source_kind() {
             Some(OdxGlyphSourceKind::Odf) => {
                 let (sphere_vertices, sphere_indices) = odx
@@ -359,7 +368,7 @@ pub(super) fn build_gpu_resources(
                 if !instances.is_empty() {
                     if use_slice_local {
                         let amplitudes = odx
-                            .odf_amplitudes_for_slice(2, axial_slice)
+                            .conditioned_odf_amplitudes_for_slice(2, axial_slice, conditioning)
                             .expect("ODF amplitudes should exist for slice-local ODF mode");
                         glyphs.set_odx_slice_odf(
                             device,
@@ -372,7 +381,7 @@ pub(super) fn build_gpu_resources(
                         );
                     } else {
                         let amplitudes = odx
-                            .odf_amplitudes_full_sphere()
+                            .conditioned_odf_amplitudes_full_sphere(conditioning)
                             .expect("ODF amplitudes should exist for ODF glyph mode");
                         glyphs.set_odx_odf_volume(
                             device,
@@ -414,6 +423,9 @@ pub(super) fn build_gpu_resources(
                         mesh.transform_flat(),
                         mesh.source_dir_count(),
                         mesh.row_width(),
+                        odx.default_normalized_peak_length_mm(),
+                        true,
+                        false,
                         None,
                         None,
                     );
