@@ -197,6 +197,8 @@ pub fn load_odx_with_reference_affine(
         sh_path: None,
         fixel_dir: None,
         reference_affine: reference_affine_path,
+        mapmri_tensor_path: None,
+        mapmri_uvec_path: None,
     };
     let (dataset, _format) = load_dataset(path, options).map_err(|err| anyhow!(err.to_string()))?;
     OdxScene::from_dataset(dataset).map_err(|err| anyhow!(err.to_string()))
