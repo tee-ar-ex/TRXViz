@@ -8,24 +8,32 @@ on:
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
+    name: Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          - name: linux
+            os: ubuntu-22.04
             artifact_name: trxviz-linux
             binary: trxviz
             archive: TRXViz-linux.tar.gz
-          - os: windows-latest
+          - name: windows
+            os: windows-latest
             artifact_name: trxviz-windows
             binary: trxviz.exe
             archive: TRXViz-windows.zip
-          - os: macos-latest
+          - name: macos-arm64
+            os: macos-latest
             artifact_name: trxviz-macos
             binary: trxviz
             archive: TRXViz-macos.dmg
+          - name: macos-intel
+            os: macos-13
+            artifact_name: trxviz-macos-intel
+            binary: trxviz
+            archive: TRXViz-macos-intel.dmg
 
     steps:
       - uses: actions/checkout@v5
@@ -67,6 +75,7 @@ jobs:
           MACOS_DIR="$APP/Contents/MacOS"
           RESOURCES_DIR="$APP/Contents/Resources"
           STAGING_DIR="target/release/dmg-root"
+          DMG_PATH="target/release/${{ matrix.archive }}"
           APP_VERSION="$(grep '^version' trxviz/Cargo.toml | head -n1 | sed 's/.*= "\(.*\)"/\1/')"
           BUILD_VERSION="${GITHUB_RUN_NUMBER}"
 
@@ -107,14 +116,14 @@ jobs:
             -volname "TRXViz" \
             -srcfolder "$STAGING_DIR" \
             -ov -format UDZO \
-            "target/release/TRXViz-macos.dmg"
+            "$DMG_PATH"
 
       - name: Upload macOS artifact
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
-          path: trxviz/target/release/TRXViz-macos.dmg
+          path: trxviz/target/release/${{ matrix.archive }}
 
       # ── Windows: zip GUI + CLI ────────────────────────────────────────────
       - name: Package Windows .zip
