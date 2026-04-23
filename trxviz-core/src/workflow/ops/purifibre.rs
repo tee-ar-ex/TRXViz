@@ -42,9 +42,15 @@ pub struct PurifibreOp {
 
 // Defaults mirror nibrary's `purifibre.h` line-for-line (10% trim,
 // 10% discard, 15° spherical Gaussian).
-fn default_trim_fraction() -> f32 { 0.10 }
-fn default_puri_fraction() -> f32 { 0.10 }
-fn default_spherical_smoothing_deg() -> f32 { 15.0 }
+fn default_trim_fraction() -> f32 {
+    0.10
+}
+fn default_puri_fraction() -> f32 {
+    0.10
+}
+fn default_spherical_smoothing_deg() -> f32 {
+    15.0
+}
 
 impl Default for PurifibreOp {
     fn default() -> Self {
@@ -80,10 +86,8 @@ impl WorkflowOp for PurifibreOp {
         ctx: &mut EvalCtx<'_, '_>,
     ) -> crate::error::WorkflowResult<Vec<EvaluatedValue>> {
         let flow = expect_streamline_input(ctx.inputs, self.title())?;
-        let (bf_plan, bf_stale) = expect_boundary_field_input(
-            ctx.inputs.get(1).and_then(|o| o.as_ref()),
-            self.title(),
-        )?;
+        let (bf_plan, bf_stale) =
+            expect_boundary_field_input(ctx.inputs.get(1).and_then(|o| o.as_ref()), self.title())?;
 
         let before = flow.selected_streamlines.len();
 
@@ -197,8 +201,7 @@ impl WorkflowOp for PurifibreOp {
                     scalar_range_max: flow.scalar_range_max,
                     scalar_colormap: flow.scalar_colormap,
                 };
-                ctx.node_state.summary =
-                    format!("{} (boundary field rebuilding)", c.summary);
+                ctx.node_state.summary = format!("{} (boundary field rebuilding)", c.summary);
                 return Ok(vec![
                     EvaluatedValue {
                         value: WorkflowValue::Streamline(scored_flow),
@@ -362,8 +365,14 @@ impl WorkflowOp for PurifibreOp {
             cache.summary.clone()
         };
         Ok(vec![
-            EvaluatedValue { value: WorkflowValue::Streamline(scored_flow), stale },
-            EvaluatedValue { value: WorkflowValue::Streamline(filtered_flow), stale },
+            EvaluatedValue {
+                value: WorkflowValue::Streamline(scored_flow),
+                stale,
+            },
+            EvaluatedValue {
+                value: WorkflowValue::Streamline(filtered_flow),
+                stale,
+            },
         ])
     }
 }

@@ -82,7 +82,9 @@ pub fn prune_by_topology(
         let min_support = params.min_support;
         let kept: Vec<StreamlineIndex> = selected
             .par_iter()
-            .filter(|&&sid| streamline_supported(gpu, sid.0, &grid, &density, min_support, max_unsupported))
+            .filter(|&&sid| {
+                streamline_supported(gpu, sid.0, &grid, &density, min_support, max_unsupported)
+            })
             .copied()
             .collect();
 
@@ -185,11 +187,7 @@ fn compute_grid(gpu: &TrxGpuData, selected: &[StreamlineIndex], vs: f32) -> Opti
 /// once per unique voxel *per streamline*. Uses a cheap "skip when same as
 /// previous voxel" dedup which is exact for locally-coherent segments — the
 /// same approximation DSI-Studio uses.
-fn build_density(
-    gpu: &TrxGpuData,
-    selected: &[StreamlineIndex],
-    grid: &Grid,
-) -> Vec<u32> {
+fn build_density(gpu: &TrxGpuData, selected: &[StreamlineIndex], grid: &Grid) -> Vec<u32> {
     let n = grid.n_voxels();
     let offsets = &gpu.offsets;
     let positions = &gpu.positions;
@@ -231,18 +229,11 @@ fn streamline_supported(
     max_unsupported_fraction: f32,
 ) -> bool {
     let mut touched: Vec<usize> = Vec::with_capacity(64);
-    for_each_voxel(
-        gpu,
-        sid,
-        grid,
-        &gpu.offsets,
-        &gpu.positions,
-        |idx, prev| {
-            if Some(idx) != prev {
-                touched.push(idx);
-            }
-        },
-    );
+    for_each_voxel(gpu, sid, grid, &gpu.offsets, &gpu.positions, |idx, prev| {
+        if Some(idx) != prev {
+            touched.push(idx);
+        }
+    });
     if touched.is_empty() {
         return false;
     }
@@ -338,9 +329,7 @@ mod tests {
 
     #[test]
     fn single_streamline_is_fully_pruned() {
-        let gpu = make_gpu(vec![(0..20)
-            .map(|i| [i as f32, 0.0, 0.0])
-            .collect()]);
+        let gpu = make_gpu(vec![(0..20).map(|i| [i as f32, 0.0, 0.0]).collect()]);
         let mut sel: Vec<StreamlineIndex> = vec![StreamlineIndex(0)];
         let r = prune_by_topology(&gpu, &mut sel, &TipParams::default());
         assert_eq!(r.kept, 0);
@@ -351,11 +340,8 @@ mod tests {
     fn overlapping_streamlines_are_kept() {
         let line: Vec<[f32; 3]> = (0..20).map(|i| [i as f32, 0.0, 0.0]).collect();
         let gpu = make_gpu(vec![line.clone(), line.clone(), line]);
-        let mut sel: Vec<StreamlineIndex> = vec![
-            StreamlineIndex(0),
-            StreamlineIndex(1),
-            StreamlineIndex(2),
-        ];
+        let mut sel: Vec<StreamlineIndex> =
+            vec![StreamlineIndex(0), StreamlineIndex(1), StreamlineIndex(2)];
         let r = prune_by_topology(&gpu, &mut sel, &TipParams::default());
         assert_eq!(r.kept, 3);
         assert_eq!(r.removed, 0);
@@ -367,13 +353,16 @@ mod tests {
         let core: Vec<[f32; 3]> = (0..30).map(|i| [i as f32, 0.0, 0.0]).collect();
         let outlier: Vec<[f32; 3]> = (0..30).map(|i| [5.0, i as f32, 0.0]).collect();
         let streamlines = vec![
-            core.clone(), core.clone(), core.clone(),
-            core.clone(), core.clone(), core,
+            core.clone(),
+            core.clone(),
+            core.clone(),
+            core.clone(),
+            core.clone(),
+            core,
             outlier,
         ];
         let gpu = make_gpu(streamlines);
-        let mut sel: Vec<StreamlineIndex> =
-            (0..7u32).map(StreamlineIndex).collect();
+        let mut sel: Vec<StreamlineIndex> = (0..7u32).map(StreamlineIndex).collect();
         let r = prune_by_topology(&gpu, &mut sel, &TipParams::default());
         assert_eq!(r.kept, 6);
         assert!(!sel.iter().any(|s| s.0 == 6));
@@ -385,8 +374,7 @@ mod tests {
             .map(|k| (0..10).map(|i| [i as f32, k as f32 * 10.0, 0.0]).collect())
             .collect();
         let gpu = make_gpu(streamlines);
-        let mut sel: Vec<StreamlineIndex> =
-            (0..5u32).map(StreamlineIndex).collect();
+        let mut sel: Vec<StreamlineIndex> = (0..5u32).map(StreamlineIndex).collect();
         let params = TipParams {
             max_unsupported_fraction: 1.0,
             ..Default::default()

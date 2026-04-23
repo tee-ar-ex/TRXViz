@@ -265,13 +265,12 @@ pub fn apply_puri_threshold(
 /// Allocates and returns a new owned buffer the same shape as `src`.
 /// O(n_voxels × n_bins²) — fine for typical bin counts (≤200) and
 /// voxel counts (≤10⁵). Runs in parallel across voxels.
-fn smooth_histograms_on_sphere(
-    src: &[f32],
-    sphere: &SphereTemplate,
-    fwhm_deg: f32,
-) -> Vec<f32> {
+fn smooth_histograms_on_sphere(src: &[f32], sphere: &SphereTemplate, fwhm_deg: f32) -> Vec<f32> {
     let nbins = sphere.directions.len();
-    debug_assert!(src.len() % nbins == 0, "src must be a whole number of voxels");
+    debug_assert!(
+        src.len() % nbins == 0,
+        "src must be a whole number of voxels"
+    );
     let n_voxels = src.len() / nbins;
 
     // Build the per-bin Gaussian weight matrix once. `weights[b]` is

@@ -60,10 +60,18 @@ fn ports_one() -> &'static [PortKind] {
 pub struct AddRoiOp;
 
 impl WorkflowOp for AddRoiOp {
-    fn tag(&self) -> &'static str { "add_roi" }
-    fn title(&self) -> &'static str { "Add ROI (waypoint)" }
-    fn input_ports(&self) -> &'static [PortKind] { ports_two() }
-    fn output_ports(&self) -> &'static [PortKind] { ports_one() }
+    fn tag(&self) -> &'static str {
+        "add_roi"
+    }
+    fn title(&self) -> &'static str {
+        "Add ROI (waypoint)"
+    }
+    fn input_ports(&self) -> &'static [PortKind] {
+        ports_two()
+    }
+    fn output_ports(&self) -> &'static [PortKind] {
+        ports_one()
+    }
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         let (plan, mask) = unpack_inputs(ctx, self.title())?;
         let mut new_plan: TrackingPlan = (*plan).clone();
@@ -74,7 +82,9 @@ impl WorkflowOp for AddRoiOp {
     }
 }
 impl From<AddRoiOp> for WorkflowNodeKind {
-    fn from(_: AddRoiOp) -> Self { Self::AddRoi }
+    fn from(_: AddRoiOp) -> Self {
+        Self::AddRoi
+    }
 }
 
 // ── AddRoa ──────────────────────────────────────────────────────────────
@@ -83,10 +93,18 @@ impl From<AddRoiOp> for WorkflowNodeKind {
 pub struct AddRoaOp;
 
 impl WorkflowOp for AddRoaOp {
-    fn tag(&self) -> &'static str { "add_roa" }
-    fn title(&self) -> &'static str { "Add ROA (exclusion)" }
-    fn input_ports(&self) -> &'static [PortKind] { ports_two() }
-    fn output_ports(&self) -> &'static [PortKind] { ports_one() }
+    fn tag(&self) -> &'static str {
+        "add_roa"
+    }
+    fn title(&self) -> &'static str {
+        "Add ROA (exclusion)"
+    }
+    fn input_ports(&self) -> &'static [PortKind] {
+        ports_two()
+    }
+    fn output_ports(&self) -> &'static [PortKind] {
+        ports_one()
+    }
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         let (plan, mask) = unpack_inputs(ctx, self.title())?;
         let mut new_plan: TrackingPlan = (*plan).clone();
@@ -100,7 +118,9 @@ impl WorkflowOp for AddRoaOp {
     }
 }
 impl From<AddRoaOp> for WorkflowNodeKind {
-    fn from(_: AddRoaOp) -> Self { Self::AddRoa }
+    fn from(_: AddRoaOp) -> Self {
+        Self::AddRoa
+    }
 }
 
 // ── AddEndRegion ────────────────────────────────────────────────────────
@@ -109,10 +129,18 @@ impl From<AddRoaOp> for WorkflowNodeKind {
 pub struct AddEndRegionOp;
 
 impl WorkflowOp for AddEndRegionOp {
-    fn tag(&self) -> &'static str { "add_end_region" }
-    fn title(&self) -> &'static str { "Add End Region" }
-    fn input_ports(&self) -> &'static [PortKind] { ports_two() }
-    fn output_ports(&self) -> &'static [PortKind] { ports_one() }
+    fn tag(&self) -> &'static str {
+        "add_end_region"
+    }
+    fn title(&self) -> &'static str {
+        "Add End Region"
+    }
+    fn input_ports(&self) -> &'static [PortKind] {
+        ports_two()
+    }
+    fn output_ports(&self) -> &'static [PortKind] {
+        ports_one()
+    }
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         let (plan, mask) = unpack_inputs(ctx, self.title())?;
         let mut new_plan: TrackingPlan = (*plan).clone();
@@ -123,7 +151,9 @@ impl WorkflowOp for AddEndRegionOp {
     }
 }
 impl From<AddEndRegionOp> for WorkflowNodeKind {
-    fn from(_: AddEndRegionOp) -> Self { Self::AddEndRegion }
+    fn from(_: AddEndRegionOp) -> Self {
+        Self::AddEndRegion
+    }
 }
 
 // ── AddLimiting ─────────────────────────────────────────────────────────
@@ -132,10 +162,18 @@ impl From<AddEndRegionOp> for WorkflowNodeKind {
 pub struct AddLimitingOp;
 
 impl WorkflowOp for AddLimitingOp {
-    fn tag(&self) -> &'static str { "add_limiting" }
-    fn title(&self) -> &'static str { "Add Limiting Region" }
-    fn input_ports(&self) -> &'static [PortKind] { ports_two() }
-    fn output_ports(&self) -> &'static [PortKind] { ports_one() }
+    fn tag(&self) -> &'static str {
+        "add_limiting"
+    }
+    fn title(&self) -> &'static str {
+        "Add Limiting Region"
+    }
+    fn input_ports(&self) -> &'static [PortKind] {
+        ports_two()
+    }
+    fn output_ports(&self) -> &'static [PortKind] {
+        ports_one()
+    }
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         let (plan, mask) = unpack_inputs(ctx, self.title())?;
         let mut new_plan: TrackingPlan = (*plan).clone();
@@ -150,7 +188,9 @@ impl WorkflowOp for AddLimitingOp {
     }
 }
 impl From<AddLimitingOp> for WorkflowNodeKind {
-    fn from(_: AddLimitingOp) -> Self { Self::AddLimiting }
+    fn from(_: AddLimitingOp) -> Self {
+        Self::AddLimiting
+    }
 }
 
 // ── AddTerm ─────────────────────────────────────────────────────────────
@@ -159,10 +199,18 @@ impl From<AddLimitingOp> for WorkflowNodeKind {
 pub struct AddTermOp;
 
 impl WorkflowOp for AddTermOp {
-    fn tag(&self) -> &'static str { "add_term" }
-    fn title(&self) -> &'static str { "Add Terminative Region" }
-    fn input_ports(&self) -> &'static [PortKind] { ports_two() }
-    fn output_ports(&self) -> &'static [PortKind] { ports_one() }
+    fn tag(&self) -> &'static str {
+        "add_term"
+    }
+    fn title(&self) -> &'static str {
+        "Add Terminative Region"
+    }
+    fn input_ports(&self) -> &'static [PortKind] {
+        ports_two()
+    }
+    fn output_ports(&self) -> &'static [PortKind] {
+        ports_one()
+    }
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         let (plan, mask) = unpack_inputs(ctx, self.title())?;
         let mut new_plan: TrackingPlan = (*plan).clone();
@@ -176,7 +224,9 @@ impl WorkflowOp for AddTermOp {
     }
 }
 impl From<AddTermOp> for WorkflowNodeKind {
-    fn from(_: AddTermOp) -> Self { Self::AddTerm }
+    fn from(_: AddTermOp) -> Self {
+        Self::AddTerm
+    }
 }
 
 // ── AddNoEnd ────────────────────────────────────────────────────────────
@@ -185,10 +235,18 @@ impl From<AddTermOp> for WorkflowNodeKind {
 pub struct AddNoEndOp;
 
 impl WorkflowOp for AddNoEndOp {
-    fn tag(&self) -> &'static str { "add_no_end" }
-    fn title(&self) -> &'static str { "Add No-End Region" }
-    fn input_ports(&self) -> &'static [PortKind] { ports_two() }
-    fn output_ports(&self) -> &'static [PortKind] { ports_one() }
+    fn tag(&self) -> &'static str {
+        "add_no_end"
+    }
+    fn title(&self) -> &'static str {
+        "Add No-End Region"
+    }
+    fn input_ports(&self) -> &'static [PortKind] {
+        ports_two()
+    }
+    fn output_ports(&self) -> &'static [PortKind] {
+        ports_one()
+    }
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         let (plan, mask) = unpack_inputs(ctx, self.title())?;
         let mut new_plan: TrackingPlan = (*plan).clone();
@@ -202,7 +260,9 @@ impl WorkflowOp for AddNoEndOp {
     }
 }
 impl From<AddNoEndOp> for WorkflowNodeKind {
-    fn from(_: AddNoEndOp) -> Self { Self::AddNoEnd }
+    fn from(_: AddNoEndOp) -> Self {
+        Self::AddNoEnd
+    }
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────

@@ -18,12 +18,12 @@ use crate::error::{WorkflowError, WorkflowResult};
 use crate::units::StreamlineIndex;
 
 use super::tracking_filters::{
-    point_in_mask, streamline_endpoint_in, streamline_hits_all_rois,
-    streamline_passes_hausdorff, streamline_satisfies_end_masks,
+    point_in_mask, streamline_endpoint_in, streamline_hits_all_rois, streamline_passes_hausdorff,
+    streamline_satisfies_end_masks,
 };
 use super::types::{
-    DipyDirectionGetter, DipyTractographyPlan, PostFilter, StreamlineDataset,
-    StreamlineFlow, VoxelMask, WorkflowExecutionCache, WorkflowNodeUuid,
+    DipyDirectionGetter, DipyTractographyPlan, PostFilter, StreamlineDataset, StreamlineFlow,
+    VoxelMask, WorkflowExecutionCache, WorkflowNodeUuid,
 };
 
 /// Per-thread scratch + output buffers. Mirrors `cpu_yeh::ThreadAccum`.
@@ -119,14 +119,12 @@ pub(super) fn run_cpu_dipy(plan: &DipyTractographyPlan) -> WorkflowResult<Stream
         }
     }
 
-
     let scene = &plan.odx_scene;
 
     // ── collect field data ──────────────────────────────────────────────
     let sh_view = scene.sh_view_f32().ok_or_else(|| {
         WorkflowError::Evaluation(
-            "ODX file has no SH coefficients. Re-derive with odx-rs from a PAM5/CSD model."
-                .into(),
+            "ODX file has no SH coefficients. Re-derive with odx-rs from a PAM5/CSD model.".into(),
         )
     })?;
     let ncoeffs = sh_view.ncols();
@@ -817,10 +815,13 @@ fn trilinear_sh(
 // ── simple LCG RNG (reproducible, no external deps) ─────────────────
 
 fn simple_lcg(seed: u64) -> u64 {
-    seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)
+    seed.wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407)
 }
 
 fn lcg_f32(state: &mut u64) -> f32 {
-    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *state = state
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     ((*state >> 33) as f32) / (u32::MAX as f32)
 }

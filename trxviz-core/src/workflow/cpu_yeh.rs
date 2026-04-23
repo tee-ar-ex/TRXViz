@@ -18,12 +18,10 @@ use crate::error::{WorkflowError, WorkflowResult};
 use crate::units::StreamlineIndex;
 
 use super::tracking_filters::{
-    point_in_mask, streamline_endpoint_in, streamline_hits_all_rois,
-    streamline_passes_hausdorff, streamline_satisfies_end_masks,
+    point_in_mask, streamline_endpoint_in, streamline_hits_all_rois, streamline_passes_hausdorff,
+    streamline_satisfies_end_masks,
 };
-use super::types::{
-    PostFilter, StreamlineDataset, StreamlineFlow, VoxelMask, YehTractographyPlan,
-};
+use super::types::{PostFilter, StreamlineDataset, StreamlineFlow, VoxelMask, YehTractographyPlan};
 
 /// Outcome of a single seed attempt. No streamline payload — when an
 /// attempt is kept, `try_one_attempt` has already appended the points
@@ -198,11 +196,7 @@ pub(super) fn run_cpu_yeh(plan: &YehTractographyPlan) -> WorkflowResult<Streamli
     let mask_grid_matches = plan
         .seed_mask
         .as_ref()
-        .map(|m| {
-            m.dims[0] as usize == nx
-                && m.dims[1] as usize == ny
-                && m.dims[2] as usize == nz
-        })
+        .map(|m| m.dims[0] as usize == nx && m.dims[1] as usize == ny && m.dims[2] as usize == nz)
         .unwrap_or(true);
     if !mask_grid_matches {
         log::warn!(
@@ -384,8 +378,7 @@ pub(super) fn run_cpu_yeh(plan: &YehTractographyPlan) -> WorkflowResult<Streamli
         all_positions,
         all_offsets,
     ));
-    let selected: Vec<StreamlineIndex> =
-        (0..nb_streamlines as u32).map(StreamlineIndex).collect();
+    let selected: Vec<StreamlineIndex> = (0..nb_streamlines as u32).map(StreamlineIndex).collect();
     let dataset_out = Arc::new(StreamlineDataset {
         name: plan.label.clone(),
         gpu_data,
@@ -433,11 +426,7 @@ fn empty_flow(label: &str) -> StreamlineFlow {
 /// On a `Kept` outcome, the streamline points have already been pushed
 /// onto `acc.positions` and a new boundary appended to `acc.offsets`.
 /// The caller does not need to do anything else.
-fn try_one_attempt(
-    ctx: &YehCtx<'_>,
-    attempt_idx: u64,
-    acc: &mut ThreadAccum,
-) -> AttemptOutcome {
+fn try_one_attempt(ctx: &YehCtx<'_>, attempt_idx: u64, acc: &mut ThreadAccum) -> AttemptOutcome {
     let plan = ctx.plan;
     // Derive a well-dispersed u64 from (rng_seed, attempt_idx). The two
     // multiply-adds produce a SplitMix-style state uncorrelated with the
@@ -460,8 +449,7 @@ fn try_one_attempt(
     if let (Some(mask), true) = (&plan.seed_mask, ctx.mask_grid_matches) {
         let [i, j, k] = ctx.ijk_lookup[compact_idx];
         let idx = (i as usize)
-            + (mask.dims[0] as usize)
-                * ((j as usize) + (mask.dims[1] as usize) * (k as usize));
+            + (mask.dims[0] as usize) * ((j as usize) + (mask.dims[1] as usize) * (k as usize));
         if mask.data.get(idx).copied().unwrap_or(0) == 0 {
             return AttemptOutcome::SkipEmpty;
         }
@@ -472,7 +460,11 @@ fn try_one_attempt(
     let step_mm = if plan.step_size_mm <= 0.0 {
         // DSI-Studio `tracking_thread.cpp`: `param.step_size = vs[0] ·
         // (0.5 + rand())` — step is expressed in voxel units, not mm.
-        let vs = ctx.vox_to_ras.col(0).truncate().length()
+        let vs = ctx
+            .vox_to_ras
+            .col(0)
+            .truncate()
+            .length()
             .min(ctx.vox_to_ras.col(1).truncate().length())
             .min(ctx.vox_to_ras.col(2).truncate().length())
             .max(1e-3);
@@ -763,13 +755,7 @@ fn track_one(
     Ok(())
 }
 
-fn voxel_at(
-    pt_vox: Vec3,
-    dense_lut: &[usize],
-    nx: usize,
-    ny: usize,
-    nz: usize,
-) -> Option<usize> {
+fn voxel_at(pt_vox: Vec3, dense_lut: &[usize], nx: usize, ny: usize, nz: usize) -> Option<usize> {
     let x = pt_vox.x.floor() as i32;
     let y = pt_vox.y.floor() as i32;
     let z = pt_vox.z.floor() as i32;

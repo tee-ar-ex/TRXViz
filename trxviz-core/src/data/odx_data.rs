@@ -220,11 +220,7 @@ impl OdxScene {
     /// Return the Otsu threshold for the given metric + scope, computing
     /// and memoizing it on first request. `metric = None` auto-resolves
     /// in the odx-rs priority order (amplitude → afd → qa).
-    pub fn fixel_otsu(
-        &self,
-        metric: Option<&str>,
-        scope: OtsuScope,
-    ) -> anyhow::Result<FixelOtsu> {
+    pub fn fixel_otsu(&self, metric: Option<&str>, scope: OtsuScope) -> anyhow::Result<FixelOtsu> {
         // Fast path: if the caller's `metric` matches the eager default
         // entry's resolved name, skip the lookup-then-write dance.
         if let Some(entry) = self.default_fixel_otsu.as_ref() {
@@ -237,7 +233,12 @@ impl OdxScene {
         // Try the cache.
         if let Some(name) = metric {
             let key = (name.to_string(), scope);
-            if let Some(hit) = self.fixel_otsu_cache.read().ok().and_then(|c| c.get(&key).cloned()) {
+            if let Some(hit) = self
+                .fixel_otsu_cache
+                .read()
+                .ok()
+                .and_then(|c| c.get(&key).cloned())
+            {
                 return Ok(hit);
             }
         }

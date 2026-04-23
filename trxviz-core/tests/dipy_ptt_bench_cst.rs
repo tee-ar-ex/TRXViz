@@ -32,18 +32,15 @@ use trxviz_core::asset_loader::AssetLoader;
 use trxviz_core::data::loaded_files::{LoadedOdx, LoadedTrx};
 use trxviz_core::data::odx_data::OdxScene;
 use trxviz_core::data::trx_data::TrxGpuData;
-use trxviz_core::gpu::plan_prep::hausdorff::{
-    HausdorffPlanParams, build_hausdorff_plan,
-};
+use trxviz_core::gpu::plan_prep::hausdorff::{HausdorffPlanParams, build_hausdorff_plan};
 use trxviz_core::scene::LoadedStreamlineSource;
 use trxviz_core::workflow::{
-    DipyDirectionGetter, DipyTractographyPlan, WorkflowJobOutput,
-    WorkflowJobPayload, WorkflowNodeUuid, run_workflow_job,
+    DipyDirectionGetter, DipyTractographyPlan, WorkflowJobOutput, WorkflowJobPayload,
+    WorkflowNodeUuid, run_workflow_job,
 };
 
 const DEFAULT_ODX_FILE: &str = "sub-20124_ses-1_space-ACPC_desc-preproc_dwi.gqi.fz";
-const DEFAULT_REF_TCK: &str =
-    "sub-20124_ses-1_space-ACPC_model-gqi_bundle-ProjectionBrainstemCorticospinalTractL_streamlines.tck.gz";
+const DEFAULT_REF_TCK: &str = "sub-20124_ses-1_space-ACPC_model-gqi_bundle-ProjectionBrainstemCorticospinalTractL_streamlines.tck.gz";
 
 fn fixture_paths() -> Option<(PathBuf, PathBuf)> {
     if let (Some(odx), Some(tck)) = (
@@ -52,7 +49,9 @@ fn fixture_paths() -> Option<(PathBuf, PathBuf)> {
     ) {
         let odx = PathBuf::from(odx);
         let tck = PathBuf::from(tck);
-        if odx.is_file() && tck.is_file() { return Some((odx, tck)); }
+        if odx.is_file() && tck.is_file() {
+            return Some((odx, tck));
+        }
         return None;
     }
     let dir = std::env::var_os("TRXVIZ_REAL_TEST_DATA")
@@ -60,14 +59,21 @@ fn fixture_paths() -> Option<(PathBuf, PathBuf)> {
         .unwrap_or_else(|| PathBuf::from("/Users/mcieslak/projects/odx/test_data"));
     let odx = dir.join(DEFAULT_ODX_FILE);
     let tck = dir.join(DEFAULT_REF_TCK);
-    if odx.is_file() && tck.is_file() { Some((odx, tck)) } else { None }
+    if odx.is_file() && tck.is_file() {
+        Some((odx, tck))
+    } else {
+        None
+    }
 }
 
 fn load_odx(path: &Path, id: usize) -> LoadedOdx {
     let scene = OdxScene::load(path).expect("load ODX");
     LoadedOdx {
         id,
-        name: path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "odx".into()),
+        name: path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "odx".into()),
         path: path.to_path_buf(),
         scene: Arc::new(scene),
         warnings: Vec::new(),
@@ -79,7 +85,10 @@ fn load_trx(path: &Path, id: usize) -> LoadedTrx {
     let source = LoadedStreamlineSource::load(path).expect("load .tck.gz");
     LoadedTrx {
         id,
-        name: path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "trx".into()),
+        name: path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "trx".into()),
         path: path.to_path_buf(),
         data: Arc::new(source.data),
         backing: Some(source.backing),
@@ -89,19 +98,27 @@ fn load_trx(path: &Path, id: usize) -> LoadedTrx {
 
 fn flatten(data: &TrxGpuData) -> (Vec<[f32; 3]>, Vec<std::ops::Range<usize>>) {
     let points = data.positions.clone();
-    let ranges = data.offsets.windows(2).map(|w| (w[0] as usize)..(w[1] as usize)).collect();
+    let ranges = data
+        .offsets
+        .windows(2)
+        .map(|w| (w[0] as usize)..(w[1] as usize))
+        .collect();
     (points, ranges)
 }
 
 fn mean_min_distance(streamline: &[[f32; 3]], reference_points: &[[f32; 3]]) -> f32 {
-    if streamline.is_empty() || reference_points.is_empty() { return f32::INFINITY; }
+    if streamline.is_empty() || reference_points.is_empty() {
+        return f32::INFINITY;
+    }
     let mut acc = 0.0f32;
     for p in streamline {
         let p = Vec3::from_array(*p);
         let mut min_d2 = f32::INFINITY;
         for q in reference_points {
             let d2 = (Vec3::from_array(*q) - p).length_squared();
-            if d2 < min_d2 { min_d2 = d2; }
+            if d2 < min_d2 {
+                min_d2 = d2;
+            }
         }
         acc += min_d2.sqrt();
     }
@@ -116,16 +133,24 @@ fn streamline_length(streamline: &[[f32; 3]]) -> f32 {
 }
 
 fn subsample(points: &[[f32; 3]], max_points: usize) -> Vec<[f32; 3]> {
-    if points.len() <= max_points { return points.to_vec(); }
+    if points.len() <= max_points {
+        return points.to_vec();
+    }
     let stride = points.len().div_ceil(max_points);
     points.iter().copied().step_by(stride).collect()
 }
 
 fn median(values: &mut [f32]) -> f32 {
-    if values.is_empty() { return f32::NAN; }
+    if values.is_empty() {
+        return f32::NAN;
+    }
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let n = values.len();
-    if n % 2 == 1 { values[n / 2] } else { 0.5 * (values[n / 2 - 1] + values[n / 2]) }
+    if n % 2 == 1 {
+        values[n / 2]
+    } else {
+        0.5 * (values[n / 2 - 1] + values[n / 2])
+    }
 }
 
 /// Try to acquire a wgpu device. Returns `None` when no GPU adapter is
@@ -190,7 +215,11 @@ fn dipy_ptt_benchmark_cst_l() {
 
     let ref_n = ref_gpu.offsets.len().saturating_sub(1);
     let (ref_points_flat, ref_ranges) = flatten(&ref_gpu);
-    eprintln!("[ptt-bench] loaded ref bundle: {} streamlines, {} total points", ref_n, ref_points_flat.len());
+    eprintln!(
+        "[ptt-bench] loaded ref bundle: {} streamlines, {} total points",
+        ref_n,
+        ref_points_flat.len()
+    );
 
     let fixel_otsu = ref_scene
         .default_fixel_otsu()
@@ -267,7 +296,10 @@ fn dipy_ptt_benchmark_cst_l() {
 
     let flow = match output {
         WorkflowJobOutput::DipyTractography { flow } => flow,
-        other => panic!("expected DipyTractography output, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected DipyTractography output, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
 
     let kept = flow.selected_streamlines.len();
@@ -301,7 +333,11 @@ fn dipy_ptt_benchmark_cst_l() {
         .iter()
         .filter(|&&d| d.is_finite() && d <= cov_tolerance)
         .count();
-    let coverage_frac = if ref_mean_min.is_empty() { 0.0 } else { covered as f32 / ref_mean_min.len() as f32 };
+    let coverage_frac = if ref_mean_min.is_empty() {
+        0.0
+    } else {
+        covered as f32 / ref_mean_min.len() as f32
+    };
 
     let median_cand_len = median(&mut lengths.clone());
     let ref_min_len = ref_lengths.iter().copied().fold(f32::INFINITY, f32::min);
@@ -327,7 +363,10 @@ fn dipy_ptt_benchmark_cst_l() {
     // streamlines than the well-tuned probabilistic path. The point of
     // the bench is to verify the GPU pipeline runs end-to-end and the
     // post-hoc Hausdorff filter takes effect.
-    assert!(kept >= 10, "PTT produced only {kept} streamlines; pipeline may be broken");
+    assert!(
+        kept >= 10,
+        "PTT produced only {kept} streamlines; pipeline may be broken"
+    );
     assert!(
         forward_mean <= 16.0,
         "forward Hausdorff mean {:.2} exceeds filter cap 16mm — post_filter not applied?",

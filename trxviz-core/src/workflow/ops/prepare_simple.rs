@@ -15,13 +15,27 @@ use crate::workflow::types::{TrackingPlan, VoxelMask, WorkflowValue};
 
 use super::super::{EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp};
 
-fn default_step() -> f32 { 1.0 }
-fn default_angle() -> f32 { 60.0 }
-fn default_min_len() -> f32 { 15.0 }
-fn default_max_len() -> f32 { 100.0 }
-fn default_fa() -> f32 { 0.05 }
-fn default_smooth() -> f32 { 0.25 }
-fn default_fixel_otsu() -> f32 { 0.1 }
+fn default_step() -> f32 {
+    1.0
+}
+fn default_angle() -> f32 {
+    60.0
+}
+fn default_min_len() -> f32 {
+    15.0
+}
+fn default_max_len() -> f32 {
+    100.0
+}
+fn default_fa() -> f32 {
+    0.05
+}
+fn default_smooth() -> f32 {
+    0.25
+}
+fn default_fixel_otsu() -> f32 {
+    0.1
+}
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PrepareSimplePlanOp {
@@ -107,19 +121,17 @@ impl WorkflowOp for PrepareSimplePlanOp {
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         // Optional seed mask. When unwired, the tracker will seed across the
         // whole fixel/ODF mask.
-        let seed_mask: Option<Arc<VoxelMask>> =
-            match ctx.inputs.first().and_then(|v| v.as_ref()) {
-                Some(ev) => match &ev.value {
-                    WorkflowValue::VoxelMask(m) => Some(m.clone()),
-                    _ => {
-                        return Err(crate::error::WorkflowError::Evaluation(
-                            "Prepare Simple Plan: input must be a VoxelMask (or unconnected)"
-                                .into(),
-                        ));
-                    }
-                },
-                None => None,
-            };
+        let seed_mask: Option<Arc<VoxelMask>> = match ctx.inputs.first().and_then(|v| v.as_ref()) {
+            Some(ev) => match &ev.value {
+                WorkflowValue::VoxelMask(m) => Some(m.clone()),
+                _ => {
+                    return Err(crate::error::WorkflowError::Evaluation(
+                        "Prepare Simple Plan: input must be a VoxelMask (or unconnected)".into(),
+                    ));
+                }
+            },
+            None => None,
+        };
 
         // Infer a placeholder grid if no mask is wired. The tracker only
         // reads `seed_mask` + override fields from this plan, so grid_dims +
@@ -145,7 +157,9 @@ impl WorkflowOp for PrepareSimplePlanOp {
             max_len_mm: self.override_max_len.then_some(self.max_len_mm),
             max_angle_deg: self.override_angle.then_some(self.max_angle_deg),
             step_size_mm: self.override_step.then_some(self.step_size_mm),
-            fixel_threshold: self.override_fixel_threshold.then_some(self.fixel_threshold),
+            fixel_threshold: self
+                .override_fixel_threshold
+                .then_some(self.fixel_threshold),
             smooth_fraction: self.override_smooth.then_some(self.smooth_fraction),
             tolerance_mm: None,
             fixel_otsu: self.override_fixel_otsu.then_some(self.fixel_otsu),

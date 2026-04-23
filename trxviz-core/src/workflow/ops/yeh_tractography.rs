@@ -4,8 +4,7 @@ use std::sync::Arc;
 use crate::data::trx_data::TrxGpuData;
 use crate::error::WorkflowResult;
 use crate::workflow::types::{
-    StreamlineDataset, StreamlineFlow, TrackingPlan, VoxelMask, WorkflowValue,
-    YehTractographyPlan,
+    StreamlineDataset, StreamlineFlow, TrackingPlan, VoxelMask, WorkflowValue, YehTractographyPlan,
 };
 
 use super::super::{
@@ -13,15 +12,33 @@ use super::super::{
     sync_node_state_from_run_record,
 };
 
-fn default_step_size() -> f32 { 1.0 }
-fn default_max_angle() -> f32 { 60.0 }
-fn default_min_len() -> f32 { 10.0 }
-fn default_max_len() -> f32 { 300.0 }
-fn default_fixel_threshold() -> f32 { 0.05 }
-fn default_smooth() -> f32 { 0.25 }
-fn default_max_points() -> u32 { 501 }
-fn default_target_streamlines() -> u32 { 30_000 }
-fn default_max_seed_attempts() -> u32 { 10_000_000 }
+fn default_step_size() -> f32 {
+    1.0
+}
+fn default_max_angle() -> f32 {
+    60.0
+}
+fn default_min_len() -> f32 {
+    10.0
+}
+fn default_max_len() -> f32 {
+    300.0
+}
+fn default_fixel_threshold() -> f32 {
+    0.05
+}
+fn default_smooth() -> f32 {
+    0.25
+}
+fn default_max_points() -> u32 {
+    501
+}
+fn default_target_streamlines() -> u32 {
+    30_000
+}
+fn default_max_seed_attempts() -> u32 {
+    10_000_000
+}
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct YehTractographyOp {
@@ -133,7 +150,11 @@ impl WorkflowOp for YehTractographyOp {
     }
 
     fn input_ports(&self) -> &'static [PortKind] {
-        &[PortKind::Fixels, PortKind::VoxelMask, PortKind::TrackingPlan]
+        &[
+            PortKind::Fixels,
+            PortKind::VoxelMask,
+            PortKind::TrackingPlan,
+        ]
     }
 
     fn output_ports(&self) -> &'static [PortKind] {
@@ -176,7 +197,8 @@ impl WorkflowOp for YehTractographyOp {
         // Optional TrackingPlan — when present, its seed_mask and length
         // bounds override the op's direct inputs / slider values. Anything
         // the plan leaves as `None` falls back to the local value.
-        let plan_input: Option<Arc<TrackingPlan>> = match ctx.inputs.get(2).and_then(|v| v.as_ref()) {
+        let plan_input: Option<Arc<TrackingPlan>> = match ctx.inputs.get(2).and_then(|v| v.as_ref())
+        {
             Some(ev) => match &ev.value {
                 WorkflowValue::TrackingPlan(p) => Some(p.clone()),
                 _ => {
@@ -205,16 +227,36 @@ impl WorkflowOp for YehTractographyOp {
             if p.seed_mask.is_some() {
                 ov.push("seed_mask".into());
             }
-            if let Some(v) = p.min_len_mm { ov.push("min_len_mm".into()); vals.insert("min_len_mm".into(), v); }
-            if let Some(v) = p.max_len_mm { ov.push("max_len_mm".into()); vals.insert("max_len_mm".into(), v); }
-            if let Some(v) = p.max_angle_deg { ov.push("max_angle_deg".into()); vals.insert("max_angle_deg".into(), v); }
-            if let Some(v) = p.step_size_mm { ov.push("step_size_mm".into()); vals.insert("step_size_mm".into(), v); }
-            if let Some(v) = p.fixel_threshold { ov.push("fixel_threshold".into()); vals.insert("fixel_threshold".into(), v); }
-            if let Some(v) = p.smooth_fraction { ov.push("smooth_fraction".into()); vals.insert("smooth_fraction".into(), v); }
+            if let Some(v) = p.min_len_mm {
+                ov.push("min_len_mm".into());
+                vals.insert("min_len_mm".into(), v);
+            }
+            if let Some(v) = p.max_len_mm {
+                ov.push("max_len_mm".into());
+                vals.insert("max_len_mm".into(), v);
+            }
+            if let Some(v) = p.max_angle_deg {
+                ov.push("max_angle_deg".into());
+                vals.insert("max_angle_deg".into(), v);
+            }
+            if let Some(v) = p.step_size_mm {
+                ov.push("step_size_mm".into());
+                vals.insert("step_size_mm".into(), v);
+            }
+            if let Some(v) = p.fixel_threshold {
+                ov.push("fixel_threshold".into());
+                vals.insert("fixel_threshold".into(), v);
+            }
+            if let Some(v) = p.smooth_fraction {
+                ov.push("smooth_fraction".into());
+                vals.insert("smooth_fraction".into(), v);
+            }
             // Informational only — sentinel-driven random thresholds
             // center on 0.6·fixel_otsu, so users want to see the value
             // the plan derived from the ODX.
-            if let Some(v) = p.fixel_otsu { vals.insert("fixel_otsu".into(), v); }
+            if let Some(v) = p.fixel_otsu {
+                vals.insert("fixel_otsu".into(), v);
+            }
             ctx.node_state.overridden_fields = ov;
             ctx.node_state.overridden_values = vals;
         }
@@ -255,7 +297,8 @@ impl WorkflowOp for YehTractographyOp {
         // triggers re-run.
         let fingerprint = {
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            self.fingerprint(odx_source_id, seed_mask.as_deref()).hash(&mut h);
+            self.fingerprint(odx_source_id, seed_mask.as_deref())
+                .hash(&mut h);
             effective_min_len.to_bits().hash(&mut h);
             effective_max_len.to_bits().hash(&mut h);
             effective_max_angle.to_bits().hash(&mut h);
@@ -293,56 +336,49 @@ impl WorkflowOp for YehTractographyOp {
         // Pass through any region/filter the plan carries. These fields
         // take effect at tracking time (per-step for limiting/roa/term,
         // post-hoc for roi/end/no_end/post_filter).
-        let (
-            limiting_mask,
-            roa_mask,
-            term_mask,
-            roi_masks,
-            end_masks,
-            no_end_mask,
-            post_filter,
-        ) = if let Some(p) = plan_input.as_ref() {
-            (
-                p.limiting_mask.clone(),
-                p.roa_mask.clone(),
-                p.term_mask.clone(),
-                p.roi_masks.clone(),
-                p.end_masks.clone(),
-                p.no_end_mask.clone(),
-                p.post_filter.clone(),
-            )
-        } else {
-            (None, None, None, Vec::new(), Vec::new(), None, None)
-        };
+        let (limiting_mask, roa_mask, term_mask, roi_masks, end_masks, no_end_mask, post_filter) =
+            if let Some(p) = plan_input.as_ref() {
+                (
+                    p.limiting_mask.clone(),
+                    p.roa_mask.clone(),
+                    p.term_mask.clone(),
+                    p.roi_masks.clone(),
+                    p.end_masks.clone(),
+                    p.no_end_mask.clone(),
+                    p.post_filter.clone(),
+                )
+            } else {
+                (None, None, None, Vec::new(), Vec::new(), None, None)
+            };
 
         if stale {
-            ctx.scene_plan.yeh_tractography_plans.push(YehTractographyPlan {
-                node_uuid: ctx.node.uuid,
-                label: ctx.node.label.clone(),
-                odx_source_id,
-                odx_scene: loaded_odx.scene.clone(),
-                seed_mask,
-                limiting_mask,
-                roa_mask,
-                term_mask,
-                roi_masks,
-                end_masks,
-                no_end_mask,
-                post_filter,
-                step_size_mm: effective_step_size,
-                max_angle_deg: effective_max_angle,
-                min_len_mm: effective_min_len,
-                max_len_mm: effective_max_len,
-                fixel_threshold: effective_fixel_threshold,
-                smooth_fraction: effective_smooth,
-                max_points: self.max_points,
-                target_streamlines: self.target_streamlines,
-                max_seed_attempts: self.max_seed_attempts,
-                rng_seed: self.rng_seed,
-                fixel_otsu: plan_input
-                    .as_ref()
-                    .and_then(|p| p.fixel_otsu),
-            });
+            ctx.scene_plan
+                .yeh_tractography_plans
+                .push(YehTractographyPlan {
+                    node_uuid: ctx.node.uuid,
+                    label: ctx.node.label.clone(),
+                    odx_source_id,
+                    odx_scene: loaded_odx.scene.clone(),
+                    seed_mask,
+                    limiting_mask,
+                    roa_mask,
+                    term_mask,
+                    roi_masks,
+                    end_masks,
+                    no_end_mask,
+                    post_filter,
+                    step_size_mm: effective_step_size,
+                    max_angle_deg: effective_max_angle,
+                    min_len_mm: effective_min_len,
+                    max_len_mm: effective_max_len,
+                    fixel_threshold: effective_fixel_threshold,
+                    smooth_fraction: effective_smooth,
+                    max_points: self.max_points,
+                    target_streamlines: self.target_streamlines,
+                    max_seed_attempts: self.max_seed_attempts,
+                    rng_seed: self.rng_seed,
+                    fixel_otsu: plan_input.as_ref().and_then(|p| p.fixel_otsu),
+                });
         }
 
         Ok(vec![super::super::EvaluatedValue {

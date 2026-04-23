@@ -11,7 +11,7 @@ struct Uniforms {
     fill_strength: f32,
     headlight_mix: f32,
     specular_strength: f32,
-    _pad0: f32,
+    opacity: f32,           // per-draw alpha multiplier in [0, 1]
     _pad1: f32,
     _pad2: f32,
     fog_color: vec4<f32>,
@@ -93,5 +93,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let shaded = in.color.rgb * lit;
     let faded = apply_depth_fade(shaded, in.world_pos);
-    return vec4<f32>(apply_post_color(faded, in.ndc_xy), in.color.a);
+    return vec4<f32>(apply_post_color(faded, in.ndc_xy), in.color.a * uniforms.opacity);
 }

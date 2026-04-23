@@ -165,10 +165,8 @@ pub fn evaluate_scene_plan_with_mode(
                     // i.e. ColorByDps reads its own input flow's
                     // names — because every Color* op passes the
                     // dataset through unchanged in shape.)
-                    node_state.available_dps_fields =
-                        flow.dataset.gpu_data.dps_names.clone();
-                    node_state.available_dpv_fields =
-                        flow.dataset.gpu_data.dpv_names.clone();
+                    node_state.available_dps_fields = flow.dataset.gpu_data.dps_names.clone();
+                    node_state.available_dpv_fields = flow.dataset.gpu_data.dpv_names.clone();
                 }
                 if node_state.summary == node.op.title() {
                     node_state.summary = summarize_value(&first.value);

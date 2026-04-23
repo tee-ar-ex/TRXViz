@@ -908,6 +908,10 @@ pub struct StreamlineDrawPlan {
     pub tube_radius_mm: Millimeters,
     pub tube_sides: u32,
     pub slab_half_width_mm: Millimeters,
+    /// Per-display opacity multiplier in [0, 1]. Multiplied with the
+    /// per-vertex color alpha by the streamline / tube fragment
+    /// shader. 1.0 = fully opaque (default).
+    pub opacity: f32,
 }
 
 #[derive(Clone)]
@@ -1140,7 +1144,8 @@ pub struct VoxelMask {
 
 impl VoxelMask {
     pub fn lin_idx(&self, x: u32, y: u32, z: u32) -> usize {
-        (x as usize) + (self.dims[0] as usize) * ((y as usize) + (self.dims[1] as usize) * (z as usize))
+        (x as usize)
+            + (self.dims[0] as usize) * ((y as usize) + (self.dims[1] as usize) * (z as usize))
     }
 
     pub fn count(&self) -> usize {
@@ -1160,11 +1165,9 @@ impl VoxelMask {
                 for x in 0..nx {
                     let idx = self.lin_idx(x, y, z);
                     if self.data[idx] != 0 {
-                        let p = self.voxel_to_ras.transform_point3(glam::Vec3::new(
-                            x as f32,
-                            y as f32,
-                            z as f32,
-                        ));
+                        let p = self
+                            .voxel_to_ras
+                            .transform_point3(glam::Vec3::new(x as f32, y as f32, z as f32));
                         out.push([p.x, p.y, p.z]);
                     }
                 }

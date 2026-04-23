@@ -74,6 +74,7 @@ pub(super) fn build_render_data(
                 visible: draw.visible,
                 render_style: draw.render_style,
                 tube_radius: draw.tube_radius_mm.0,
+                opacity: draw.opacity,
             })
             .collect::<Vec<_>>()
     };

@@ -6,22 +6,37 @@ use crate::error::WorkflowResult;
 use crate::units::StreamlineIndex;
 
 use super::super::{
-    CachedTractographyResult, DipyDirectionGetter, EvalCtx, PortKind, StreamlineDataset,
-    StreamlineFlow, DipyTractographyPlan, VoxelMask, WorkflowNodeKind, WorkflowOp,
-    WorkflowValue, mark_expensive_success, prime_expensive_record,
-    sync_node_state_from_run_record,
+    CachedTractographyResult, DipyDirectionGetter, DipyTractographyPlan, EvalCtx, PortKind,
+    StreamlineDataset, StreamlineFlow, VoxelMask, WorkflowNodeKind, WorkflowOp, WorkflowValue,
+    mark_expensive_success, prime_expensive_record, sync_node_state_from_run_record,
 };
-use crate::data::trx_data::ColorMode;
 use crate::data::loaded_files::StreamlineBacking;
+use crate::data::trx_data::ColorMode;
 
-fn default_step_size() -> f32 { 0.5 }
-fn default_max_angle() -> f32 { 60.0 }
-fn default_min_len() -> f32 { 10.0 }
-fn default_max_len() -> f32 { 300.0 }
-fn default_fixel_threshold() -> f32 { 0.1 }
-fn default_relative_peak_threshold() -> f32 { 0.25 }
-fn default_seeds_per_voxel() -> u32 { 1 }
-fn default_max_points() -> u32 { 501 }
+fn default_step_size() -> f32 {
+    0.5
+}
+fn default_max_angle() -> f32 {
+    60.0
+}
+fn default_min_len() -> f32 {
+    10.0
+}
+fn default_max_len() -> f32 {
+    300.0
+}
+fn default_fixel_threshold() -> f32 {
+    0.1
+}
+fn default_relative_peak_threshold() -> f32 {
+    0.25
+}
+fn default_seeds_per_voxel() -> u32 {
+    1
+}
+fn default_max_points() -> u32 {
+    501
+}
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DipyTractographyOp {
@@ -64,7 +79,11 @@ impl Default for DipyTractographyOp {
 }
 
 impl DipyTractographyOp {
-    fn fingerprint(&self, odx_source_id: crate::data::loaded_files::FileId, mask: &VoxelMask) -> u64 {
+    fn fingerprint(
+        &self,
+        odx_source_id: crate::data::loaded_files::FileId,
+        mask: &VoxelMask,
+    ) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         odx_source_id.hash(&mut h);
         mask.dims.hash(&mut h);
@@ -140,11 +159,15 @@ impl WorkflowOp for DipyTractographyOp {
     }
 
     fn title(&self) -> &'static str {
-        "GPU Tracking"
+        "Dipy/GPUStreamlines Tractography (ODF)"
     }
 
     fn input_ports(&self) -> &'static [PortKind] {
-        &[PortKind::OdfField, PortKind::VoxelMask, PortKind::TrackingPlan]
+        &[
+            PortKind::OdfField,
+            PortKind::VoxelMask,
+            PortKind::TrackingPlan,
+        ]
     }
 
     fn output_ports(&self) -> &'static [PortKind] {
@@ -161,13 +184,13 @@ impl WorkflowOp for DipyTractographyOp {
                 WorkflowValue::OdfField(f) => f.clone(),
                 _ => {
                     return Err(crate::error::WorkflowError::Evaluation(
-                        "GPU Tracking requires an ODF field input".into(),
+                        "Dipy/GPUStreamlines tractography requires an ODF field input".into(),
                     ));
                 }
             },
             None => {
                 return Err(crate::error::WorkflowError::Evaluation(
-                    "GPU Tracking requires an ODF field input".into(),
+                    "Dipy/GPUStreamlines tractography requires an ODF field input".into(),
                 ));
             }
         };
@@ -178,7 +201,9 @@ impl WorkflowOp for DipyTractographyOp {
                 WorkflowValue::VoxelMask(m) => Some(m.clone()),
                 _ => {
                     return Err(crate::error::WorkflowError::Evaluation(
-                        "GPU Tracking: second input must be a VoxelMask (or unconnected)".into(),
+                        "Dipy/GPUStreamlines tractography: second input must be a VoxelMask \
+                         (or unconnected)"
+                            .into(),
                     ));
                 }
             },
@@ -193,7 +218,8 @@ impl WorkflowOp for DipyTractographyOp {
                     WorkflowValue::TrackingPlan(p) => Some(p.clone()),
                     _ => {
                         return Err(crate::error::WorkflowError::Evaluation(
-                            "GPU Tracking: third input must be a TrackingPlan (or unconnected)"
+                            "Dipy/GPUStreamlines tractography: third input must be a \
+                             TrackingPlan (or unconnected)"
                                 .into(),
                         ));
                     }
@@ -207,7 +233,8 @@ impl WorkflowOp for DipyTractographyOp {
             .or(direct_mask)
             .ok_or_else(|| {
                 crate::error::WorkflowError::Evaluation(
-                    "GPU Tracking needs either a VoxelMask input or a TrackingPlan with a seed_mask"
+                    "Dipy/GPUStreamlines tractography needs either a VoxelMask input \
+                     or a TrackingPlan with a seed_mask"
                         .into(),
                 )
             })?;
@@ -247,14 +274,31 @@ impl WorkflowOp for DipyTractographyOp {
             if p.seed_mask.is_some() {
                 ov.push("seed_mask".into());
             }
-            if let Some(v) = p.min_len_mm { ov.push("min_len_mm".into()); vals.insert("min_len_mm".into(), v); }
-            if let Some(v) = p.max_len_mm { ov.push("max_len_mm".into()); vals.insert("max_len_mm".into(), v); }
-            if let Some(v) = p.max_angle_deg { ov.push("max_angle_deg".into()); vals.insert("max_angle_deg".into(), v); }
-            if let Some(v) = p.step_size_mm { ov.push("step_size_mm".into()); vals.insert("step_size_mm".into(), v); }
-            if let Some(v) = p.fixel_threshold { ov.push("fixel_threshold".into()); vals.insert("fixel_threshold".into(), v); }
+            if let Some(v) = p.min_len_mm {
+                ov.push("min_len_mm".into());
+                vals.insert("min_len_mm".into(), v);
+            }
+            if let Some(v) = p.max_len_mm {
+                ov.push("max_len_mm".into());
+                vals.insert("max_len_mm".into(), v);
+            }
+            if let Some(v) = p.max_angle_deg {
+                ov.push("max_angle_deg".into());
+                vals.insert("max_angle_deg".into(), v);
+            }
+            if let Some(v) = p.step_size_mm {
+                ov.push("step_size_mm".into());
+                vals.insert("step_size_mm".into(), v);
+            }
+            if let Some(v) = p.fixel_threshold {
+                ov.push("fixel_threshold".into());
+                vals.insert("fixel_threshold".into(), v);
+            }
             // Informational only — sentinel-driven random thresholds
             // center on 0.6·fixel_otsu.
-            if let Some(v) = p.fixel_otsu { vals.insert("fixel_otsu".into(), v); }
+            if let Some(v) = p.fixel_otsu {
+                vals.insert("fixel_otsu".into(), v);
+            }
             ctx.node_state.overridden_fields = ov;
             ctx.node_state.overridden_values = vals;
         }
@@ -320,33 +364,33 @@ impl WorkflowOp for DipyTractographyOp {
             } else {
                 (None, None, None, Vec::new(), Vec::new(), None, None)
             };
-            ctx.scene_plan.dipy_tractography_plans.push(DipyTractographyPlan {
-                node_uuid: ctx.node.uuid,
-                label: ctx.node.label.clone(),
-                odx_source_id,
-                odx_scene: loaded_odx.scene.clone(),
-                seed_mask,
-                step_size_mm: effective_step_size,
-                max_angle_deg: effective_max_angle,
-                min_len_mm: effective_min_len,
-                max_len_mm: effective_max_len,
-                fixel_threshold: effective_fixel_threshold,
-                relative_peak_threshold: self.relative_peak_threshold,
-                seeds_per_voxel: self.seeds_per_voxel,
-                max_points: self.max_points,
-                rng_seed: self.rng_seed,
-                limiting_mask,
-                roa_mask,
-                term_mask,
-                roi_masks,
-                end_masks,
-                no_end_mask,
-                post_filter,
-                fixel_otsu: plan_input
-                    .as_ref()
-                    .and_then(|p| p.fixel_otsu),
-                direction_getter: self.direction_getter,
-            });
+            ctx.scene_plan
+                .dipy_tractography_plans
+                .push(DipyTractographyPlan {
+                    node_uuid: ctx.node.uuid,
+                    label: ctx.node.label.clone(),
+                    odx_source_id,
+                    odx_scene: loaded_odx.scene.clone(),
+                    seed_mask,
+                    step_size_mm: effective_step_size,
+                    max_angle_deg: effective_max_angle,
+                    min_len_mm: effective_min_len,
+                    max_len_mm: effective_max_len,
+                    fixel_threshold: effective_fixel_threshold,
+                    relative_peak_threshold: self.relative_peak_threshold,
+                    seeds_per_voxel: self.seeds_per_voxel,
+                    max_points: self.max_points,
+                    rng_seed: self.rng_seed,
+                    limiting_mask,
+                    roa_mask,
+                    term_mask,
+                    roi_masks,
+                    end_masks,
+                    no_end_mask,
+                    post_filter,
+                    fixel_otsu: plan_input.as_ref().and_then(|p| p.fixel_otsu),
+                    direction_getter: self.direction_getter,
+                });
         }
 
         Ok(vec![super::super::EvaluatedValue {

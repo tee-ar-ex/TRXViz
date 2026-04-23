@@ -27,10 +27,7 @@ pub(crate) fn point_in_mask(pt_ras: Vec3, mask: &VoxelMask) -> bool {
 }
 
 /// Does the streamline pass through **every** waypoint mask? AND-semantics.
-pub(crate) fn streamline_hits_all_rois(
-    streamline: &[[f32; 3]],
-    rois: &[Arc<VoxelMask>],
-) -> bool {
+pub(crate) fn streamline_hits_all_rois(streamline: &[[f32; 3]], rois: &[Arc<VoxelMask>]) -> bool {
     rois.iter().all(|roi| {
         streamline
             .iter()

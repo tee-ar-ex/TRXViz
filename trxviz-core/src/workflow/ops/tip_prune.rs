@@ -11,9 +11,9 @@ use super::super::{
     expect_streamline_input, mark_expensive_success, prime_expensive_record,
     sync_node_state_from_run_record,
 };
-use crate::workflow::tip::{prune_by_topology, TipParams};
-use crate::workflow::types::CachedTipPrune;
 use crate::workflow::WorkflowEvalMode;
+use crate::workflow::tip::{TipParams, prune_by_topology};
+use crate::workflow::types::CachedTipPrune;
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TipPruneOp {
@@ -27,9 +27,15 @@ pub struct TipPruneOp {
     pub max_unsupported_fraction: f32,
 }
 
-fn default_voxel_size_mm() -> f32 { 1.0 }
-fn default_iterations() -> u32 { 16 }
-fn default_min_support() -> u32 { 1 }
+fn default_voxel_size_mm() -> f32 {
+    1.0
+}
+fn default_iterations() -> u32 {
+    16
+}
+fn default_min_support() -> u32 {
+    1
+}
 
 impl Default for TipPruneOp {
     fn default() -> Self {
@@ -112,8 +118,7 @@ impl WorkflowOp for TipPruneOp {
                 max_unsupported_fraction: self.max_unsupported_fraction,
             };
             let mut selected = flow.selected_streamlines.clone();
-            let report =
-                prune_by_topology(&flow.dataset.gpu_data, &mut selected, &params);
+            let report = prune_by_topology(&flow.dataset.gpu_data, &mut selected, &params);
             let summary = format!(
                 "{}→{} (−{}) in {} iter{}",
                 before,

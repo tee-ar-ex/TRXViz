@@ -41,6 +41,7 @@ pub fn workflow_streamline_fingerprint(draw: &StreamlineDrawPlan) -> u64 {
     draw.tube_radius_mm.0.to_bits().hash(&mut hasher);
     draw.tube_sides.hash(&mut hasher);
     draw.slab_half_width_mm.0.to_bits().hash(&mut hasher);
+    draw.opacity.to_bits().hash(&mut hasher);
     hash_flow(&draw.flow, &mut hasher);
     hasher.finish()
 }

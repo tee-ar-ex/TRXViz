@@ -345,9 +345,10 @@ fn apply_job_result(
             mark_expensive_success(record, fingerprint, summary);
         }
         WorkflowJobOutput::DipyTractography { flow } => {
-            cache
-                .dipy_tractography_results
-                .insert(node_uuid, crate::workflow::CachedTractographyResult { fingerprint, flow });
+            cache.dipy_tractography_results.insert(
+                node_uuid,
+                crate::workflow::CachedTractographyResult { fingerprint, flow },
+            );
             mark_expensive_success(record, fingerprint, "dipy tractography".to_string());
         }
         WorkflowJobOutput::YehTractography { flow } => {

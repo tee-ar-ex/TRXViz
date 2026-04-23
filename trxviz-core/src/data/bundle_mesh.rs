@@ -748,7 +748,10 @@ pub fn build_voxel_mask_mesh(
     }
 
     // 1. Density grid: 0.0 / 1.0.
-    let mut density: Vec<f32> = mask.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 }).collect();
+    let mut density: Vec<f32> = mask
+        .iter()
+        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+        .collect();
     if !density.iter().any(|&v| v > 0.0) {
         return None;
     }
@@ -779,8 +782,7 @@ pub fn build_voxel_mask_mesh(
         .vertices
         .iter()
         .map(|v| {
-            let p =
-                voxel_to_ras.transform_point3(glam::Vec3::new(v.posit.x, v.posit.y, v.posit.z));
+            let p = voxel_to_ras.transform_point3(glam::Vec3::new(v.posit.x, v.posit.y, v.posit.z));
             BundleMeshVertex {
                 position: [p.x, p.y, p.z],
                 normal: [0.0, 0.0, 1.0],

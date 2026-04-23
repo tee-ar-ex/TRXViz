@@ -62,8 +62,7 @@ impl WorkflowOp for OdxSourceOp {
                 otsu.metric_name, otsu.threshold, otsu.n_values,
             );
         } else {
-            ctx.node_state.summary =
-                "(no DPF tracking metric; Otsu unavailable)".to_string();
+            ctx.node_state.summary = "(no DPF tracking metric; Otsu unavailable)".to_string();
         }
 
         Ok(vec![

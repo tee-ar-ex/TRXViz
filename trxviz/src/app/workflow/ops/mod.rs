@@ -4,7 +4,6 @@ use trxviz_core::data::loaded_files::VolumeColormap;
 use trxviz_core::data::orientation_field::{
     BoundaryGlyphColorMode, BoundaryGlyphNormalization, DirectionFieldBinningMode,
 };
-use trxviz_core::renderer::mesh_renderer::SurfaceColormap;
 use trxviz_core::data::trx_data::RenderStyle;
 use trxviz_core::renderer::mesh_renderer::SurfaceColormap;
 
@@ -144,7 +143,11 @@ pub(crate) fn edit_node_op(
                     .logarithmic(true),
             );
             ui.add(egui::Slider::new(iterations, 1..=64).text("Iterations"));
-            ui.add(egui::DragValue::new(min_support).range(0..=10).prefix("Min support "));
+            ui.add(
+                egui::DragValue::new(min_support)
+                    .range(0..=10)
+                    .prefix("Min support "),
+            );
             ui.add(
                 egui::Slider::new(max_unsupported_fraction, 0.0..=1.0)
                     .text("Max unsupported fraction"),
@@ -160,13 +163,23 @@ pub(crate) fn edit_node_op(
                 egui::Slider::new(trim_fraction, 0.0..=0.5)
                     .text("Trim fraction")
                     .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
-                    .custom_parser(|s| s.trim_end_matches('%').parse::<f64>().ok().map(|v| v / 100.0)),
+                    .custom_parser(|s| {
+                        s.trim_end_matches('%')
+                            .parse::<f64>()
+                            .ok()
+                            .map(|v| v / 100.0)
+                    }),
             );
             ui.add(
                 egui::Slider::new(puri_fraction, 0.0..=0.9)
                     .text("Discard fraction")
                     .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
-                    .custom_parser(|s| s.trim_end_matches('%').parse::<f64>().ok().map(|v| v / 100.0)),
+                    .custom_parser(|s| {
+                        s.trim_end_matches('%')
+                            .parse::<f64>()
+                            .ok()
+                            .map(|v| v / 100.0)
+                    }),
             );
             ui.add(
                 egui::Slider::new(spherical_smoothing_deg, 0.0..=45.0)
@@ -220,6 +233,7 @@ pub(crate) fn edit_node_op(
             tube_radius_mm,
             tube_sides,
             slab_half_width_mm,
+            opacity,
         } => {
             ui.checkbox(enabled, "Visible");
             egui::ComboBox::from_id_salt(format!("render_style_{}", node_uuid.0))
@@ -245,6 +259,7 @@ pub(crate) fn edit_node_op(
                     .speed(0.5)
                     .prefix("Slice slab "),
             );
+            ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
         }
         workflow::WorkflowNodeKind::VolumeDisplay {
             colormap,
@@ -807,9 +822,21 @@ pub(crate) fn edit_node_op(
         } => {
             ui.label("Center (RAS+ mm)");
             ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(&mut center_ras[0]).speed(0.5).prefix("X "));
-                ui.add(egui::DragValue::new(&mut center_ras[1]).speed(0.5).prefix("Y "));
-                ui.add(egui::DragValue::new(&mut center_ras[2]).speed(0.5).prefix("Z "));
+                ui.add(
+                    egui::DragValue::new(&mut center_ras[0])
+                        .speed(0.5)
+                        .prefix("X "),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut center_ras[1])
+                        .speed(0.5)
+                        .prefix("Y "),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut center_ras[2])
+                        .speed(0.5)
+                        .prefix("Z "),
+                );
             });
             ui.add(
                 egui::DragValue::new(&mut radius_or_half_extent_mm.0)
@@ -836,11 +863,32 @@ pub(crate) fn edit_node_op(
             seeds_per_voxel,
             max_points,
             rng_seed,
-            // DG variant not yet exposed in the UI — only Probabilistic
-            // is implemented. Once PTT lands on CPU/GPU, add a combo box
-            // here and a parameter pane for PTT-specific knobs.
-            direction_getter: _,
+            direction_getter,
         } => {
+            // Direction-getter variant picker. We compare the discriminant
+            // via a bool rather than selectable_value on the full enum
+            // because the PTT variant carries its own inline parameters
+            // which we don't want to recreate on every combo-box redraw.
+            let is_ptt = matches!(direction_getter, workflow::DipyDirectionGetter::Ptt { .. });
+            let mut new_is_ptt = is_ptt;
+            egui::ComboBox::from_id_salt(format!("dipy_dg_{}", node_uuid.0))
+                .selected_text(if is_ptt {
+                    "PTT (GPU only)"
+                } else {
+                    "Probabilistic"
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut new_is_ptt, false, "Probabilistic");
+                    ui.selectable_value(&mut new_is_ptt, true, "PTT (GPU only)");
+                });
+            if new_is_ptt != is_ptt {
+                *direction_getter = if new_is_ptt {
+                    workflow::DipyDirectionGetter::ptt_default()
+                } else {
+                    workflow::DipyDirectionGetter::Probabilistic
+                };
+            }
+
             ui.add(egui::Slider::new(step_size_mm, 0.1..=2.0).text("Step size (mm)"));
             ui.add(egui::Slider::new(max_angle_deg, 10.0..=90.0).text("Max angle (°)"));
             ui.add(egui::Slider::new(min_len_mm, 5.0..=100.0).text("Min length (mm)"));
@@ -853,12 +901,14 @@ pub(crate) fn edit_node_op(
                 egui::Slider::new(relative_peak_threshold, 0.0..=1.0)
                     .text("Relative peak threshold"),
             );
-            ui.add(
-                egui::Slider::new(seeds_per_voxel, 1..=10).text("Seeds per voxel"),
-            );
+            ui.add(egui::Slider::new(seeds_per_voxel, 1..=10).text("Seeds per voxel"));
             ui.add(egui::Slider::new(max_points, 50..=2000).text("Max points"));
             ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(rng_seed).speed(1.0).prefix("RNG seed "));
+                ui.add(
+                    egui::DragValue::new(rng_seed)
+                        .speed(1.0)
+                        .prefix("RNG seed "),
+                );
                 if ui.button("Randomize").clicked() {
                     *rng_seed = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -867,6 +917,45 @@ pub(crate) fn edit_node_op(
                     result.run_expensive_requested = true;
                 }
             });
+
+            // PTT-specific knobs. Exhaustive match on the enum so adding
+            // a new variant is a compile error (forcing-function for the
+            // pattern that previously ate the `direction_getter: _`
+            // discard and silently demoted PTT back to Probabilistic).
+            match direction_getter {
+                workflow::DipyDirectionGetter::Probabilistic => {}
+                workflow::DipyDirectionGetter::Ptt {
+                    probe_length_mm,
+                    probe_quality,
+                    probe_radius_mm,
+                    probe_count,
+                    max_curvature_per_mm,
+                    data_support_exponent,
+                    min_data_support,
+                    rejection_sampling_max_try,
+                } => {
+                    ui.separator();
+                    ui.label("PTT probe parameters");
+                    ui.add(egui::Slider::new(probe_length_mm, 0.1..=2.0).text("Probe length (mm)"));
+                    ui.add(egui::Slider::new(probe_quality, 1..=16).text("Probe quality"));
+                    ui.add(egui::Slider::new(probe_radius_mm, 0.0..=2.0).text("Probe radius (mm)"));
+                    ui.add(egui::Slider::new(probe_count, 1..=8).text("Probe count"));
+                    ui.add(
+                        egui::Slider::new(max_curvature_per_mm, 0.0..=2.0)
+                            .text("Max curvature (1/mm)"),
+                    );
+                    ui.add(
+                        egui::Slider::new(data_support_exponent, 0.25..=4.0)
+                            .text("Data support exponent"),
+                    );
+                    ui.add(egui::Slider::new(min_data_support, 0.0..=1.0).text("Min data support"));
+                    ui.add(
+                        egui::Slider::new(rejection_sampling_max_try, 10..=500)
+                            .text("Rejection sampling max try"),
+                    );
+                }
+            }
+
             if ui.button("Run Tractography").clicked() {
                 result.run_expensive_requested = true;
             }
@@ -905,37 +994,67 @@ pub(crate) fn edit_node_op(
                     // visible rather than clamped to an endpoint.
                     let lo = range.start().min(plan_value);
                     let hi = range.end().max(plan_value);
-                    ui.add_enabled(
-                        false,
-                        egui::Slider::new(&mut displayed, lo..=hi).text(text),
-                    );
+                    ui.add_enabled(false, egui::Slider::new(&mut displayed, lo..=hi).text(text));
                 } else {
                     ui.add(egui::Slider::new(value_if_live, range).text(text));
                 }
             };
-            override_slider(ui, "step_size_mm", step_size_mm, 0.0..=2.0, "Step size mm (0 = random)");
-            override_slider(ui, "max_angle_deg", max_angle_deg, 0.0..=90.0, "Max angle ° (0 = random)");
+            override_slider(
+                ui,
+                "step_size_mm",
+                step_size_mm,
+                0.0..=2.0,
+                "Step size mm (0 = random)",
+            );
+            override_slider(
+                ui,
+                "max_angle_deg",
+                max_angle_deg,
+                0.0..=90.0,
+                "Max angle ° (0 = random)",
+            );
             override_slider(ui, "min_len_mm", min_len_mm, 5.0..=100.0, "Min length (mm)");
-            override_slider(ui, "max_len_mm", max_len_mm, 20.0..=500.0, "Max length (mm)");
-            override_slider(ui, "fixel_threshold", fixel_threshold, 0.0..=0.5, "Fixel threshold (0 = random)");
+            override_slider(
+                ui,
+                "max_len_mm",
+                max_len_mm,
+                20.0..=500.0,
+                "Max length (mm)",
+            );
+            override_slider(
+                ui,
+                "fixel_threshold",
+                fixel_threshold,
+                0.0..=0.5,
+                "Fixel threshold (0 = random)",
+            );
             if let Some(&v) = ctx.overridden_values.get("fixel_otsu") {
                 ui.small(format!(
                     "plan fixel_otsu = {:.4} (random threshold centered on 0.6·this)",
                     v
                 ));
             }
-            override_slider(ui, "smooth_fraction", smooth_fraction, 0.0..=1.0, "Smoothing (1 = random)");
+            override_slider(
+                ui,
+                "smooth_fraction",
+                smooth_fraction,
+                0.0..=1.0,
+                "Smoothing (1 = random)",
+            );
             ui.add(egui::Slider::new(max_points, 50..=2000).text("Max points per streamline"));
             ui.add(
-                egui::Slider::new(target_streamlines, 1_000..=1_000_000)
-                    .text("Target streamlines"),
+                egui::Slider::new(target_streamlines, 1_000..=1_000_000).text("Target streamlines"),
             );
             ui.add(
                 egui::Slider::new(max_seed_attempts, 100_000..=10_000_000)
                     .text("Max seed attempts"),
             );
             ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(rng_seed).speed(1.0).prefix("RNG seed "));
+                ui.add(
+                    egui::DragValue::new(rng_seed)
+                        .speed(1.0)
+                        .prefix("RNG seed "),
+                );
                 if ui.button("Randomize").clicked() {
                     *rng_seed = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -988,21 +1107,57 @@ pub(crate) fn edit_node_op(
         } => {
             ui.small("Each override, when enabled, replaces the tracker's slider value.");
             let row = |ui: &mut egui::Ui,
-                           enabled: &mut bool,
-                           value: &mut f32,
-                           range: std::ops::RangeInclusive<f32>,
-                           label: &str| {
+                       enabled: &mut bool,
+                       value: &mut f32,
+                       range: std::ops::RangeInclusive<f32>,
+                       label: &str| {
                 ui.horizontal(|ui| {
                     ui.checkbox(enabled, "");
                     ui.add_enabled(*enabled, egui::Slider::new(value, range).text(label));
                 });
             };
-            row(ui, override_step, step_size_mm, 0.25..=2.0, "Step size (mm)");
-            row(ui, override_angle, max_angle_deg, 30.0..=90.0, "Max angle (°)");
-            row(ui, override_min_len, min_len_mm, 5.0..=100.0, "Min length (mm)");
-            row(ui, override_max_len, max_len_mm, 20.0..=500.0, "Max length (mm)");
-            row(ui, override_fixel_threshold, fixel_threshold, 0.0..=0.5, "Fixel threshold");
-            row(ui, override_smooth, smooth_fraction, 0.0..=0.95, "Smoothing");
+            row(
+                ui,
+                override_step,
+                step_size_mm,
+                0.25..=2.0,
+                "Step size (mm)",
+            );
+            row(
+                ui,
+                override_angle,
+                max_angle_deg,
+                30.0..=90.0,
+                "Max angle (°)",
+            );
+            row(
+                ui,
+                override_min_len,
+                min_len_mm,
+                5.0..=100.0,
+                "Min length (mm)",
+            );
+            row(
+                ui,
+                override_max_len,
+                max_len_mm,
+                20.0..=500.0,
+                "Max length (mm)",
+            );
+            row(
+                ui,
+                override_fixel_threshold,
+                fixel_threshold,
+                0.0..=0.5,
+                "Fixel threshold",
+            );
+            row(
+                ui,
+                override_smooth,
+                smooth_fraction,
+                0.0..=0.95,
+                "Smoothing",
+            );
             row(ui, override_fixel_otsu, fixel_otsu, 0.0..=1.0, "Fixel Otsu");
         }
         workflow::WorkflowNodeKind::PrepareHausdorffPlan {
@@ -1034,11 +1189,7 @@ pub(crate) fn edit_node_op(
                         ui.selectable_value(tracking_metric, None, "auto");
                         if let Some(names) = ctx.odx_selector_names {
                             for name in &names.dpf_names {
-                                ui.selectable_value(
-                                    tracking_metric,
-                                    Some(name.clone()),
-                                    name,
-                                );
+                                ui.selectable_value(tracking_metric, Some(name.clone()), name);
                             }
                         }
                     });
@@ -1048,10 +1199,7 @@ pub(crate) fn edit_node_op(
                 ui.selectable_value(otsu_scope, OtsuScope::AllFixels, "All fixels");
                 ui.selectable_value(otsu_scope, OtsuScope::PrimaryPeak, "Primary peak");
             });
-            ui.add(
-                egui::Slider::new(seed_fixel_otsu_factor, 0.0..=2.0)
-                    .text("Seed factor × Otsu"),
-            );
+            ui.add(egui::Slider::new(seed_fixel_otsu_factor, 0.0..=2.0).text("Seed factor × Otsu"));
             ui.add(
                 egui::Slider::new(not_end_fixel_otsu_factor, 0.0..=2.0)
                     .text("No-end factor × Otsu"),
@@ -1073,20 +1221,12 @@ pub(crate) fn edit_node_op(
 /// display ops. When auto is on, the gate is hidden (the scene's
 /// `default_fixel_otsu()` drives it at eval time); when off, expose the
 /// four gate parameters explicitly.
-fn fixel_opacity_gate_editor(
-    ui: &mut egui::Ui,
-    auto: &mut bool,
-    gate: &mut workflow::OpacityGate,
-) {
+fn fixel_opacity_gate_editor(ui: &mut egui::Ui, auto: &mut bool, gate: &mut workflow::OpacityGate) {
     ui.separator();
     ui.checkbox(auto, "Auto-gate from tracking Otsu");
     if !*auto {
-        ui.add(
-            egui::Slider::new(&mut gate.range.0, 0.0..=1.0).text("Gate range min"),
-        );
-        ui.add(
-            egui::Slider::new(&mut gate.range.1, 0.0..=1.0).text("Gate range max"),
-        );
+        ui.add(egui::Slider::new(&mut gate.range.0, 0.0..=1.0).text("Gate range min"));
+        ui.add(egui::Slider::new(&mut gate.range.1, 0.0..=1.0).text("Gate range max"));
         ui.add(egui::Slider::new(&mut gate.below, 0.0..=1.0).text("Alpha below"));
         ui.add(egui::Slider::new(&mut gate.above, 0.0..=1.0).text("Alpha above"));
     } else {

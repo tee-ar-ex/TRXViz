@@ -1231,6 +1231,7 @@ impl super::super::TrxVizApp {
                 render_style: draw.render_style,
                 tube_radius: draw.tube_radius_mm.0,
                 slab_half_width: draw.slab_half_width_mm.0,
+                opacity: draw.opacity,
             })
             .collect::<Vec<_>>();
 

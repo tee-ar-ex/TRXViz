@@ -115,6 +115,7 @@ pub(super) fn render_scene3d_to_png(
                 glam::Vec3::ZERO,
                 0.0,
                 aux,
+                streamline.opacity,
                 lighting,
                 render_3d,
                 fog_near,

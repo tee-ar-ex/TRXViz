@@ -33,20 +33,17 @@ use trxviz_core::asset_loader::AssetLoader;
 use trxviz_core::data::loaded_files::{LoadedOdx, LoadedTrx};
 use trxviz_core::data::odx_data::OdxScene;
 use trxviz_core::data::trx_data::TrxGpuData;
-use trxviz_core::gpu::plan_prep::hausdorff::{
-    HausdorffPlanParams, build_hausdorff_plan,
-};
+use trxviz_core::gpu::plan_prep::hausdorff::{HausdorffPlanParams, build_hausdorff_plan};
 use trxviz_core::scene::LoadedStreamlineSource;
 use trxviz_core::workflow::{
-    DipyDirectionGetter, DipyTractographyPlan, WorkflowJobOutput,
-    WorkflowJobPayload, WorkflowNodeUuid, run_workflow_job,
+    DipyDirectionGetter, DipyTractographyPlan, WorkflowJobOutput, WorkflowJobPayload,
+    WorkflowNodeUuid, run_workflow_job,
 };
 
 // Default fixture file names. The user can override via env vars; see the
 // module comment.
 const DEFAULT_ODX_FILE: &str = "sub-20124_ses-1_space-ACPC_desc-preproc_dwi.gqi.fz";
-const DEFAULT_REF_TCK: &str =
-    "sub-20124_ses-1_space-ACPC_model-gqi_bundle-ProjectionBrainstemCorticospinalTractL_streamlines.tck.gz";
+const DEFAULT_REF_TCK: &str = "sub-20124_ses-1_space-ACPC_model-gqi_bundle-ProjectionBrainstemCorticospinalTractL_streamlines.tck.gz";
 
 /// Resolve fixture paths. Returns `Some((odx_path, ref_path))` if both
 /// files exist, or `None` if either is missing (test skips gracefully).
@@ -227,13 +224,7 @@ fn dipy_benchmark_cst_l() {
         not_end_fixel_otsu_factor: 0.9,
         max_reference_points: 20_000,
     };
-    let haus = build_hausdorff_plan(
-        &ref_scene,
-        &ref_gpu,
-        &[],
-        "CST-L reference".into(),
-        &params,
-    );
+    let haus = build_hausdorff_plan(&ref_scene, &ref_gpu, &[], "CST-L reference".into(), &params);
     eprintln!(
         "[dipy-bench] Hausdorff plan: seed={} voxels, limiting={} voxels, \
          no_end={} voxels, min_len={:?}mm, max_len={:?}mm",

@@ -2,24 +2,34 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::error::WorkflowResult;
-use crate::gpu::plan_prep::hausdorff::{
-    build_hausdorff_plan, HausdorffPlanParams,
-};
-use crate::workflow::types::{CachedHausdorffPlan, WorkflowValue};
+use crate::gpu::plan_prep::hausdorff::{HausdorffPlanParams, build_hausdorff_plan};
 use crate::workflow::WorkflowEvalMode;
+use crate::workflow::types::{CachedHausdorffPlan, WorkflowValue};
 use odx_rs::qc::OtsuScope;
 
 use super::super::{
-    EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp,
-    prime_expensive_record, sync_node_state_from_run_record, mark_expensive_success,
+    EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp, mark_expensive_success,
+    prime_expensive_record, sync_node_state_from_run_record,
 };
 
-fn default_tolerance_mm() -> f32 { 12.0 }
-fn default_seed_tolerance_mm() -> f32 { 2.0 }
-fn default_seed_fixel_otsu_factor() -> f32 { 0.5 }
-fn default_not_end_fixel_otsu_factor() -> f32 { 0.9 }
-fn default_max_reference_points() -> u32 { 20_000 }
-fn default_otsu_scope() -> OtsuScope { OtsuScope::AllFixels }
+fn default_tolerance_mm() -> f32 {
+    12.0
+}
+fn default_seed_tolerance_mm() -> f32 {
+    2.0
+}
+fn default_seed_fixel_otsu_factor() -> f32 {
+    0.5
+}
+fn default_not_end_fixel_otsu_factor() -> f32 {
+    0.9
+}
+fn default_max_reference_points() -> u32 {
+    20_000
+}
+fn default_otsu_scope() -> OtsuScope {
+    OtsuScope::AllFixels
+}
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PrepareHausdorffPlanOp {
@@ -248,8 +258,7 @@ impl WorkflowOp for PrepareHausdorffPlanOp {
         // downstream nodes mark themselves stale too. Once a downstream
         // Run fires, Settled mode fills the cache on this same pass.
         let Some(cached) = cache else {
-            ctx.node_state.summary =
-                "Plan not built yet — click Run on a downstream node.".into();
+            ctx.node_state.summary = "Plan not built yet — click Run on a downstream node.".into();
             let dims = loaded_odx.scene.dimensions();
             let dims_u32 = [dims[0] as u32, dims[1] as u32, dims[2] as u32];
             let voxel_to_ras = loaded_odx.scene.voxel_to_ras();
@@ -339,4 +348,3 @@ impl From<PrepareHausdorffPlanOp> for WorkflowNodeKind {
         }
     }
 }
-

@@ -135,6 +135,7 @@ pub(super) fn render_scene2d_to_png(
                     slab_center,
                     hw,
                     0.5,
+                    streamline.opacity,
                     lighting,
                     &neutral_render,
                     0.0,

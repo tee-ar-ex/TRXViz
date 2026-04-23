@@ -11,7 +11,7 @@ struct Uniforms {
     fill_strength: f32,
     headlight_mix: f32,
     specular_strength: f32,
-    _pad0: f32,
+    opacity: f32,           // per-draw alpha multiplier in [0, 1]
     _pad1: f32,
     _pad2: f32,
     fog_color: vec4<f32>,
@@ -102,7 +102,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             + specular;
         let shaded = in.color.rgb * lit;
         let faded = apply_depth_fade(shaded, in.world_pos);
-        return vec4<f32>(apply_post_color(faded, in.ndc_xy), in.color.a);
+        return vec4<f32>(apply_post_color(faded, in.ndc_xy), in.color.a * uniforms.opacity);
 
     } else if uniforms.render_style == 3u {
         // Depth cueing: brightness fades with distance from camera
@@ -111,10 +111,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let depth_far = max(uniforms.tube_radius, 1.0);
         let cue = 1.0 - clamp(dist / depth_far, 0.0, 0.65);
         let faded = apply_depth_fade(in.color.rgb * cue, in.world_pos);
-        return vec4<f32>(apply_post_color(faded, in.ndc_xy), in.color.a);
+        return vec4<f32>(apply_post_color(faded, in.ndc_xy), in.color.a * uniforms.opacity);
     }
 
     // Flat (default)
     let faded = apply_depth_fade(in.color.rgb, in.world_pos);
-    return vec4<f32>(apply_post_color(faded, in.ndc_xy), in.color.a);
+    return vec4<f32>(apply_post_color(faded, in.ndc_xy), in.color.a * uniforms.opacity);
 }

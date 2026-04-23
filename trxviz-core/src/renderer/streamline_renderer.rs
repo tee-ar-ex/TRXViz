@@ -47,7 +47,11 @@ struct Uniforms {
     fill_strength: f32,       // [120..124]
     headlight_mix: f32,       // [124..128]
     specular_strength: f32,   // [128..132]
-    _pad0: [f32; 3],          // [132..144]
+    /// Per-draw opacity multiplier in [0, 1]. Multiplied with the
+    /// per-vertex alpha channel by the fragment shader. 1.0 = the
+    /// streamline's own color alpha; 0.0 = fully transparent.
+    opacity: f32, // [132..136]
+    _pad0: [f32; 2],          // [136..144]
     fog_color: [f32; 4],      // [144..160]
     fog_params: [f32; 4],     // [160..176]
     post_params: [f32; 4],    // [176..192]
@@ -96,7 +100,8 @@ impl StreamlineResources {
             fill_strength: 0.18,
             headlight_mix: 0.18,
             specular_strength: 0.14,
-            _pad0: [0.0; 3],
+            opacity: 1.0,
+            _pad0: [0.0; 2],
             fog_color: [0.0, 0.0, 0.0, 0.0],
             fog_params: [0.0, 1.0, 0.0, 0.0],
             post_params: [1.0, 1.0, 0.12, 0.0],
@@ -355,6 +360,7 @@ impl StreamlineResources {
         slab_center: glam::Vec3,
         slab_half_width: f32,
         tube_radius: f32,
+        opacity: f32,
         scene_lighting: SceneLightingParams,
         render_3d: &WorkflowRender3D,
         fog_near: f32,
@@ -373,7 +379,8 @@ impl StreamlineResources {
             fill_strength: scene_lighting.fill_strength(),
             headlight_mix: scene_lighting.headlight_mix(),
             specular_strength: scene_lighting.specular_strength(),
-            _pad0: [0.0; 3],
+            opacity: opacity.clamp(0.0, 1.0),
+            _pad0: [0.0; 2],
             fog_color: [
                 render_3d.fog_color[0],
                 render_3d.fog_color[1],

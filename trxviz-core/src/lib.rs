@@ -4,10 +4,10 @@
 //! rendering behavior and workflow execution stay aligned across both surfaces.
 
 pub mod asset_loader;
-pub mod gpu;
 pub mod data;
 /// Structured error types for the workflow evaluator and persistence layer.
 pub mod error;
+pub mod gpu;
 /// Headless offscreen rendering entrypoints and PNG export helpers.
 pub mod headless;
 /// Scene lighting presets and parameters shared by render paths.

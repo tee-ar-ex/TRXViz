@@ -59,12 +59,7 @@ pub fn build_hausdorff_plan(
     let ras_to_vox = voxel_to_ras.inverse();
 
     // Step 1: voxelize reference streamlines → coverage mask.
-    let coverage = voxelize_streamlines(
-        dims,
-        ras_to_vox,
-        reference_gpu,
-        selected_streamlines,
-    );
+    let coverage = voxelize_streamlines(dims, ras_to_vox, reference_gpu, selected_streamlines);
 
     // Step 2: EDT-dilate coverage by `tolerance_mm` → limiting mask, and
     // separately by `seed_tolerance_mm` → seed envelope. If
@@ -124,8 +119,7 @@ pub fn build_hausdorff_plan(
 
     // Step 5: compute reference-bundle min/max arc-length, clamp by ±2·tol
     // (DSI-Studio auto_track.cpp:265–267).
-    let (ref_min, ref_max) =
-        reference_length_extents(reference_gpu, selected_streamlines);
+    let (ref_min, ref_max) = reference_length_extents(reference_gpu, selected_streamlines);
     let tol = params.tolerance_mm.max(0.0);
     let min_len_mm = if ref_min > 0.0 {
         Some(tol.max(ref_min - 2.0 * tol).max(0.0))
@@ -192,8 +186,7 @@ fn voxelize_streamlines(
         if x >= nx || y >= ny || z >= nz {
             return;
         }
-        let idx = (x as usize)
-            + (nx as usize) * ((y as usize) + (ny as usize) * (z as usize));
+        let idx = (x as usize) + (nx as usize) * ((y as usize) + (ny as usize) * (z as usize));
         mask[idx] = 1;
     };
 
@@ -205,7 +198,12 @@ fn voxelize_streamlines(
         let dz = vb.z - va.z;
         let steps = dx.abs().max(dy.abs()).max(dz.abs()).ceil() as i32;
         if steps <= 0 {
-            set(va.x.floor() as i32, va.y.floor() as i32, va.z.floor() as i32, mask);
+            set(
+                va.x.floor() as i32,
+                va.y.floor() as i32,
+                va.z.floor() as i32,
+                mask,
+            );
             return;
         }
         let inv = 1.0 / steps as f32;
@@ -385,11 +383,7 @@ fn lower_envelope(f: &[u64]) -> Vec<u64> {
         let vk = v[k];
         let vkf = vk as f64;
         let d = (qf - vkf) * (qf - vkf) + fd(vk);
-        out[q] = if d >= inf_f {
-            INF
-        } else {
-            d.round() as u64
-        };
+        out[q] = if d >= inf_f { INF } else { d.round() as u64 };
     }
     out
 }
@@ -439,9 +433,7 @@ fn scatter_primary_peak_metric(scene: &OdxScene, dims: [u32; 3], metric: &str) -
             }
         }
     } else {
-        log::warn!(
-            "scatter_primary_peak_metric: DPF '{metric}' not found; masks will be vacuous"
-        );
+        log::warn!("scatter_primary_peak_metric: DPF '{metric}' not found; masks will be vacuous");
         for ijk in ijk.iter() {
             let i = ijk[0] as usize;
             let j = ijk[1] as usize;

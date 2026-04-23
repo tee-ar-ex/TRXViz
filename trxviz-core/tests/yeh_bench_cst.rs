@@ -22,22 +22,18 @@ use glam::Vec3;
 
 use trxviz_core::asset_loader::AssetLoader;
 use trxviz_core::data::loaded_files::{LoadedOdx, LoadedTrx};
-use trxviz_core::scene::LoadedStreamlineSource;
 use trxviz_core::data::odx_data::OdxScene;
 use trxviz_core::data::trx_data::TrxGpuData;
-use trxviz_core::gpu::plan_prep::hausdorff::{
-    HausdorffPlanParams, build_hausdorff_plan,
-};
+use trxviz_core::gpu::plan_prep::hausdorff::{HausdorffPlanParams, build_hausdorff_plan};
+use trxviz_core::scene::LoadedStreamlineSource;
 use trxviz_core::units::Millimeters;
 use trxviz_core::workflow::{
-    GraphPos, WorkflowEvalMode, WorkflowExecutionCache, WorkflowJobOutput,
-    WorkflowJobPayload, WorkflowNodeKind, default_document,
-    evaluate_scene_plan_with_mode, make_node, run_workflow_job,
+    GraphPos, WorkflowEvalMode, WorkflowExecutionCache, WorkflowJobOutput, WorkflowJobPayload,
+    WorkflowNodeKind, default_document, evaluate_scene_plan_with_mode, make_node, run_workflow_job,
 };
 
 const ODX_FILE: &str = "sub-20124_ses-1_space-ACPC_desc-preproc_dwi.gqi.fz";
-const REF_TCK: &str =
-    "sub-20124_ses-1_space-ACPC_model-gqi_bundle-ProjectionBrainstemCorticospinalTractL_streamlines.tck.gz";
+const REF_TCK: &str = "sub-20124_ses-1_space-ACPC_model-gqi_bundle-ProjectionBrainstemCorticospinalTractL_streamlines.tck.gz";
 
 /// Resolve the fixture directory, or `None` when neither candidate is
 /// present. Handled gracefully so the test `return`s cleanly instead of
@@ -187,13 +183,7 @@ fn yeh_benchmark_cst_l() {
         not_end_fixel_otsu_factor: 0.9,
         max_reference_points: 20_000,
     };
-    let haus = build_hausdorff_plan(
-        &ref_scene,
-        &ref_gpu,
-        &[],
-        "CST-L reference".into(),
-        &params,
-    );
+    let haus = build_hausdorff_plan(&ref_scene, &ref_gpu, &[], "CST-L reference".into(), &params);
     eprintln!(
         "[yeh-bench] Hausdorff plan: seed={} voxels, limiting={} voxels, \
          no_end={} voxels, min_len={:?}mm, max_len={:?}mm",
@@ -229,8 +219,14 @@ fn yeh_benchmark_cst_l() {
     );
     // Fixels port 0 of OdxSource → Yeh input 0.
     document.graph.connect(
-        trxviz_core::workflow::OutPort { node: odx_src, output: 0 },
-        trxviz_core::workflow::InPort { node: yeh, input: 0 },
+        trxviz_core::workflow::OutPort {
+            node: odx_src,
+            output: 0,
+        },
+        trxviz_core::workflow::InPort {
+            node: yeh,
+            input: 0,
+        },
     );
     // Yeh input 1 (VoxelMask seed) + 2 (TrackingPlan) are unconnected;
     // we instead *inject* the Hausdorff-derived plan into the emitted
@@ -272,13 +268,16 @@ fn yeh_benchmark_cst_l() {
     }
 
     let t0 = std::time::Instant::now();
-    let output = run_workflow_job(WorkflowJobPayload::YehTractography { plan })
-        .expect("yeh job ran");
+    let output =
+        run_workflow_job(WorkflowJobPayload::YehTractography { plan }).expect("yeh job ran");
     let elapsed = t0.elapsed();
 
     let flow = match output {
         WorkflowJobOutput::YehTractography { flow } => flow,
-        other => panic!("expected YehTractography output, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected YehTractography output, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
 
     let kept = flow.selected_streamlines.len();
@@ -324,10 +323,7 @@ fn yeh_benchmark_cst_l() {
     };
 
     let median_cand_len = median(&mut lengths.clone());
-    let ref_min_len = ref_lengths
-        .iter()
-        .copied()
-        .fold(f32::INFINITY, f32::min);
+    let ref_min_len = ref_lengths.iter().copied().fold(f32::INFINITY, f32::min);
     let ref_max_len = ref_lengths.iter().copied().fold(0.0f32, f32::max);
 
     eprintln!(

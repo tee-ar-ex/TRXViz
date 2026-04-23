@@ -1,6 +1,4 @@
 mod add_groups_from_parcellation;
-mod roi_ops;
-mod dipy_tractography;
 mod bundle_boundary;
 mod cifti_source;
 mod cifti_structure;
@@ -9,6 +7,7 @@ mod color_by_dps;
 mod color_by_dpv;
 mod color_by_fixel_scalars;
 mod color_by_group;
+mod dipy_tractography;
 mod fixel_display;
 mod group_select;
 mod limit_streamlines;
@@ -23,8 +22,10 @@ mod parcellation_source;
 mod plan_add;
 mod prepare_hausdorff;
 mod prepare_simple;
+mod purifibre;
 mod random_subset;
 mod remove_duplicates;
+mod roi_ops;
 mod save_streamlines;
 mod sphere_query;
 mod streamline_display;
@@ -34,7 +35,6 @@ mod surface_display;
 mod surface_projection;
 mod surface_source;
 mod tip_prune;
-mod purifibre;
 mod uniform_color;
 mod volume_display;
 mod volume_source;
@@ -43,8 +43,8 @@ mod yeh_tractography;
 
 pub use add_groups_from_parcellation::AddGroupsFromParcellationOp;
 pub use bundle_boundary::{
-    StreamlineDirectionFieldOp, BoundaryGlyphDisplayOp, BundleSurfaceBuildOp, BundleSurfaceDisplayOp,
-    ParcelSurfaceBuildOp,
+    BoundaryGlyphDisplayOp, BundleSurfaceBuildOp, BundleSurfaceDisplayOp, ParcelSurfaceBuildOp,
+    StreamlineDirectionFieldOp,
 };
 pub use cifti_source::CiftiSourceOp;
 pub use cifti_structure::CiftiStructureOp;
@@ -53,6 +53,7 @@ pub use color_by_dps::ColorByDpsOp;
 pub use color_by_dpv::ColorByDpvOp;
 pub use color_by_fixel_scalars::ColorByFixelScalarsOp;
 pub use color_by_group::ColorByGroupOp;
+pub use dipy_tractography::DipyTractographyOp;
 pub use fixel_display::{Fixel2DDisplayOp, Fixel3DDisplayOp};
 pub use group_select::GroupSelectOp;
 pub use limit_streamlines::LimitStreamlinesOp;
@@ -67,8 +68,10 @@ pub use parcellation_source::ParcellationSourceOp;
 pub use plan_add::{AddEndRegionOp, AddLimitingOp, AddNoEndOp, AddRoaOp, AddRoiOp, AddTermOp};
 pub use prepare_hausdorff::PrepareHausdorffPlanOp;
 pub use prepare_simple::PrepareSimplePlanOp;
+pub use purifibre::PurifibreOp;
 pub use random_subset::RandomSubsetOp;
 pub use remove_duplicates::RemoveDuplicatesOp;
+pub use roi_ops::{RoiFromParcelOp, RoiFromShapeOp, RoiFromVolumeOp, RoiShape};
 pub use save_streamlines::SaveStreamlinesOp;
 pub use sphere_query::SphereQueryOp;
 pub use streamline_display::StreamlineDisplayOp;
@@ -77,15 +80,12 @@ pub use surface_depth_query::SurfaceDepthQueryOp;
 pub use surface_display::{SurfaceDisplayOp, SurfaceOverlayStackOp};
 pub use surface_projection::{SurfaceProjectionDensityOp, SurfaceProjectionMeanDpsOp};
 pub use surface_source::SurfaceSourceOp;
-pub use purifibre::PurifibreOp;
 pub use tip_prune::TipPruneOp;
 pub use uniform_color::UniformColorOp;
 pub use volume_display::{VolumeDisplayOp, VolumeScalarsDisplayOp};
 pub use volume_source::VolumeSourceOp;
 pub use voxel_mask_display::VoxelMaskDisplayOp;
 pub use yeh_tractography::YehTractographyOp;
-pub use roi_ops::{RoiFromParcelOp, RoiFromVolumeOp, RoiFromShapeOp, RoiShape};
-pub use dipy_tractography::DipyTractographyOp;
 
 use super::{
     BundleSurfaceBuildMode, BundleSurfaceColorMode, DpsFieldName, DpvFieldName, EvalCtx,
@@ -230,6 +230,7 @@ pub enum WorkflowNodeKind {
         tube_radius_mm: Millimeters,
         tube_sides: u32,
         slab_half_width_mm: Millimeters,
+        opacity: f32,
     },
     VolumeDisplay {
         colormap: VolumeColormap,
@@ -749,6 +750,7 @@ macro_rules! with_workflow_op {
                 tube_radius_mm,
                 tube_sides,
                 slab_half_width_mm,
+                opacity,
             } => {
                 let $op = streamline_display::StreamlineDisplayOp {
                     enabled: *enabled,
@@ -756,6 +758,7 @@ macro_rules! with_workflow_op {
                     tube_radius_mm: *tube_radius_mm,
                     tube_sides: *tube_sides,
                     slab_half_width_mm: *slab_half_width_mm,
+                    opacity: *opacity,
                 };
                 $body
             }
@@ -1190,10 +1193,12 @@ pub(super) fn validate_registry() -> WorkflowResult<()> {
         color_by_group::ColorByGroupOp.tag(),
         color_by_dpv::ColorByDpvOp {
             field: super::DpvFieldName::default(),
+            colormap: crate::renderer::mesh_renderer::SurfaceColormap::default(),
         }
         .tag(),
         color_by_dps::ColorByDpsOp {
             field: super::DpsFieldName::default(),
+            colormap: crate::renderer::mesh_renderer::SurfaceColormap::default(),
         }
         .tag(),
         uniform_color::UniformColorOp { color: [0.0; 4] }.tag(),
@@ -1221,6 +1226,7 @@ pub(super) fn validate_registry() -> WorkflowResult<()> {
             tube_radius_mm: crate::units::Millimeters(0.0),
             tube_sides: 0,
             slab_half_width_mm: crate::units::Millimeters(0.0),
+            opacity: 1.0,
         }
         .tag(),
         save_streamlines::SaveStreamlinesOp {

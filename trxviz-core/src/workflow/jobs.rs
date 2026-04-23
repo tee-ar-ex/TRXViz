@@ -131,7 +131,11 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
                 boundary_field.as_deref(),
             ),
         }),
-        WorkflowJobPayload::DipyTractography { plan, device, queue } => {
+        WorkflowJobPayload::DipyTractography {
+            plan,
+            device,
+            queue,
+        } => {
             let flow = if let (Some(device), Some(queue)) = (device, queue) {
                 crate::gpu::dipy::run_gpu_dipy(&plan, &device, &queue)?
             } else {

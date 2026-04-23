@@ -153,6 +153,7 @@ struct StreamlineDrawInfo {
     visible: bool,
     render_style: RenderStyle,
     tube_radius: f32,
+    opacity: f32,
 }
 
 struct BundleDrawInfo {

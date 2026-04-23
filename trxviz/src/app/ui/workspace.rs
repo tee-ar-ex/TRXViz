@@ -462,7 +462,12 @@ impl super::super::TrxVizApp {
                 .runtime
                 .node_state
                 .get(&node_uuid)
-                .map(|s| (s.available_dps_fields.clone(), s.available_dpv_fields.clone()))
+                .map(|s| {
+                    (
+                        s.available_dps_fields.clone(),
+                        s.available_dpv_fields.clone(),
+                    )
+                })
                 .unwrap_or_default();
             let edit_result = workflow::edit_node_op(
                 ui,
@@ -479,7 +484,11 @@ impl super::super::TrxVizApp {
                     overridden_values: &overridden_values,
                 },
             );
-            (edit_result.save_now, edit_result.run_expensive_requested, *node != original_node)
+            (
+                edit_result.save_now,
+                edit_result.run_expensive_requested,
+                *node != original_node,
+            )
         };
 
         if run_requested {

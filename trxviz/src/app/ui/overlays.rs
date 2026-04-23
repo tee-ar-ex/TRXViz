@@ -547,8 +547,7 @@ impl crate::app::TrxVizApp {
 
                 let mut pts = Vec::with_capacity(3);
                 for (p0, p1) in [(a, b), (b, c), (c, a)] {
-                    if let Some(p) = intersect_edge_with_slice(p0, p1, axis_index, slice_pos, eps)
-                    {
+                    if let Some(p) = intersect_edge_with_slice(p0, p1, axis_index, slice_pos, eps) {
                         if !pts
                             .iter()
                             .any(|q: &glam::Vec3| (*q - p).length_squared() <= eps * eps)

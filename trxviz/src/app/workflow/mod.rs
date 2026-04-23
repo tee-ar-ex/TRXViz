@@ -36,6 +36,9 @@ pub fn is_render_only_change(before: &WorkflowNodeKind, after: &WorkflowNodeKind
                 tube_radius_mm: tr1,
                 tube_sides: ts1,
                 slab_half_width_mm: _,
+                // opacity is a uniform sent each frame; opacity-only
+                // changes don't require re-evaluating the workflow.
+                opacity: _,
             },
             K::StreamlineDisplay {
                 enabled: _,
@@ -43,6 +46,7 @@ pub fn is_render_only_change(before: &WorkflowNodeKind, after: &WorkflowNodeKind
                 tube_radius_mm: tr2,
                 tube_sides: ts2,
                 slab_half_width_mm: _,
+                opacity: _,
             },
         ) => rs1 == rs2 && tr1 == tr2 && ts1 == ts2,
         (
@@ -102,6 +106,7 @@ mod tests {
             tube_radius_mm: Millimeters(0.4),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         };
         let after = WorkflowNodeKind::StreamlineDisplay {
             enabled: true,
@@ -109,6 +114,7 @@ mod tests {
             tube_radius_mm: Millimeters(0.4),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         };
         assert!(!is_render_only_change(&before, &after));
     }

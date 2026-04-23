@@ -4,14 +4,24 @@ use std::sync::Arc;
 use crate::data::bundle_mesh::build_voxel_mask_mesh;
 use crate::error::WorkflowResult;
 use crate::units::Millimeters;
-use crate::workflow::types::{CachedVoxelMaskMesh, VoxelMask, VoxelMaskMeshDrawPlan, WorkflowValue};
+use crate::workflow::types::{
+    CachedVoxelMaskMesh, VoxelMask, VoxelMaskMeshDrawPlan, WorkflowValue,
+};
 
 use super::super::{EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp};
 
-fn default_color() -> [f32; 4] { [0.85, 0.55, 0.25, 1.0] }
-fn default_opacity() -> f32 { 1.0 }
-fn default_smooth_sigma() -> f32 { 1.0 }
-fn default_min_component_volume_mm3() -> Millimeters { Millimeters(0.0) }
+fn default_color() -> [f32; 4] {
+    [0.85, 0.55, 0.25, 1.0]
+}
+fn default_opacity() -> f32 {
+    1.0
+}
+fn default_smooth_sigma() -> f32 {
+    1.0
+}
+fn default_min_component_volume_mm3() -> Millimeters {
+    Millimeters(0.0)
+}
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VoxelMaskDisplayOp {
@@ -100,9 +110,7 @@ impl WorkflowOp for VoxelMaskDisplayOp {
             .cloned();
 
         let (mesh_opt, draw_id) = match cached {
-            Some(c) if c.fingerprint == fingerprint => {
-                (Some(c.mesh), c.draw_id)
-            }
+            Some(c) if c.fingerprint == fingerprint => (Some(c.mesh), c.draw_id),
             _ => {
                 // Mint a draw_id on first sight; stable across re-runs via cache.
                 let draw_id = if let Some(c) = &cached {
@@ -150,19 +158,25 @@ impl WorkflowOp for VoxelMaskDisplayOp {
         };
 
         ctx.node_state.summary = match &mesh_opt {
-            Some(mesh) => format!("{} vertices, {} triangles", mesh.vertices.len(), mesh.indices.len() / 3),
+            Some(mesh) => format!(
+                "{} vertices, {} triangles",
+                mesh.vertices.len(),
+                mesh.indices.len() / 3
+            ),
             None => "empty mask".to_string(),
         };
 
         if mesh_opt.is_some() {
-            ctx.scene_plan.voxel_mask_mesh_draws.push(VoxelMaskMeshDrawPlan {
-                node_uuid: ctx.node.uuid,
-                draw_id,
-                label: ctx.node.label.clone(),
-                fingerprint,
-                color: self.color,
-                opacity: self.opacity,
-            });
+            ctx.scene_plan
+                .voxel_mask_mesh_draws
+                .push(VoxelMaskMeshDrawPlan {
+                    node_uuid: ctx.node.uuid,
+                    draw_id,
+                    label: ctx.node.label.clone(),
+                    fingerprint,
+                    color: self.color,
+                    opacity: self.opacity,
+                });
         }
 
         Ok(Vec::new())

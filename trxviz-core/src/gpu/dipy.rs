@@ -13,14 +13,14 @@ use crate::data::loaded_files::StreamlineBacking;
 use crate::data::trx_data::TrxGpuData;
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::units::StreamlineIndex;
-use crate::workflow::{
-    DipyDirectionGetter, DipyTractographyPlan, StreamlineDataset, StreamlineFlow,
-};
+use crate::workflow::PostFilter;
 use crate::workflow::tracking_filters::{
     streamline_endpoint_in, streamline_hits_all_rois, streamline_passes_hausdorff,
     streamline_satisfies_end_masks,
 };
-use crate::workflow::PostFilter;
+use crate::workflow::{
+    DipyDirectionGetter, DipyTractographyPlan, StreamlineDataset, StreamlineFlow,
+};
 
 /// Maximum seeds dispatched in a single GPU batch.
 const BATCH_SIZE: u32 = 2048;
@@ -74,17 +74,13 @@ pub(super) fn prepare_dipy_inputs(
     let scene = &plan.odx_scene;
 
     let sh_view = scene.sh_view_f32().ok_or_else(|| {
-        WorkflowError::Evaluation(
-            "ODX file has no SH coefficients. Re-derive with odx-rs.".into(),
-        )
+        WorkflowError::Evaluation("ODX file has no SH coefficients. Re-derive with odx-rs.".into())
     })?;
     let ncoeffs = sh_view.ncols() as u32;
     let nb_voxels = sh_view.nrows();
 
     let mesh = scene.sh_render_mesh(2).ok_or_else(|| {
-        WorkflowError::Evaluation(
-            "Could not build SH render mesh for GPU tractography.".into(),
-        )
+        WorkflowError::Evaluation("Could not build SH render mesh for GPU tractography.".into())
     })?;
     let sphere_verts = mesh.vertices();
     let n_dirs = sphere_verts.len() as u32;
@@ -100,9 +96,8 @@ pub(super) fn prepare_dipy_inputs(
     let lut_len = (nx * ny * nz) as usize;
     let mut lut: Vec<u32> = vec![0xFFFF_FFFFu32; lut_len];
     for (compact_idx, &[ix, iy, iz]) in scene.ijk_lookup().iter().enumerate() {
-        let flat = ix as usize * ny as usize * nz as usize
-            + iy as usize * nz as usize
-            + iz as usize;
+        let flat =
+            ix as usize * ny as usize * nz as usize + iy as usize * nz as usize + iz as usize;
         lut[flat] = compact_idx as u32;
     }
 
@@ -201,9 +196,7 @@ pub(super) fn keep_streamline_for_plan(
     plan: &DipyTractographyPlan,
     streamline: &[[f32; 3]],
 ) -> bool {
-    if !plan.roi_masks.is_empty()
-        && !streamline_hits_all_rois(streamline, &plan.roi_masks)
-    {
+    if !plan.roi_masks.is_empty() && !streamline_hits_all_rois(streamline, &plan.roi_masks) {
         return false;
     }
     if let Some(ne) = plan.no_end_mask.as_deref() {
@@ -211,9 +204,7 @@ pub(super) fn keep_streamline_for_plan(
             return false;
         }
     }
-    if !plan.end_masks.is_empty()
-        && !streamline_satisfies_end_masks(streamline, &plan.end_masks)
-    {
+    if !plan.end_masks.is_empty() && !streamline_satisfies_end_masks(streamline, &plan.end_masks) {
         return false;
     }
     if let Some(PostFilter::Hausdorff {
@@ -237,8 +228,7 @@ pub(super) fn assemble_flow(
 ) -> StreamlineFlow {
     let nb_streamlines = offsets.len() - 1;
     let gpu_data = Arc::new(TrxGpuData::from_positions_and_offsets(positions, offsets));
-    let selected: Vec<StreamlineIndex> =
-        (0..nb_streamlines as u32).map(StreamlineIndex).collect();
+    let selected: Vec<StreamlineIndex> = (0..nb_streamlines as u32).map(StreamlineIndex).collect();
     let dataset = Arc::new(StreamlineDataset {
         name: plan.label.clone(),
         gpu_data,
@@ -275,14 +265,10 @@ fn precompute_fod_amplitudes(
 ) -> WorkflowResult<(Vec<f32>, u32, u32, usize)> {
     let scene = &plan.odx_scene;
     let sh_view = scene.sh_view_f32().ok_or_else(|| {
-        WorkflowError::Evaluation(
-            "ODX file has no SH coefficients. Re-derive with odx-rs.".into(),
-        )
+        WorkflowError::Evaluation("ODX file has no SH coefficients. Re-derive with odx-rs.".into())
     })?;
     let mesh = scene.sh_render_mesh(2).ok_or_else(|| {
-        WorkflowError::Evaluation(
-            "Could not build SH render mesh for GPU tractography.".into(),
-        )
+        WorkflowError::Evaluation("Could not build SH render mesh for GPU tractography.".into())
     })?;
     let n_dirs = mesh.vertices().len();
     let ncoeffs = sh_view.ncols();
@@ -293,8 +279,7 @@ fn precompute_fod_amplitudes(
     // for one voxel, writing into its assigned slice of the output.
     // (b_matrix is read-only and shared; sh_view is also read-only.)
     let mut amps = vec![0.0f32; nb_voxels * n_dirs];
-    amps
-        .par_chunks_mut(n_dirs)
+    amps.par_chunks_mut(n_dirs)
         .enumerate()
         .for_each(|(v, voxel_slice)| {
             let sh_row = sh_view.row(v);
@@ -351,18 +336,13 @@ pub fn run_gpu_dipy(
 
     eprintln!(
         "[gpu_dipy_prob] '{}': {} seeds, {} dirs, {} coeffs",
-        plan.label,
-        total_seeds,
-        n_dirs,
-        ncoeffs,
+        plan.label, total_seeds, n_dirs, ncoeffs,
     );
 
     // ── compute pipeline ─────────────────────────────────────────────────
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("tractography_prob"),
-        source: wgpu::ShaderSource::Wgsl(
-            include_str!("../shaders/tractography_prob.wgsl").into(),
-        ),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/tractography_prob.wgsl").into()),
     });
 
     let group0_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -479,12 +459,30 @@ pub fn run_gpu_dipy(
             label: Some("trac_group0"),
             layout: &group0_bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: seeds_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: sh_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: b_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: lut_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: sv_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: seeds_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: sh_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: lut_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: sv_buf.as_entire_binding(),
+                },
             ],
         });
 
@@ -515,16 +513,14 @@ pub fn run_gpu_dipy(
         });
 
         // ── dispatch ───────────────────────────────────────────────────
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("trac_encoder"),
-            });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("trac_encoder"),
+        });
         {
-            let mut pass =
-                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("trac_pass"),
-                    timestamp_writes: None,
-                });
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("trac_pass"),
+                timestamp_writes: None,
+            });
             pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &group0, &[]);
             pass.set_bind_group(1, &group1, &[]);
@@ -533,25 +529,15 @@ pub fn run_gpu_dipy(
         }
 
         // Copy output to staging buffers.
-        encoder.copy_buffer_to_buffer(
-            &out_pts_buf, 0,
-            &staging_pts, 0,
-            batch_out_pts_bytes,
-        );
-        encoder.copy_buffer_to_buffer(
-            &out_len_buf, 0,
-            &staging_len, 0,
-            batch_out_len_bytes,
-        );
+        encoder.copy_buffer_to_buffer(&out_pts_buf, 0, &staging_pts, 0, batch_out_pts_bytes);
+        encoder.copy_buffer_to_buffer(&out_len_buf, 0, &staging_len, 0, batch_out_len_bytes);
 
         queue.submit(std::iter::once(encoder.finish()));
 
         // ── readback ───────────────────────────────────────────────────
         let pts_slice = staging_pts.slice(..batch_out_pts_bytes);
         let len_slice = staging_len.slice(..batch_out_len_bytes);
-        pts_slice.map_async(wgpu::MapMode::Read, |_| {});
-        len_slice.map_async(wgpu::MapMode::Read, |_| {});
-        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        map_slices_blocking(device, &[pts_slice, len_slice], GPU_READBACK_TIMEOUT)?;
 
         let lengths: Vec<u32> = {
             let view = len_slice.get_mapped_range();
@@ -755,9 +741,7 @@ fn run_gpu_dipy_ptt(
     // ── compute pipeline ─────────────────────────────────────────────
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("dipy_ptt"),
-        source: wgpu::ShaderSource::Wgsl(
-            include_str!("../shaders/dipy_ptt.wgsl").into(),
-        ),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/dipy_ptt.wgsl").into()),
     });
 
     // PTT bind group (5 slots, vs prob's 6): we replace the
@@ -780,10 +764,7 @@ fn run_gpu_dipy_ptt(
 
     let group1_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("ptt_group1_bgl"),
-        entries: &[
-            storage_entry(0, false),
-            storage_entry(1, false),
-        ],
+        entries: &[storage_entry(0, false), storage_entry(1, false)],
     });
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -885,11 +866,26 @@ fn run_gpu_dipy_ptt(
             label: Some("ptt_group0"),
             layout: &group0_bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: seeds_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: fod_amp_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: lut_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: sv_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: seeds_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: fod_amp_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: lut_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: sv_buf.as_entire_binding(),
+                },
             ],
         });
 
@@ -945,9 +941,7 @@ fn run_gpu_dipy_ptt(
         // ── readback ──────────────────────────────────────────────────
         let pts_slice = staging_pts.slice(..batch_out_pts_bytes);
         let len_slice = staging_len.slice(..batch_out_len_bytes);
-        pts_slice.map_async(wgpu::MapMode::Read, |_| {});
-        len_slice.map_async(wgpu::MapMode::Read, |_| {});
-        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        map_slices_blocking(device, &[pts_slice, len_slice], GPU_READBACK_TIMEOUT)?;
 
         let lengths: Vec<u32> = {
             let view = len_slice.get_mapped_range();
@@ -997,7 +991,9 @@ fn run_gpu_dipy_ptt(
             let rate = batch_offset as f32 / elapsed;
             eprintln!(
                 "[gpu_dipy_ptt] {}/{} seeds ({:.0}/s) {} streamlines so far",
-                batch_offset, total_seeds, rate,
+                batch_offset,
+                total_seeds,
+                rate,
                 all_offsets.len() - 1,
             );
         }
@@ -1031,6 +1027,69 @@ fn empty_flow(plan: &DipyTractographyPlan) -> WorkflowResult<StreamlineFlow> {
         scalar_range_max: 1.0,
         scalar_colormap: crate::renderer::mesh_renderer::SurfaceColormap::default(),
     })
+}
+
+// ── readback helper ──────────────────────────────────────────────────────
+
+/// Timeout for a single batch's GPU readback. 30s is ~100× the worst real
+/// batch we've observed; crossing it almost certainly means the driver
+/// wedged and we'd rather return an error than hang the worker thread.
+const GPU_READBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Map the given buffer slices for reading, blocking until all maps
+/// complete, the map errors, or the global timeout fires. Replaces the
+/// older `map_async(..., |_| {})` + `poll(wait_indefinitely)` pattern,
+/// which silently ate `BufferAsyncError` and would hang forever if the
+/// driver never fired the callback.
+fn map_slices_blocking(
+    device: &wgpu::Device,
+    slices: &[wgpu::BufferSlice<'_>],
+    timeout: std::time::Duration,
+) -> WorkflowResult<()> {
+    use std::sync::mpsc::{RecvTimeoutError, channel};
+
+    let (tx, rx) = channel::<Result<(), wgpu::BufferAsyncError>>();
+    for slice in slices {
+        let tx = tx.clone();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+    }
+    drop(tx);
+
+    let n = slices.len();
+    let start = std::time::Instant::now();
+    let mut got = 0usize;
+    while got < n {
+        // Some backends only fire callbacks when the device is polled.
+        let _ = device.poll(wgpu::PollType::Poll);
+        match rx.recv_timeout(std::time::Duration::from_millis(50)) {
+            Ok(Ok(())) => got += 1,
+            Ok(Err(e)) => {
+                return Err(WorkflowError::Evaluation(format!(
+                    "GPU buffer map failed: {e}"
+                )));
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                if start.elapsed() > timeout {
+                    return Err(WorkflowError::Evaluation(format!(
+                        "GPU buffer map exceeded {:.0}s timeout ({}/{} buffers mapped); \
+                         driver or shader may be wedged",
+                        timeout.as_secs_f32(),
+                        got,
+                        n,
+                    )));
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err(WorkflowError::Evaluation(format!(
+                    "GPU buffer map channel closed after only {}/{} buffers mapped",
+                    got, n,
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 // ── bind group layout entry helpers ──────────────────────────────────────

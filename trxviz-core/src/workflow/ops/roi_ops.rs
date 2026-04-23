@@ -69,20 +69,20 @@ impl WorkflowOp for RoiFromParcelOp {
             }
         }
 
-        Ok(vec![WorkflowValue::VoxelMask(Arc::new(VoxelMask {
-            dims: [nx as u32, ny as u32, nz as u32],
-            voxel_to_ras: vol.voxel_to_ras,
-            data,
-        }))
-        .into()])
+        Ok(vec![
+            WorkflowValue::VoxelMask(Arc::new(VoxelMask {
+                dims: [nx as u32, ny as u32, nz as u32],
+                voxel_to_ras: vol.voxel_to_ras,
+                data,
+            }))
+            .into(),
+        ])
     }
 }
 
 impl From<RoiFromParcelOp> for WorkflowNodeKind {
     fn from(op: RoiFromParcelOp) -> Self {
-        Self::RoiFromParcel {
-            labels: op.labels,
-        }
+        Self::RoiFromParcel { labels: op.labels }
     }
 }
 
@@ -141,12 +141,14 @@ impl WorkflowOp for RoiFromVolumeOp {
             }
         }
 
-        Ok(vec![WorkflowValue::VoxelMask(Arc::new(VoxelMask {
-            dims: [nx as u32, ny as u32, nz as u32],
-            voxel_to_ras: vol.voxel_to_ras,
-            data,
-        }))
-        .into()])
+        Ok(vec![
+            WorkflowValue::VoxelMask(Arc::new(VoxelMask {
+                dims: [nx as u32, ny as u32, nz as u32],
+                voxel_to_ras: vol.voxel_to_ras,
+                data,
+            }))
+            .into(),
+        ])
     }
 }
 
@@ -211,9 +213,10 @@ impl WorkflowOp for RoiFromShapeOp {
         ctx: &mut EvalCtx<'_, '_>,
     ) -> WorkflowResult<Vec<super::super::EvaluatedValue>> {
         let odf_field = expect_odf_field_input(ctx.inputs, self.title())?;
-        let loaded = ctx.odx_assets.get(&odf_field.source_id).ok_or_else(|| {
-            crate::error::WorkflowError::Evaluation("Missing ODX asset".into())
-        })?;
+        let loaded = ctx
+            .odx_assets
+            .get(&odf_field.source_id)
+            .ok_or_else(|| crate::error::WorkflowError::Evaluation("Missing ODX asset".into()))?;
         let scene = &loaded.scene;
         let dims64 = scene.dimensions();
         let dims = [dims64[0] as u32, dims64[1] as u32, dims64[2] as u32];
@@ -228,8 +231,7 @@ impl WorkflowOp for RoiFromShapeOp {
         for z in 0..nz {
             for y in 0..ny {
                 for x in 0..nx {
-                    let pt = voxel_to_ras
-                        .transform_point3(Vec3::new(x as f32, y as f32, z as f32));
+                    let pt = voxel_to_ras.transform_point3(Vec3::new(x as f32, y as f32, z as f32));
                     let inside = match self.shape {
                         RoiShape::Sphere => pt.distance(center) <= r,
                         RoiShape::Box => {
@@ -246,12 +248,14 @@ impl WorkflowOp for RoiFromShapeOp {
             }
         }
 
-        Ok(vec![WorkflowValue::VoxelMask(Arc::new(VoxelMask {
-            dims,
-            voxel_to_ras,
-            data,
-        }))
-        .into()])
+        Ok(vec![
+            WorkflowValue::VoxelMask(Arc::new(VoxelMask {
+                dims,
+                voxel_to_ras,
+                data,
+            }))
+            .into(),
+        ])
     }
 }
 

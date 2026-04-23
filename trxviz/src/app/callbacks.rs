@@ -57,6 +57,7 @@ pub(super) struct StreamlineDrawInfo {
     pub render_style: RenderStyle,
     pub tube_radius: f32,
     pub slab_half_width: f32,
+    pub opacity: f32,
 }
 
 #[derive(Clone)]
@@ -143,6 +144,7 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                         glam::Vec3::ZERO, // slab_center
                         0.0,              // slab_half_width = 0 → disabled
                         aux,
+                        sd.opacity,
                         self.scene_lighting,
                         &self.render_3d,
                         self.fog_near,
@@ -494,6 +496,7 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                         self.slab_center,
                         hw,
                         0.5,
+                        sd.opacity,
                         self.scene_lighting,
                         &neutral_render,
                         0.0,
