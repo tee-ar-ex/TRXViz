@@ -1,6 +1,6 @@
 mod add_groups_from_parcellation;
 mod roi_ops;
-mod tractography;
+mod dipy_tractography;
 mod bundle_boundary;
 mod cifti_source;
 mod cifti_structure;
@@ -34,6 +34,7 @@ mod surface_display;
 mod surface_projection;
 mod surface_source;
 mod tip_prune;
+mod purifibre;
 mod uniform_color;
 mod volume_display;
 mod volume_source;
@@ -42,7 +43,7 @@ mod yeh_tractography;
 
 pub use add_groups_from_parcellation::AddGroupsFromParcellationOp;
 pub use bundle_boundary::{
-    BoundaryFieldBuildOp, BoundaryGlyphDisplayOp, BundleSurfaceBuildOp, BundleSurfaceDisplayOp,
+    StreamlineDirectionFieldOp, BoundaryGlyphDisplayOp, BundleSurfaceBuildOp, BundleSurfaceDisplayOp,
     ParcelSurfaceBuildOp,
 };
 pub use cifti_source::CiftiSourceOp;
@@ -76,6 +77,7 @@ pub use surface_depth_query::SurfaceDepthQueryOp;
 pub use surface_display::{SurfaceDisplayOp, SurfaceOverlayStackOp};
 pub use surface_projection::{SurfaceProjectionDensityOp, SurfaceProjectionMeanDpsOp};
 pub use surface_source::SurfaceSourceOp;
+pub use purifibre::PurifibreOp;
 pub use tip_prune::TipPruneOp;
 pub use uniform_color::UniformColorOp;
 pub use volume_display::{VolumeDisplayOp, VolumeScalarsDisplayOp};
@@ -83,7 +85,7 @@ pub use volume_source::VolumeSourceOp;
 pub use voxel_mask_display::VoxelMaskDisplayOp;
 pub use yeh_tractography::YehTractographyOp;
 pub use roi_ops::{RoiFromParcelOp, RoiFromVolumeOp, RoiFromShapeOp, RoiShape};
-pub use tractography::TractographyOp;
+pub use dipy_tractography::DipyTractographyOp;
 
 use super::{
     BundleSurfaceBuildMode, BundleSurfaceColorMode, DpsFieldName, DpvFieldName, EvalCtx,
@@ -157,6 +159,11 @@ pub enum WorkflowNodeKind {
         min_support: u32,
         max_unsupported_fraction: f32,
     },
+    Purifibre {
+        trim_fraction: f32,
+        puri_fraction: f32,
+        spherical_smoothing_deg: f32,
+    },
     Merge,
     AddGroupsFromParcellation,
     ParcelSelect {
@@ -174,9 +181,11 @@ pub enum WorkflowNodeKind {
     ColorByGroup,
     ColorByDPV {
         field: DpvFieldName,
+        colormap: crate::renderer::mesh_renderer::SurfaceColormap,
     },
     ColorByDPS {
         field: DpsFieldName,
+        colormap: crate::renderer::mesh_renderer::SurfaceColormap,
     },
     UniformColor {
         color: [f32; 4],
@@ -205,13 +214,14 @@ pub enum WorkflowNodeKind {
         tube_sides: u32,
         opacity: f32,
     },
-    BoundaryFieldBuild {
+    StreamlineDirectionField {
         #[serde(default = "default_boundary_field_voxel_size_mm")]
         voxel_size_mm: Millimeters,
         #[serde(default = "default_boundary_field_sphere_lod")]
         sphere_lod: u32,
         #[serde(default = "default_boundary_field_normalization")]
         normalization: BoundaryGlyphNormalization,
+        binning_mode: crate::data::orientation_field::DirectionFieldBinningMode,
     },
     StreamlineDisplay {
         #[serde(default = "default_enabled")]
@@ -428,7 +438,7 @@ pub enum WorkflowNodeKind {
         #[serde(default)]
         max_reference_points: u32,
     },
-    Tractography {
+    DipyTractography {
         #[serde(default)]
         step_size_mm: f32,
         #[serde(default)]
@@ -447,6 +457,7 @@ pub enum WorkflowNodeKind {
         max_points: u32,
         #[serde(default)]
         rng_seed: u64,
+        direction_getter: super::types::DipyDirectionGetter,
     },
     YehTractography {
         #[serde(default)]
@@ -597,6 +608,18 @@ macro_rules! with_workflow_op {
                 };
                 $body
             }
+            WorkflowNodeKind::Purifibre {
+                trim_fraction,
+                puri_fraction,
+                spherical_smoothing_deg,
+            } => {
+                let $op = purifibre::PurifibreOp {
+                    trim_fraction: *trim_fraction,
+                    puri_fraction: *puri_fraction,
+                    spherical_smoothing_deg: *spherical_smoothing_deg,
+                };
+                $body
+            }
             WorkflowNodeKind::Merge => {
                 let $op = merge::MergeOp;
                 $body
@@ -645,15 +668,17 @@ macro_rules! with_workflow_op {
                 let $op = color_by_group::ColorByGroupOp;
                 $body
             }
-            WorkflowNodeKind::ColorByDPV { field } => {
+            WorkflowNodeKind::ColorByDPV { field, colormap } => {
                 let $op = color_by_dpv::ColorByDpvOp {
                     field: field.clone(),
+                    colormap: *colormap,
                 };
                 $body
             }
-            WorkflowNodeKind::ColorByDPS { field } => {
+            WorkflowNodeKind::ColorByDPS { field, colormap } => {
                 let $op = color_by_dps::ColorByDpsOp {
                     field: field.clone(),
+                    colormap: *colormap,
                 };
                 $body
             }
@@ -704,15 +729,17 @@ macro_rules! with_workflow_op {
                 };
                 $body
             }
-            WorkflowNodeKind::BoundaryFieldBuild {
+            WorkflowNodeKind::StreamlineDirectionField {
                 voxel_size_mm,
                 sphere_lod,
                 normalization,
+                binning_mode,
             } => {
-                let $op = bundle_boundary::BoundaryFieldBuildOp {
+                let $op = bundle_boundary::StreamlineDirectionFieldOp {
                     voxel_size_mm: *voxel_size_mm,
                     sphere_lod: *sphere_lod,
                     normalization: *normalization,
+                    binning_mode: *binning_mode,
                 };
                 $body
             }
@@ -1040,7 +1067,7 @@ macro_rules! with_workflow_op {
                 };
                 $body
             }
-            WorkflowNodeKind::Tractography {
+            WorkflowNodeKind::DipyTractography {
                 step_size_mm,
                 max_angle_deg,
                 min_len_mm,
@@ -1050,8 +1077,9 @@ macro_rules! with_workflow_op {
                 seeds_per_voxel,
                 max_points,
                 rng_seed,
+                direction_getter,
             } => {
-                let $op = tractography::TractographyOp {
+                let $op = dipy_tractography::DipyTractographyOp {
                     step_size_mm: *step_size_mm,
                     max_angle_deg: *max_angle_deg,
                     min_len_mm: *min_len_mm,
@@ -1061,6 +1089,7 @@ macro_rules! with_workflow_op {
                     seeds_per_voxel: *seeds_per_voxel,
                     max_points: *max_points,
                     rng_seed: *rng_seed,
+                    direction_getter: *direction_getter,
                 };
                 $body
             }
@@ -1145,6 +1174,7 @@ pub(super) fn validate_registry() -> WorkflowResult<()> {
         }
         .tag(),
         tip_prune::TipPruneOp::default().tag(),
+        purifibre::PurifibreOp::default().tag(),
         merge::MergeOp.tag(),
         add_groups_from_parcellation::AddGroupsFromParcellationOp.tag(),
         parcel_select::ParcelSelectOp {
@@ -1291,10 +1321,11 @@ pub(super) fn validate_registry() -> WorkflowResult<()> {
             space: super::SurfaceDisplaySpace::Anatomical,
         }
         .tag(),
-        bundle_boundary::BoundaryFieldBuildOp {
+        bundle_boundary::StreamlineDirectionFieldOp {
             voxel_size_mm: crate::units::Millimeters(0.0),
             sphere_lod: 0,
             normalization: crate::data::orientation_field::BoundaryGlyphNormalization::GlobalPeak,
+            binning_mode: crate::data::orientation_field::DirectionFieldBinningMode::default(),
         }
         .tag(),
         bundle_boundary::BundleSurfaceDisplayOp {
@@ -1324,7 +1355,7 @@ pub(super) fn validate_registry() -> WorkflowResult<()> {
         plan_add::AddNoEndOp.tag(),
         plan_add::AddLimitingOp.tag(),
         plan_add::AddTermOp.tag(),
-        tractography::TractographyOp::default().tag(),
+        dipy_tractography::DipyTractographyOp::default().tag(),
         yeh_tractography::YehTractographyOp::default().tag(),
     ] {
         if tag.is_empty() {

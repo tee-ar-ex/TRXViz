@@ -2,10 +2,11 @@
 
 pub use crate::error::{WorkflowError, WorkflowResult};
 
-pub(super) mod cpu_tractography;
+pub(super) mod cpu_dipy;
 pub(super) mod cpu_yeh;
+pub(super) mod purifibre;
 pub(super) mod tip;
-pub(super) mod tracking_filters;
+pub(crate) mod tracking_filters;
 mod eval_inputs;
 mod eval_streamlines;
 mod eval_surface;
@@ -65,7 +66,7 @@ pub(crate) use evaluate::{
 };
 pub(crate) use op::{EvalCtx, WorkflowOp};
 pub use ops::{
-    AddGroupsFromParcellationOp, BoundaryFieldBuildOp, BoundaryGlyphDisplayOp,
+    AddGroupsFromParcellationOp, StreamlineDirectionFieldOp, BoundaryGlyphDisplayOp,
     BundleSurfaceBuildOp, BundleSurfaceDisplayOp, CiftiSourceOp, CiftiStructureOp,
     ColorByDirectionOp, ColorByDpsOp, ColorByDpvOp, ColorByFixelScalarsOp, ColorByGroupOp,
     Fixel2DDisplayOp, Fixel3DDisplayOp, GroupSelectOp, LimitStreamlinesOp, MergeOp,
@@ -73,11 +74,11 @@ pub use ops::{
     ParcelEndOp, ParcelRoaOp, ParcelRoiOp, ParcelSelectOp, ParcelSurfaceBuildOp,
     AddEndRegionOp, AddLimitingOp, AddNoEndOp, AddRoaOp, AddRoiOp, AddTermOp,
     ParcellationDisplayOp, ParcellationSourceOp, PrepareHausdorffPlanOp, PrepareSimplePlanOp,
-    RandomSubsetOp, RemoveDuplicatesOp,
+    PurifibreOp, RandomSubsetOp, RemoveDuplicatesOp,
     RoiFromParcelOp, RoiFromShapeOp, RoiFromVolumeOp, RoiShape,
     SaveStreamlinesOp, SphereQueryOp, StreamlineDisplayOp, StreamlineSourceOp, SurfaceDepthQueryOp, TipPruneOp,
     SurfaceDisplayOp, SurfaceOverlayStackOp, SurfaceProjectionDensityOp,
-    SurfaceProjectionMeanDpsOp, SurfaceSourceOp, TractographyOp, UniformColorOp, VolumeDisplayOp,
+    SurfaceProjectionMeanDpsOp, SurfaceSourceOp, DipyTractographyOp, UniformColorOp, VolumeDisplayOp,
     VolumeScalarsDisplayOp, VolumeSourceOp, VoxelMaskDisplayOp, WorkflowNodeKind,
     YehTractographyOp,
 };

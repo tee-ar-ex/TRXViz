@@ -122,6 +122,8 @@ pub fn evaluate_scene_plan_with_mode(
             fingerprint: None,
             last_result_summary: None,
             available_streamline_groups: Vec::new(),
+            available_dps_fields: Vec::new(),
+            available_dpv_fields: Vec::new(),
             overridden_fields: Vec::new(),
             overridden_values: std::collections::BTreeMap::new(),
         };
@@ -155,6 +157,18 @@ pub fn evaluate_scene_plan_with_mode(
                         .iter()
                         .map(|(name, _members)| name.clone())
                         .collect();
+                    // Surface the DPS/DPV field names of this node's
+                    // output so the inspector for downstream
+                    // ColorByDps/ColorByDpv nodes can show a combobox
+                    // populated with what's actually available. (We
+                    // populate from the *upstream* node's output —
+                    // i.e. ColorByDps reads its own input flow's
+                    // names — because every Color* op passes the
+                    // dataset through unchanged in shape.)
+                    node_state.available_dps_fields =
+                        flow.dataset.gpu_data.dps_names.clone();
+                    node_state.available_dpv_fields =
+                        flow.dataset.gpu_data.dpv_names.clone();
                 }
                 if node_state.summary == node.op.title() {
                     node_state.summary = summarize_value(&first.value);

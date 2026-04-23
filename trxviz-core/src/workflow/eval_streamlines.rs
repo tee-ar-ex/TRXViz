@@ -201,6 +201,7 @@ pub(crate) fn add_groups_from_parcellation_from_label(
         scalar_auto_range: flow.scalar_auto_range,
         scalar_range_min: flow.scalar_range_min,
         scalar_range_max: flow.scalar_range_max,
+        scalar_colormap: flow.scalar_colormap,
     })
 }
 
@@ -284,6 +285,7 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 scalar_auto_range: left.scalar_auto_range,
                 scalar_range_min: left.scalar_range_min,
                 scalar_range_max: left.scalar_range_max,
+                scalar_colormap: left.scalar_colormap,
             })
         }
         ReactiveStreamlineOp::ParcelROA {
@@ -309,6 +311,7 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 scalar_auto_range: left.scalar_auto_range,
                 scalar_range_min: left.scalar_range_min,
                 scalar_range_max: left.scalar_range_max,
+                scalar_colormap: left.scalar_colormap,
             })
         }
         ReactiveStreamlineOp::ParcelEnd {
@@ -335,6 +338,7 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 scalar_auto_range: left.scalar_auto_range,
                 scalar_range_min: left.scalar_range_min,
                 scalar_range_max: left.scalar_range_max,
+                scalar_colormap: left.scalar_colormap,
             })
         }
         ReactiveStreamlineOp::ParcelCrop {
@@ -377,6 +381,7 @@ fn streamline_flow_from_tractogram(
         scalar_auto_range: true,
         scalar_range_min: 0.0,
         scalar_range_max: 1.0,
+        scalar_colormap: source_flow.scalar_colormap,
     })
 }
 

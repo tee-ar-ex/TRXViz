@@ -33,7 +33,7 @@ pub(crate) fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
         WorkflowJobKind::TubeGeometry => "tube geometry",
         WorkflowJobKind::BundleSurface => "bundle surface",
         WorkflowJobKind::BoundaryField => "boundary field",
-        WorkflowJobKind::Tractography => "tractography",
+        WorkflowJobKind::DipyTractography => "dipy tractography",
         WorkflowJobKind::YehTractography => "yeh tractography",
     }
 }
@@ -651,12 +651,12 @@ impl crate::app::TrxVizApp {
                                     changed = true;
                                 }
                             }
-                            WorkflowJobOutput::Tractography { flow } => {
+                            WorkflowJobOutput::DipyTractography { flow } => {
                                 let summary =
                                     format!("{} streamlines", flow.selected_streamlines.len());
                                 self.workflow
                                     .execution_cache
-                                    .tractography_results
+                                    .dipy_tractography_results
                                     .insert(node_uuid, CachedTractographyResult { fingerprint, flow });
                                 mark_expensive_success(record, fingerprint, summary);
                                 changed = true;
@@ -844,7 +844,7 @@ impl crate::app::TrxVizApp {
             .workflow
             .runtime
             .scene_plan
-            .tractography_plans
+            .dipy_tractography_plans
             .clone()
         {
             let node_uuid = plan.node_uuid;
@@ -864,8 +864,8 @@ impl crate::app::TrxVizApp {
                 self.queue_workflow_job(
                     node_uuid,
                     fingerprint,
-                    WorkflowJobKind::Tractography,
-                    WorkflowJobPayload::Tractography {
+                    WorkflowJobKind::DipyTractography,
+                    WorkflowJobPayload::DipyTractography {
                         plan,
                         device: self.gpu_device.clone(),
                         queue: self.gpu_queue.clone(),

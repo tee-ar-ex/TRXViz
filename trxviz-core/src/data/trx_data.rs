@@ -270,14 +270,20 @@ impl TrxGpuData {
     }
 
     /// Recompute vertex colors based on the given color mode.
-    /// For scalar modes (DPV/DPS), `scalar_range` overrides automatic range detection.
-    pub fn recolor(&mut self, mode: &ColorMode, scalar_range: Option<(f32, f32)>) {
+    /// For scalar modes (DPV/DPS), `scalar_range` overrides automatic
+    /// range detection and `colormap` selects the colormap.
+    pub fn recolor(
+        &mut self,
+        mode: &ColorMode,
+        scalar_range: Option<(f32, f32)>,
+        colormap: crate::renderer::mesh_renderer::SurfaceColormap,
+    ) {
         self.colors = match mode {
             ColorMode::DirectionRgb => direction_colors_from_tangents(&self.tangents),
             ColorMode::Dpv(name) => {
                 if let Some((_, data)) = self.dpv_data.iter().find(|(n, _)| n == name) {
                     let (lo, hi) = scalar_range.unwrap_or_else(|| scalar_auto_range(data));
-                    scalar_to_colors_ranged(data, lo, hi)
+                    scalar_to_colors_ranged(data, lo, hi, colormap)
                 } else {
                     vec![[0.5, 0.5, 0.5, 1.0]; self.nb_vertices]
                 }
@@ -285,7 +291,14 @@ impl TrxGpuData {
             ColorMode::Dps(name) => {
                 if let Some((_, data)) = self.dps_data.iter().find(|(n, _)| n == name) {
                     let (lo, hi) = scalar_range.unwrap_or_else(|| scalar_auto_range(data));
-                    expand_dps_to_vertices_ranged(data, &self.offsets, self.nb_vertices, lo, hi)
+                    expand_dps_to_vertices_ranged(
+                        data,
+                        &self.offsets,
+                        self.nb_vertices,
+                        lo,
+                        hi,
+                        colormap,
+                    )
                 } else {
                     vec![[0.5, 0.5, 0.5, 1.0]; self.nb_vertices]
                 }
@@ -794,14 +807,20 @@ pub fn scalar_auto_range(values: &[f32]) -> (f32, f32) {
     (lo, hi.max(lo + 1e-6))
 }
 
-/// Map scalar values to the blue→white→red colormap using an explicit range.
-pub fn scalar_to_colors_ranged(values: &[f32], min_v: f32, max_v: f32) -> Vec<[f32; 4]> {
+/// Map scalar values to the chosen colormap using an explicit range.
+pub fn scalar_to_colors_ranged(
+    values: &[f32],
+    min_v: f32,
+    max_v: f32,
+    colormap: crate::renderer::mesh_renderer::SurfaceColormap,
+) -> Vec<[f32; 4]> {
     let range = (max_v - min_v).max(1e-10);
     values
         .iter()
         .map(|&v| {
             let t = ((v - min_v) / range).clamp(0.0, 1.0);
-            colormap_bwr(t)
+            let [r, g, b] = crate::renderer::colormap::surface_colormap_rgb(t, colormap);
+            [r, g, b, 1.0]
         })
         .collect()
 }
@@ -1007,6 +1026,7 @@ fn expand_dps_to_vertices_ranged(
     nb_vertices: usize,
     min_v: f32,
     max_v: f32,
+    colormap: crate::renderer::mesh_renderer::SurfaceColormap,
 ) -> Vec<[f32; 4]> {
     let mut per_vertex = vec![0.0f32; nb_vertices];
     for (si, &val) in dps_values.iter().enumerate() {
@@ -1018,7 +1038,7 @@ fn expand_dps_to_vertices_ranged(
             }
         }
     }
-    scalar_to_colors_ranged(&per_vertex, min_v, max_v)
+    scalar_to_colors_ranged(&per_vertex, min_v, max_v, colormap)
 }
 
 fn aabb_overlaps_expanded_surface(aabb: &StreamlineAabb, smin: Vec3, smax: Vec3) -> bool {

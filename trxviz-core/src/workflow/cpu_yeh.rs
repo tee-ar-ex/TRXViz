@@ -8,6 +8,7 @@
 //! When `seed_mask` is absent, seed from every voxel that has at least one
 //! fixel peak.
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use glam::{Mat4, Vec3};
 use rayon::prelude::*;
@@ -24,11 +25,14 @@ use super::types::{
     PostFilter, StreamlineDataset, StreamlineFlow, VoxelMask, YehTractographyPlan,
 };
 
-/// Outcome of a single seed attempt. Keeps the kept streamline inline so
-/// the parent loop can drain them into the shared output without heap
-/// contention across threads.
+/// Outcome of a single seed attempt. No streamline payload — when an
+/// attempt is kept, `try_one_attempt` has already appended the points
+/// directly into the caller's thread-local accumulator. This enum is now
+/// just a tiny tag (one byte at runtime), so passing it around in a hot
+/// loop is essentially free.
+#[derive(Clone, Copy)]
 enum AttemptOutcome {
-    Kept(Vec<[f32; 3]>),
+    Kept,
     SkipEmpty,         // picked voxel has no fixels or is outside seed mask
     InitialPeakFailed, // no viable initial direction above fixel threshold
     RejectRoa,         // per-step ROA hit
@@ -37,6 +41,87 @@ enum AttemptOutcome {
     RejectEnd,
     RejectNoEnd,
     RejectHausdorff,
+}
+
+/// Per-thread scratch + output buffers. Each rayon worker keeps one of
+/// these alive across all the attempts it processes; reusing the buffers
+/// (via `clear()`) keeps their underlying allocations and means we pay the
+/// `Vec::with_capacity` cost ~once per thread instead of ~once per attempt.
+///
+/// `positions` and `offsets` are the local share of the final output: at
+/// the end of the parallel section we `reduce` (merge) all per-thread
+/// `ThreadAccum`s into a single output by appending positions and
+/// rebasing offsets.
+struct ThreadAccum {
+    /// Concatenated streamline points for streamlines this thread kept.
+    positions: Vec<[f32; 3]>,
+    /// Offsets into `positions`. Always starts with `0`; pushes one
+    /// entry per kept streamline equal to the new `positions.len()`.
+    /// (After merge, offsets are rebased relative to the global vector.)
+    offsets: Vec<u32>,
+    /// Reusable scratch buffer for `track_one`'s forward branch.
+    fwd_scratch: Vec<[f32; 3]>,
+    /// Reusable scratch buffer for `track_one`'s backward branch.
+    bwd_scratch: Vec<[f32; 3]>,
+    /// Reusable scratch buffer for `pick_initial_peak` candidate list.
+    peak_scratch: Vec<Vec3>,
+    /// Per-thread rejection counters (summed during reduce).
+    counts: RejectionCounts,
+}
+
+#[derive(Default, Clone, Copy)]
+struct RejectionCounts {
+    skip: usize,
+    initial: usize,
+    roa: usize,
+    min_len: usize,
+    roi: usize,
+    end: usize,
+    no_end: usize,
+    hausdorff: usize,
+    kept: usize,
+}
+
+impl ThreadAccum {
+    fn new() -> Self {
+        Self {
+            positions: Vec::new(),
+            // `offsets` mirrors the TRX/streamline-set convention: N
+            // streamlines → N+1 offsets, where `offsets[i]..offsets[i+1]`
+            // is the slice of points for streamline i. The leading 0 is
+            // the start of streamline 0.
+            offsets: vec![0u32],
+            fwd_scratch: Vec::new(),
+            bwd_scratch: Vec::new(),
+            peak_scratch: Vec::new(),
+            counts: RejectionCounts::default(),
+        }
+    }
+
+    /// Merge `other` into `self`. Used as the `reduce` step after the
+    /// parallel `fold`.  We append `other`'s positions then translate
+    /// (rebase) its offsets by the byte... err, the *element* count we
+    /// had before the append. This is O(streamlines) per merge, not
+    /// O(positions), so it's cheap.
+    fn merge(mut self, other: ThreadAccum) -> ThreadAccum {
+        let base = self.positions.len() as u32;
+        self.positions.extend(other.positions);
+        // Skip other.offsets[0] (always 0) — our last offset already
+        // marks the boundary between the two thread-locals' streamlines.
+        for off in other.offsets.into_iter().skip(1) {
+            self.offsets.push(base + off);
+        }
+        self.counts.skip += other.counts.skip;
+        self.counts.initial += other.counts.initial;
+        self.counts.roa += other.counts.roa;
+        self.counts.min_len += other.counts.min_len;
+        self.counts.roi += other.counts.roi;
+        self.counts.end += other.counts.end;
+        self.counts.no_end += other.counts.no_end;
+        self.counts.hausdorff += other.counts.hausdorff;
+        self.counts.kept += other.counts.kept;
+        self
+    }
 }
 
 /// Shared read-only context for per-attempt tracking. Constructed once per
@@ -159,59 +244,123 @@ pub(super) fn run_cpu_yeh(plan: &YehTractographyPlan) -> WorkflowResult<Streamli
         mask_grid_matches,
     };
 
-    let mut all_positions: Vec<[f32; 3]> = Vec::new();
-    let mut all_offsets: Vec<u32> = vec![0];
-    let mut attempts_used = 0usize;
-    let mut rejected_roa = 0usize;
-    let mut rejected_min_len = 0usize;
-    let mut rejected_roi = 0usize;
-    let mut rejected_end = 0usize;
-    let mut rejected_no_end = 0usize;
-    let mut rejected_hausdorff = 0usize;
-    let mut rejected_skip = 0usize;
-    let mut rejected_initial = 0usize;
+    // ── Parallel section: fold + reduce ─────────────────────────────────
+    //
+    // Strategy: fire one rayon par-iter over the whole `0..attempt_budget`
+    // range (no wave-loop, no per-wave `.collect()` barrier). Each rayon
+    // worker keeps its own `ThreadAccum` alive across the chunk it owns,
+    // appending kept streamlines and reusing scratch buffers. After the
+    // parallel section we `reduce` (merge) the per-thread accumulators
+    // into a single output.
+    //
+    // Why this is faster than the prior wave loop:
+    //   1. No barrier between waves — workers stay busy until the global
+    //      target is hit.
+    //   2. No per-streamline `Vec` allocation (was: `track_one` returned
+    //      a fresh Vec; outer loop returned an `AttemptOutcome::Kept(Vec)`).
+    //      Streamlines are now appended directly into the worker's local
+    //      `positions` buffer — at most ~1 reallocation per worker.
+    //   3. `with_min_len(64)` keeps rayon from over-splitting cheap
+    //      attempts. Without it, rayon's adaptive splitter can hand out
+    //      tasks small enough that a `SkipEmpty` rejection (a few ns of
+    //      work) is dominated by scheduling overhead. 64 was picked as a
+    //      conservative "even worst-case-cheap items batch into ~µs of
+    //      work" floor — there's headroom to tune higher (256, 1024) once
+    //      benchmarks land.
+    //
+    // Determinism note: each individual streamline at attempt index `i`
+    // is bit-identical to before — RNG is derived from `(rng_seed, i)`.
+    // What changes: the *order* of kept streamlines in the output may
+    // shift between runs because thread scheduling determines which
+    // worker's keeps land first during reduce. If you need stable order,
+    // sort by attempt_idx (not done here — would cost an extra `u64` per
+    // kept streamline).
+    let target_atomic = AtomicUsize::new(0);
 
-    // Process attempts in chunks so we can stop cleanly once we hit the
-    // streamline target without wasting an entire 10M-attempt parallel
-    // sweep. Chunk sizes scale with thread count.
-    let chunk_size = (n_threads * 256).max(1024);
-    let mut next_attempt: u64 = 0;
-    while all_offsets.len() - 1 < target && (next_attempt as usize) < attempt_budget {
-        let end = ((next_attempt as usize) + chunk_size).min(attempt_budget);
-        let outcomes: Vec<AttemptOutcome> = (next_attempt..end as u64)
-            .into_par_iter()
-            .map(|idx| try_one_attempt(&ctx, idx))
-            .collect();
-        attempts_used = end;
-        next_attempt = end as u64;
-
-        for outcome in outcomes {
-            if all_offsets.len() - 1 >= target {
-                break;
-            }
-            match outcome {
-                AttemptOutcome::Kept(streamline) => {
-                    all_positions.extend_from_slice(&streamline);
-                    all_offsets.push(all_positions.len() as u32);
+    // `into_par_iter()` on a `Range` returns an indexed parallel iterator.
+    // Rayon recursively splits the range; `with_min_len` says "don't split
+    // any branch below 64 items".
+    // Note: iterate as `usize` (not `u64`) — only `usize`/`u32`/`i32`/etc.
+    // ranges implement `IndexedParallelIterator` in rayon. `attempt_budget`
+    // is already a `usize`, so this is the natural type. We convert to
+    // `u64` inside the closure where `try_one_attempt` wants it.
+    let merged: ThreadAccum = (0..attempt_budget)
+        .into_par_iter()
+        .with_min_len(64)
+        .fold(
+            // `fold` takes TWO closures:
+            //   (1) the identity / init closure — called by each worker
+            //       to create its starting accumulator. Called O(workers)
+            //       times, not O(items). This is where `ThreadAccum::new`
+            //       runs (cheap — empty Vecs).
+            ThreadAccum::new,
+            //   (2) the per-item closure — folds one attempt index into
+            //       the worker-local accumulator. We pass `&mut acc` in,
+            //       then return `acc` (rayon's `fold` is move-based, so
+            //       you must return the accumulator each step).
+            |mut acc, idx| {
+                // Early-termination check. `Relaxed` is the cheapest
+                // atomic ordering — we don't need a happens-before
+                // relationship with anything; we just need eventual
+                // visibility. Worst case: a few extra attempts run after
+                // target is hit. They're harmless — we truncate at the
+                // end. Reading an atomic is ~1 ns on modern x86/ARM.
+                if target_atomic.load(Ordering::Relaxed) >= target {
+                    return acc;
                 }
-                AttemptOutcome::SkipEmpty => rejected_skip += 1,
-                AttemptOutcome::InitialPeakFailed => rejected_initial += 1,
-                AttemptOutcome::RejectRoa => rejected_roa += 1,
-                AttemptOutcome::RejectMinLen => rejected_min_len += 1,
-                AttemptOutcome::RejectRoi => rejected_roi += 1,
-                AttemptOutcome::RejectEnd => rejected_end += 1,
-                AttemptOutcome::RejectNoEnd => rejected_no_end += 1,
-                AttemptOutcome::RejectHausdorff => rejected_hausdorff += 1,
-            }
-        }
+                let outcome = try_one_attempt(&ctx, idx as u64, &mut acc);
+                match outcome {
+                    AttemptOutcome::Kept => {
+                        acc.counts.kept += 1;
+                        target_atomic.fetch_add(1, Ordering::Relaxed);
+                    }
+                    AttemptOutcome::SkipEmpty => acc.counts.skip += 1,
+                    AttemptOutcome::InitialPeakFailed => acc.counts.initial += 1,
+                    AttemptOutcome::RejectRoa => acc.counts.roa += 1,
+                    AttemptOutcome::RejectMinLen => acc.counts.min_len += 1,
+                    AttemptOutcome::RejectRoi => acc.counts.roi += 1,
+                    AttemptOutcome::RejectEnd => acc.counts.end += 1,
+                    AttemptOutcome::RejectNoEnd => acc.counts.no_end += 1,
+                    AttemptOutcome::RejectHausdorff => acc.counts.hausdorff += 1,
+                }
+                acc
+            },
+        )
+        // `fold` produces a `ParallelIterator` of partial accumulators
+        // (one per rayon split). `reduce` then combines them pairwise in
+        // a tree, also in parallel. `ThreadAccum::merge` does the offset
+        // rebasing and counter sum.
+        .reduce(ThreadAccum::new, ThreadAccum::merge);
 
-        log::info!(
-            "[yeh] {} streamlines after {} attempts",
-            all_offsets.len() - 1,
-            attempts_used,
-        );
+    let mut all_positions = merged.positions;
+    let mut all_offsets = merged.offsets;
+    let counts = merged.counts;
+
+    // Trim any overshoot. Because the atomic check is racy by design,
+    // multiple workers may have crossed the target boundary in flight —
+    // we may have e.g. target+5 kept streamlines. Truncate to exactly
+    // `target` (or leave alone if we underran the budget).
+    if (all_offsets.len() - 1) > target {
+        // offsets has N+1 entries for N streamlines; cap at target+1.
+        let cutoff = all_offsets[target] as usize;
+        all_positions.truncate(cutoff);
+        all_offsets.truncate(target + 1);
     }
-    let attempts = attempts_used;
+
+    // Attempts actually consumed: workers stop pulling fresh `idx` values
+    // after target_atomic >= target, but they finish whatever idx they
+    // had loaded. Reporting "we touched at least this many" is honest.
+    // The atomic only counts kept streamlines, so we approximate attempts
+    // as the sum of all rejection counters + kept.
+    let attempts = counts.skip
+        + counts.initial
+        + counts.roa
+        + counts.min_len
+        + counts.roi
+        + counts.end
+        + counts.no_end
+        + counts.hausdorff
+        + counts.kept;
 
     let nb_streamlines = all_offsets.len() - 1;
     log::info!(
@@ -221,14 +370,14 @@ pub(super) fn run_cpu_yeh(plan: &YehTractographyPlan) -> WorkflowResult<Streamli
         t0.elapsed().as_secs_f32(),
         nb_streamlines,
         attempts,
-        rejected_skip,
-        rejected_initial,
-        rejected_min_len,
-        rejected_roa,
-        rejected_roi,
-        rejected_end,
-        rejected_no_end,
-        rejected_hausdorff,
+        counts.skip,
+        counts.initial,
+        counts.min_len,
+        counts.roa,
+        counts.roi,
+        counts.end,
+        counts.no_end,
+        counts.hausdorff,
     );
 
     let gpu_data = Arc::new(TrxGpuData::from_positions_and_offsets(
@@ -252,6 +401,7 @@ pub(super) fn run_cpu_yeh(plan: &YehTractographyPlan) -> WorkflowResult<Streamli
         scalar_auto_range: true,
         scalar_range_min: 0.0,
         scalar_range_max: 1.0,
+        scalar_colormap: crate::renderer::mesh_renderer::SurfaceColormap::default(),
     })
 }
 
@@ -271,13 +421,23 @@ fn empty_flow(label: &str) -> StreamlineFlow {
         scalar_auto_range: true,
         scalar_range_min: 0.0,
         scalar_range_max: 1.0,
+        scalar_colormap: crate::renderer::mesh_renderer::SurfaceColormap::default(),
     }
 }
 
 /// One deterministic seed-attempt. Builds its own RNG from
-/// `(plan.rng_seed, attempt_idx)` so the stream of attempts is reproducible
-/// across CPU counts and parallelism decisions.
-fn try_one_attempt(ctx: &YehCtx<'_>, attempt_idx: u64) -> AttemptOutcome {
+/// `(plan.rng_seed, attempt_idx)` so the *content* of every attempt is
+/// reproducible across CPU counts and parallelism decisions — only the
+/// *order* of kept streamlines in the output may shift between runs.
+///
+/// On a `Kept` outcome, the streamline points have already been pushed
+/// onto `acc.positions` and a new boundary appended to `acc.offsets`.
+/// The caller does not need to do anything else.
+fn try_one_attempt(
+    ctx: &YehCtx<'_>,
+    attempt_idx: u64,
+    acc: &mut ThreadAccum,
+) -> AttemptOutcome {
     let plan = ctx.plan;
     // Derive a well-dispersed u64 from (rng_seed, attempt_idx). The two
     // multiply-adds produce a SplitMix-style state uncorrelated with the
@@ -375,13 +535,21 @@ fn try_one_attempt(ctx: &YehCtx<'_>, attempt_idx: u64) -> AttemptOutcome {
         ctx.ny,
         ctx.nz,
         &mut rng,
+        &mut acc.peak_scratch,
     ) else {
         return AttemptOutcome::InitialPeakFailed;
     };
     let sign = if lcg_f32(&mut rng) < 0.5 { 1.0 } else { -1.0 };
     let init_dir = init_peak * sign;
 
-    let forward = track_one(
+    // Reuse the per-thread scratch buffers. `clear()` keeps the underlying
+    // capacity, so after the first ~few attempts these allocations are a
+    // no-op — this is most of the per-streamline allocation savings.
+    acc.fwd_scratch.clear();
+    acc.bwd_scratch.clear();
+
+    if track_one(
+        &mut acc.fwd_scratch,
         seed_pt,
         init_dir,
         step_mm,
@@ -401,11 +569,13 @@ fn try_one_attempt(ctx: &YehCtx<'_>, attempt_idx: u64) -> AttemptOutcome {
         plan.limiting_mask.as_deref(),
         plan.roa_mask.as_deref(),
         plan.term_mask.as_deref(),
-    );
-    let Some(forward) = forward else {
+    )
+    .is_err()
+    {
         return AttemptOutcome::RejectRoa;
-    };
-    let backward = track_one(
+    }
+    if track_one(
+        &mut acc.bwd_scratch,
         seed_pt,
         -init_dir,
         step_mm,
@@ -425,35 +595,53 @@ fn try_one_attempt(ctx: &YehCtx<'_>, attempt_idx: u64) -> AttemptOutcome {
         plan.limiting_mask.as_deref(),
         plan.roa_mask.as_deref(),
         plan.term_mask.as_deref(),
-    );
-    let Some(backward) = backward else {
+    )
+    .is_err()
+    {
         return AttemptOutcome::RejectRoa;
-    };
+    }
 
-    let streamline: Vec<[f32; 3]> = backward
-        .iter()
-        .rev()
-        .chain(std::iter::once(&seed_pt.to_array()))
-        .chain(forward.iter())
-        .copied()
-        .collect();
-
-    if streamline.len() < ctx.min_pts {
+    // Pre-flight length check (cheap) so we don't pay for the post-hoc
+    // mask filters on streamlines that won't survive the length floor.
+    let streamline_len = acc.bwd_scratch.len() + 1 + acc.fwd_scratch.len();
+    if streamline_len < ctx.min_pts {
         return AttemptOutcome::RejectMinLen;
     }
+
+    // Build the assembled streamline directly into the accumulator's
+    // `positions` vector. We append in [reversed backward, seed, forward]
+    // order, then commit by pushing the new offset. If a post-hoc filter
+    // rejects, we truncate `positions` back to the saved length — cheaper
+    // than the prior pattern of building a temporary `Vec` and only later
+    // copying it into the output.
+    let commit_start = acc.positions.len();
+    acc.positions.extend(acc.bwd_scratch.iter().rev().copied());
+    acc.positions.push(seed_pt.to_array());
+    acc.positions.extend(acc.fwd_scratch.iter().copied());
+
+    // Each filter borrows the freshly-appended slice immutably, runs the
+    // check, and on rejection rolls back `positions` via `truncate` (cheap:
+    // truncate just resets the length, leaving the capacity allocated for
+    // the next attempt). We can't keep a `let streamline = &acc.positions[..]`
+    // binding alive across the truncate because that would conflict with
+    // the &mut borrow — so we re-slice inline at each filter.
+
     if !plan.roi_masks.is_empty()
-        && !streamline_hits_all_rois(&streamline, &plan.roi_masks)
+        && !streamline_hits_all_rois(&acc.positions[commit_start..], &plan.roi_masks)
     {
+        acc.positions.truncate(commit_start);
         return AttemptOutcome::RejectRoi;
     }
     if let Some(ne) = plan.no_end_mask.as_deref() {
-        if streamline_endpoint_in(&streamline, ne) {
+        if streamline_endpoint_in(&acc.positions[commit_start..], ne) {
+            acc.positions.truncate(commit_start);
             return AttemptOutcome::RejectNoEnd;
         }
     }
     if !plan.end_masks.is_empty()
-        && !streamline_satisfies_end_masks(&streamline, &plan.end_masks)
+        && !streamline_satisfies_end_masks(&acc.positions[commit_start..], &plan.end_masks)
     {
+        acc.positions.truncate(commit_start);
         return AttemptOutcome::RejectEnd;
     }
     if let Some(PostFilter::Hausdorff {
@@ -461,22 +649,36 @@ fn try_one_attempt(ctx: &YehCtx<'_>, attempt_idx: u64) -> AttemptOutcome {
         max_mm,
     }) = plan.post_filter.as_ref()
     {
-        if !streamline_passes_hausdorff(&streamline, reference_points_ras, *max_mm) {
+        if !streamline_passes_hausdorff(
+            &acc.positions[commit_start..],
+            reference_points_ras,
+            *max_mm,
+        ) {
+            acc.positions.truncate(commit_start);
             return AttemptOutcome::RejectHausdorff;
         }
     }
 
-    AttemptOutcome::Kept(streamline)
+    // Survived all filters — commit by recording the new boundary in
+    // `offsets`. The streamline points are already in `positions`.
+    acc.offsets.push(acc.positions.len() as u32);
+    AttemptOutcome::Kept
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
-/// Track one branch entirely in RAS+mm. Returns `Some(points)` on a clean
-/// termination (including clean limiting/term-mask exits), or `None` when
-/// the streamline entered a `roa_mask` — the whole streamline should be
-/// discarded in that case.
+/// Track one branch entirely in RAS+mm. Appends points to `out` as it goes.
+/// Returns `Ok(())` on a clean termination (including clean limiting/term-mask
+/// exits), or `Err(())` when the streamline entered a `roa_mask` — the whole
+/// streamline should be discarded in that case.
+///
+/// The caller supplies `out`. We do NOT allocate or clear here; the caller is
+/// responsible for `clear()`-ing the scratch buffer between streamlines (this
+/// preserves the underlying capacity, so the second-and-later allocations are
+/// near-free — a major win when running tens of thousands of attempts).
 #[allow(clippy::too_many_arguments)]
 fn track_one(
+    out: &mut Vec<[f32; 3]>,
     start: Vec3,
     mut dir: Vec3,
     step_mm: f32,
@@ -496,10 +698,9 @@ fn track_one(
     limiting: Option<&VoxelMask>,
     roa: Option<&VoxelMask>,
     term: Option<&VoxelMask>,
-) -> Option<Vec<[f32; 3]>> {
-    let mut out = Vec::<[f32; 3]>::new();
+) -> Result<(), ()> {
     if dir.length_squared() < 1e-8 {
-        return Some(out);
+        return Ok(());
     }
     dir = dir.normalize();
 
@@ -521,7 +722,7 @@ fn track_one(
         // limiting/term terminate cleanly.
         if let Some(m) = roa {
             if point_in_mask(pt_ras, m) {
-                return None;
+                return Err(());
             }
         }
         if let Some(m) = limiting {
@@ -559,7 +760,7 @@ fn track_one(
         out.push(pt_ras.to_array());
     }
 
-    Some(out)
+    Ok(())
 }
 
 fn voxel_at(
@@ -623,6 +824,10 @@ fn best_peak(
     best.map(|(d, amp, _)| (d, amp))
 }
 
+/// Pick a random initial peak among the seed voxel's fixels that exceed
+/// `fixel_threshold`. Uses a caller-supplied scratch buffer so the
+/// candidate list is allocated once per thread, not once per attempt.
+#[allow(clippy::too_many_arguments)]
 fn pick_initial_peak(
     seed_vox: Vec3,
     offsets: &[u32],
@@ -634,6 +839,7 @@ fn pick_initial_peak(
     ny: usize,
     nz: usize,
     rng: &mut u64,
+    candidates: &mut Vec<Vec3>,
 ) -> Option<Vec3> {
     let compact_idx = voxel_at(seed_vox, dense_lut, nx, ny, nz)?;
     if compact_idx + 1 >= offsets.len() {
@@ -641,7 +847,7 @@ fn pick_initial_peak(
     }
     let start = offsets[compact_idx] as usize;
     let end = offsets[compact_idx + 1] as usize;
-    let mut candidates: Vec<Vec3> = Vec::new();
+    candidates.clear();
     for k in start..end {
         if k >= directions.len() {
             break;

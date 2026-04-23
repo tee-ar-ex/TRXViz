@@ -1,7 +1,10 @@
 use std::collections::BTreeSet;
 
 use trxviz_core::data::loaded_files::VolumeColormap;
-use trxviz_core::data::orientation_field::{BoundaryGlyphColorMode, BoundaryGlyphNormalization};
+use trxviz_core::data::orientation_field::{
+    BoundaryGlyphColorMode, BoundaryGlyphNormalization, DirectionFieldBinningMode,
+};
+use trxviz_core::renderer::mesh_renderer::SurfaceColormap;
 use trxviz_core::data::trx_data::RenderStyle;
 use trxviz_core::renderer::mesh_renderer::SurfaceColormap;
 
@@ -15,6 +18,12 @@ pub(crate) struct OdxSelectorNames {
 
 pub(crate) struct NodeEditorContext<'a> {
     pub(crate) available_groups: &'a [String],
+    /// DPS / DPV field names present on this node's last evaluation
+    /// (output dataset). The inspector uses these to populate
+    /// comboboxes for `ColorByDps` / `ColorByDpv` rather than making
+    /// the user type field names by hand.
+    pub(crate) available_dps_fields: &'a [String],
+    pub(crate) available_dpv_fields: &'a [String],
     pub(crate) odx_selector_names: Option<&'a OdxSelectorNames>,
     pub(crate) sh_detail_limit: Option<u32>,
     pub(crate) save_ready: bool,
@@ -100,11 +109,25 @@ pub(crate) fn edit_node_op(
         workflow::WorkflowNodeKind::ParcelEnd { endpoint_count } => {
             ui.add(egui::Slider::new(endpoint_count, 1..=2).text("Matching endpoints"));
         }
-        workflow::WorkflowNodeKind::ColorByDPV { field } => {
-            edit_field_name(ui, field);
+        workflow::WorkflowNodeKind::ColorByDPV { field, colormap } => {
+            edit_picker_field(
+                ui,
+                field,
+                ctx.available_dpv_fields,
+                node_uuid,
+                "color_by_dpv_field",
+            );
+            edit_colormap(ui, colormap, node_uuid, "color_by_dpv_colormap");
         }
-        workflow::WorkflowNodeKind::ColorByDPS { field } => {
-            edit_field_name(ui, field);
+        workflow::WorkflowNodeKind::ColorByDPS { field, colormap } => {
+            edit_picker_field(
+                ui,
+                field,
+                ctx.available_dps_fields,
+                node_uuid,
+                "color_by_dps_field",
+            );
+            edit_colormap(ui, colormap, node_uuid, "color_by_dps_colormap");
         }
         workflow::WorkflowNodeKind::UniformColor { color } => {
             ui.color_edit_button_rgba_unmultiplied(color);
@@ -127,6 +150,32 @@ pub(crate) fn edit_node_op(
                     .text("Max unsupported fraction"),
             );
             ui.small("0.0 = strict DSI-Studio parity; 1.0 = passthrough");
+        }
+        workflow::WorkflowNodeKind::Purifibre {
+            trim_fraction,
+            puri_fraction,
+            spherical_smoothing_deg,
+        } => {
+            ui.add(
+                egui::Slider::new(trim_fraction, 0.0..=0.5)
+                    .text("Trim fraction")
+                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                    .custom_parser(|s| s.trim_end_matches('%').parse::<f64>().ok().map(|v| v / 100.0)),
+            );
+            ui.add(
+                egui::Slider::new(puri_fraction, 0.0..=0.9)
+                    .text("Discard fraction")
+                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                    .custom_parser(|s| s.trim_end_matches('%').parse::<f64>().ok().map(|v| v / 100.0)),
+            );
+            ui.add(
+                egui::Slider::new(spherical_smoothing_deg, 0.0..=45.0)
+                    .text("Spherical smoothing (°)"),
+            );
+            ui.small(
+                "Output 0 = input + FICO DPS; Output 1 = filtered survivors. \
+                 Needs a BoundaryField upstream on input 1.",
+            );
         }
         workflow::WorkflowNodeKind::RemoveDuplicates { params } => {
             egui::ComboBox::from_id_salt(format!("duplicate_mode_{}", node_uuid.0))
@@ -419,10 +468,11 @@ pub(crate) fn edit_node_op(
             ui.label("Slice outline");
             ui.add(egui::Slider::new(outline_thickness, 0.25..=8.0).text("Thickness"));
         }
-        workflow::WorkflowNodeKind::BoundaryFieldBuild {
+        workflow::WorkflowNodeKind::StreamlineDirectionField {
             voxel_size_mm,
             sphere_lod,
             normalization,
+            binning_mode,
         } => {
             ui.add(
                 egui::DragValue::new(&mut voxel_size_mm.0)
@@ -436,13 +486,34 @@ pub(crate) fn edit_node_op(
                     .range(4..=64)
                     .prefix("Sphere LOD "),
             );
-            egui::ComboBox::from_id_salt(format!("boundary_field_normalization_{}", node_uuid.0))
+            egui::ComboBox::from_id_salt(format!("direction_field_binning_{}", node_uuid.0))
+                .selected_text(binning_mode.label())
+                .show_ui(ui, |ui| {
+                    for value in DirectionFieldBinningMode::ALL {
+                        ui.selectable_value(binning_mode, value, value.label());
+                    }
+                });
+            egui::ComboBox::from_id_salt(format!("direction_field_normalization_{}", node_uuid.0))
                 .selected_text(normalization.label())
                 .show_ui(ui, |ui| {
                     for value in BoundaryGlyphNormalization::ALL {
                         ui.selectable_value(normalization, value, value.label());
                     }
                 });
+            ui.small(
+                "Per-voxel histogram of streamline tangent directions \
+                 (sTODI). Consumed by Boundary Glyph and Purifibre.",
+            );
+            ui.small(match binning_mode {
+                DirectionFieldBinningMode::WithinVoxelTangent => {
+                    "Within-voxel tangent: symmetric, length-weighted. \
+                     Recommended for Purifibre."
+                }
+                DirectionFieldBinningMode::BoundaryCrossings => {
+                    "Boundary crossings: asymmetric, count-weighted. \
+                     Original boundary-glyph behavior."
+                }
+            });
         }
         workflow::WorkflowNodeKind::BoundaryGlyphDisplay {
             enabled,
@@ -755,7 +826,7 @@ pub(crate) fn edit_node_op(
                     ui.selectable_value(shape, workflow::RoiShape::Box, "Box");
                 });
         }
-        workflow::WorkflowNodeKind::Tractography {
+        workflow::WorkflowNodeKind::DipyTractography {
             step_size_mm,
             max_angle_deg,
             min_len_mm,
@@ -765,6 +836,10 @@ pub(crate) fn edit_node_op(
             seeds_per_voxel,
             max_points,
             rng_seed,
+            // DG variant not yet exposed in the UI — only Probabilistic
+            // is implemented. Once PTT lands on CPU/GPU, add a combo box
+            // here and a parameter pane for PTT-specific knobs.
+            direction_getter: _,
         } => {
             ui.add(egui::Slider::new(step_size_mm, 0.1..=2.0).text("Step size (mm)"));
             ui.add(egui::Slider::new(max_angle_deg, 10.0..=90.0).text("Max angle (°)"));
@@ -1027,6 +1102,83 @@ where
     if ui.text_edit_singleline(&mut value).changed() {
         *field = T::from(value);
     }
+}
+
+/// DPS / DPV field picker. Renders a combobox of names available on
+/// the upstream's last evaluation; falls back to a free-text input
+/// when no names are known yet (upstream hasn't been built, or the
+/// dataset has no scalar fields). The free-text fallback also kicks
+/// in when the current field name isn't in the available list — the
+/// user keeps the old value visible and can either pick a known name
+/// from the dropdown or edit the text directly.
+fn edit_picker_field<T>(
+    ui: &mut egui::Ui,
+    field: &mut T,
+    available: &[String],
+    node_uuid: workflow::WorkflowNodeUuid,
+    salt: &str,
+) where
+    T: From<String> + AsRef<str>,
+{
+    let current = field.as_ref().to_string();
+
+    if available.is_empty() {
+        // No upstream fields known — text input with a hint so the
+        // user understands why there's no dropdown.
+        let mut value = current;
+        if ui.text_edit_singleline(&mut value).changed() {
+            *field = T::from(value);
+        }
+        ui.small("(no fields advertised by upstream — type one manually)");
+        return;
+    }
+
+    let combo_id = format!("{salt}_{}", node_uuid.0);
+    egui::ComboBox::from_id_salt(combo_id)
+        .selected_text(if current.is_empty() {
+            "(pick a field)"
+        } else {
+            current.as_str()
+        })
+        .show_ui(ui, |ui| {
+            for name in available {
+                if ui
+                    .selectable_label(name.as_str() == current.as_str(), name.as_str())
+                    .clicked()
+                {
+                    *field = T::from(name.clone());
+                }
+            }
+        });
+
+    // If the current field name isn't in the available list (upstream
+    // changed under us, or the user typed it before the field
+    // existed), surface that explicitly so the user isn't confused
+    // when the combobox shows e.g. "fico" while the rendering shows
+    // gray.
+    if !current.is_empty() && !available.iter().any(|n| n == &current) {
+        ui.small(format!(
+            "⚠ \"{current}\" is not in the upstream's field list"
+        ));
+    }
+}
+
+/// Combobox for picking a `SurfaceColormap` (the scalar colormap
+/// used by `ColorByDps` / `ColorByDpv`).
+fn edit_colormap(
+    ui: &mut egui::Ui,
+    colormap: &mut SurfaceColormap,
+    node_uuid: workflow::WorkflowNodeUuid,
+    salt: &str,
+) {
+    let combo_id = format!("{salt}_{}", node_uuid.0);
+    egui::ComboBox::from_id_salt(combo_id)
+        .selected_text(colormap.label())
+        .show_ui(ui, |ui| {
+            for value in SurfaceColormap::ALL {
+                ui.selectable_value(colormap, value, value.label());
+            }
+        });
 }
 
 fn edit_dps_field(ui: &mut egui::Ui, field: &mut workflow::DpsFieldName) {

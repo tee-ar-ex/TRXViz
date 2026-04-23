@@ -9,7 +9,7 @@ use super::types::VoxelMask;
 
 /// True when the RAS point lies within a non-zero voxel of `mask`. Honors
 /// the mask's own `voxel_to_ras`, so masks on different grids work.
-pub(super) fn point_in_mask(pt_ras: Vec3, mask: &VoxelMask) -> bool {
+pub(crate) fn point_in_mask(pt_ras: Vec3, mask: &VoxelMask) -> bool {
     let ras_to_vox = mask.voxel_to_ras.inverse();
     let v = ras_to_vox.transform_point3(pt_ras);
     let x = v.x.floor() as i32;
@@ -27,7 +27,7 @@ pub(super) fn point_in_mask(pt_ras: Vec3, mask: &VoxelMask) -> bool {
 }
 
 /// Does the streamline pass through **every** waypoint mask? AND-semantics.
-pub(super) fn streamline_hits_all_rois(
+pub(crate) fn streamline_hits_all_rois(
     streamline: &[[f32; 3]],
     rois: &[Arc<VoxelMask>],
 ) -> bool {
@@ -39,7 +39,7 @@ pub(super) fn streamline_hits_all_rois(
 }
 
 /// Is either endpoint of the streamline inside `mask`?
-pub(super) fn streamline_endpoint_in(streamline: &[[f32; 3]], mask: &VoxelMask) -> bool {
+pub(crate) fn streamline_endpoint_in(streamline: &[[f32; 3]], mask: &VoxelMask) -> bool {
     if streamline.len() < 2 {
         return false;
     }
@@ -50,7 +50,7 @@ pub(super) fn streamline_endpoint_in(streamline: &[[f32; 3]], mask: &VoxelMask) 
 
 /// End-region rule (simplified): at least one endpoint must lie in **each**
 /// mask in `end_masks`.
-pub(super) fn streamline_satisfies_end_masks(
+pub(crate) fn streamline_satisfies_end_masks(
     streamline: &[[f32; 3]],
     end_masks: &[Arc<VoxelMask>],
 ) -> bool {
@@ -66,7 +66,7 @@ pub(super) fn streamline_satisfies_end_masks(
 
 /// Mean-min Hausdorff test: each candidate point's minimum distance to the
 /// reference cloud, averaged over the streamline; pass iff mean ≤ `max_mm`.
-pub(super) fn streamline_passes_hausdorff(
+pub(crate) fn streamline_passes_hausdorff(
     streamline: &[[f32; 3]],
     reference_points: &[[f32; 3]],
     max_mm: f32,

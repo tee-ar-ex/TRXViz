@@ -454,6 +454,13 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 TipPruneOp::default().into(),
                 measured_node_sizes,
             );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                PurifibreOp::default().into(),
+                measured_node_sizes,
+            );
             add_node_button(ui, snarl, pos, MergeOp.into(), measured_node_sizes);
             add_node_button(
                 ui,
@@ -597,7 +604,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
-                BoundaryFieldBuildOp::default().into(),
+                StreamlineDirectionFieldOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
@@ -666,7 +673,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
-                TractographyOp::default().into(),
+                DipyTractographyOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
@@ -862,6 +869,11 @@ fn input_port_label(node_kind: &WorkflowNodeKind, input_index: usize, port: Port
             2 => "Size Scalars".to_string(),
             _ => port_name(port).to_string(),
         },
+        WorkflowNodeKind::Purifibre { .. } => match input_index {
+            0 => "Streamlines".to_string(),
+            1 => "Direction field".to_string(),
+            _ => port_name(port).to_string(),
+        },
         WorkflowNodeKind::SurfaceOverlayStack { layers } => {
             if input_index == 0 {
                 "Surface".to_string()
@@ -904,6 +916,16 @@ fn output_port_label(node_kind: &WorkflowNodeKind, output_index: usize, port: Po
         },
         WorkflowNodeKind::PrepareSimplePlan { .. } => match output_index {
             0 => "Plan".to_string(),
+            _ => port_name(port).to_string(),
+        },
+        WorkflowNodeKind::Purifibre { .. } => match output_index {
+            // Output 0 is the input streamlines passthrough with the
+            // FICO DPS field attached — useful for visualizing the
+            // score distribution before any filtering happens.
+            0 => "Scored (all)".to_string(),
+            // Output 1 has only streamlines that survived the
+            // discard-fraction cutoff.
+            1 => "Filtered".to_string(),
             _ => port_name(port).to_string(),
         },
         _ => port_name(port).to_string(),

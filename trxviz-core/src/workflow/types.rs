@@ -515,6 +515,12 @@ pub struct NodeEvalState {
     pub fingerprint: Option<u64>,
     pub last_result_summary: Option<String>,
     pub available_streamline_groups: Vec<String>,
+    /// DPS / DPV field names present on the streamline output of this
+    /// node's last evaluation. The inspector uses these to populate
+    /// comboboxes in `ColorByDps` / `ColorByDpv` so the user can pick
+    /// from the actual available fields rather than typing the name.
+    pub available_dps_fields: Vec<String>,
+    pub available_dpv_fields: Vec<String>,
     /// Names of op params whose value was overridden by a `TrackingPlan` on
     /// the last evaluation. The UI uses this to grey out the corresponding
     /// sliders and advertise that the plan is winning.
@@ -565,7 +571,14 @@ impl BundleSurfaceColorMode {
     pub fn label(self) -> &'static str {
         match self {
             Self::Solid => "Solid",
-            Self::BoundaryField => "Boundary field",
+            // Display label only — the enum variant is still named
+            // `BoundaryField` internally so the data type
+            // `BoundaryContactField` and `boundary_field_cache` keep
+            // their names. The user-facing language is "direction
+            // field" because the producer (StreamlineDirectionField)
+            // and one of the consumers (Purifibre) aren't
+            // boundary-glyph-specific.
+            Self::BoundaryField => "Direction field",
             Self::SourceColors => "Source colors",
         }
     }
@@ -663,11 +676,19 @@ pub struct WorkflowExecutionCache {
     pub bundle_surface_mesh_cache: HashMap<WorkflowNodeUuid, CachedBundleSurfaceMeshes>,
     pub boundary_field_cache: HashMap<WorkflowNodeUuid, CachedBoundaryField>,
     pub odx_dpv_materializations: HashMap<WorkflowNodeUuid, OdxDpvMaterialization>,
-    pub tractography_results: HashMap<WorkflowNodeUuid, CachedTractographyResult>,
+    pub dipy_tractography_results: HashMap<WorkflowNodeUuid, CachedTractographyResult>,
     pub yeh_tractography_results: HashMap<WorkflowNodeUuid, CachedTractographyResult>,
     pub voxel_mask_mesh_cache: HashMap<WorkflowNodeUuid, CachedVoxelMaskMesh>,
     pub hausdorff_plan_cache: HashMap<WorkflowNodeUuid, CachedHausdorffPlan>,
     pub tip_prune_cache: HashMap<WorkflowNodeUuid, CachedTipPrune>,
+    pub purifibre_cache: HashMap<WorkflowNodeUuid, CachedPurifibre>,
+    /// `StreamlineSourceOp` evaluates on every refresh; without
+    /// caching it would `Arc::new` a fresh `StreamlineDataset`
+    /// each time and downstream `Arc::as_ptr`-based fingerprints
+    /// (see `hash_flow`) would rebuild caches on every eval.
+    /// Reusing the cached Arc when the underlying `gpu_data`
+    /// pointer is unchanged keeps fingerprints stable.
+    pub streamline_source_datasets: HashMap<WorkflowNodeUuid, Arc<StreamlineDataset>>,
 }
 
 #[derive(Clone)]
@@ -684,6 +705,46 @@ pub struct CachedHausdorffPlan {
 pub struct CachedTipPrune {
     pub fingerprint: u64,
     pub selected: Vec<crate::units::StreamlineIndex>,
+    pub summary: String,
+}
+
+/// Purifibre result cache entry.
+///
+/// The op produces *two* outputs — the scored passthrough (all input
+/// streamlines, with FICO attached) and the filtered survivors — but
+/// both share the same underlying `StreamlineDataset` (differing only
+/// in the `selected_streamlines` list).
+///
+/// Cache shape splits "scoring" from "thresholding" so dragging the
+/// `puri_fraction` slider doesn't trigger a full re-score:
+///
+/// - `score_fingerprint` covers params and inputs that affect the
+///   per-streamline FICO computation (trim_fraction,
+///   spherical_smoothing_deg, upstream streamlines + boundary field).
+/// - `filter_fingerprint` adds `puri_fraction` on top.
+///
+/// On evaluation:
+///   - score_fingerprint matches → reuse `scored_dataset` + raw
+///     `fico_scores`; just re-threshold to get a new
+///     `filtered_selection`. Cheap (sort + filter).
+///   - score_fingerprint mismatches → re-score from scratch.
+#[derive(Clone)]
+pub struct CachedPurifibre {
+    pub score_fingerprint: u64,
+    pub filter_fingerprint: u64,
+    /// Input streamlines dataset with the `"fico"` DPS field attached.
+    /// Shared between the scored-passthrough and filtered outputs.
+    pub scored_dataset: Arc<StreamlineDataset>,
+    /// Selection for output 0 (scored passthrough) — equals the input
+    /// `selected_streamlines`, unmodified.
+    pub scored_selection: Vec<crate::units::StreamlineIndex>,
+    /// Per-streamline FICO scores (length = `nb_streamlines`, NaN for
+    /// unscored). Kept around so re-thresholding doesn't need to
+    /// re-walk segments.
+    pub fico_scores: Vec<f32>,
+    /// Selection for output 1 (filtered) — streamlines that survived
+    /// the puri_fraction cutoff.
+    pub filtered_selection: Vec<crate::units::StreamlineIndex>,
     pub summary: String,
 }
 
@@ -711,7 +772,7 @@ pub struct SceneFramePlan {
     pub fixel_3d_draws: Vec<FixelDrawPlan>,
     pub fixel_2d_draws: Vec<FixelDrawPlan>,
     pub odf_glyph_draws: Vec<OdfGlyphDrawPlan>,
-    pub tractography_plans: Vec<TractographyPlan>,
+    pub dipy_tractography_plans: Vec<DipyTractographyPlan>,
     pub yeh_tractography_plans: Vec<YehTractographyPlan>,
     pub voxel_mask_mesh_draws: Vec<VoxelMaskMeshDrawPlan>,
 }
@@ -792,7 +853,7 @@ impl Default for SceneFramePlan {
             fixel_3d_draws: Vec::new(),
             fixel_2d_draws: Vec::new(),
             odf_glyph_draws: Vec::new(),
-            tractography_plans: Vec::new(),
+            dipy_tractography_plans: Vec::new(),
             yeh_tractography_plans: Vec::new(),
             voxel_mask_mesh_draws: Vec::new(),
         }
@@ -807,6 +868,10 @@ pub struct StreamlineFlow {
     pub scalar_auto_range: bool,
     pub scalar_range_min: f32,
     pub scalar_range_max: f32,
+    /// Colormap used when `color_mode` is a scalar mode
+    /// (`Dps` / `Dpv`). Ignored for `DirectionRgb`, `Group`,
+    /// `Uniform`. Defaults to `BlueWhiteRed`.
+    pub scalar_colormap: SurfaceColormap,
 }
 
 #[derive(Clone)]
@@ -1004,6 +1069,7 @@ pub struct BoundaryFieldPlan {
     pub voxel_size_mm: Millimeters,
     pub sphere_lod: u32,
     pub normalization: BoundaryGlyphNormalization,
+    pub binning_mode: crate::data::orientation_field::DirectionFieldBinningMode,
 }
 
 #[derive(Clone)]
@@ -1199,9 +1265,79 @@ impl Default for StreamlineDisplayRuntime {
     }
 }
 
+/// Direction-getter variant used by the DIPY-style local tracker.
+///
+/// Mirrors DIPY's swappable direction-getter abstraction: every variant
+/// shares the same outer `LocalTracking` skeleton (seed loop, forward/
+/// backward branches, stitching, post-filters) and differs only in how
+/// the per-step direction is chosen. Pure-data variants (`Probabilistic`)
+/// are parameter-free here — they read what they need from the parent
+/// `DipyTractographyPlan` (e.g. `relative_peak_threshold`). Variants
+/// with their own knobs (`Ptt`) carry them inline.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum DipyDirectionGetter {
+    /// PMF-on-sphere sampling (the existing implementation in cpu_dipy.rs).
+    Probabilistic,
+    /// Parallel Transport Tractography (Aydogan & Shi 2021).
+    ///
+    /// Implementation lives in `gpu/dipy.rs::run_gpu_dipy_ptt` (GPU
+    /// only — no CPU reference yet). See `docs/ptt-implementation-notes.md`
+    /// for the algorithm overview and parameter mapping vs. nibrary/DIPY.
+    Ptt {
+        /// Length (mm) of each candidate arc evaluated per step.
+        probe_length_mm: f32,
+        /// Number of FOD samples taken along each candidate arc when
+        /// scoring it. (DIPY parameter name: `probe_quality`.)
+        probe_quality: u32,
+        /// Radius (mm) of the circumferential probe samples around
+        /// each arc point. `0.0` means a degenerate probe — single
+        /// sample at the arc point itself.
+        probe_radius_mm: f32,
+        /// Number of circumferential samples around each arc point at
+        /// `probe_radius_mm`. `1` collapses to a single on-axis sample.
+        probe_count: u32,
+        /// Maximum frame curvature (1/mm) considered when generating
+        /// candidate arcs. Larger = sharper turns allowed.
+        max_curvature_per_mm: f32,
+        /// Exponent applied to the per-candidate data support (FOD
+        /// integral). DIPY default 1.0; values > 1 sharpen the
+        /// posterior toward the strongest candidates.
+        data_support_exponent: f32,
+        /// Floor on candidate data support. Candidates below this are
+        /// rejected outright. DIPY default 0.05.
+        min_data_support: f32,
+        /// Maximum candidate evaluations per step before giving up
+        /// the streamline. DIPY default 100.
+        rejection_sampling_max_try: u32,
+    },
+}
+
+impl Default for DipyDirectionGetter {
+    fn default() -> Self {
+        DipyDirectionGetter::Probabilistic
+    }
+}
+
+impl DipyDirectionGetter {
+    /// DIPY-equivalent default PTT parameters. Convenience constructor
+    /// so callers don't need to remember every field.
+    pub fn ptt_default() -> Self {
+        DipyDirectionGetter::Ptt {
+            probe_length_mm: 0.5,
+            probe_quality: 4,
+            probe_radius_mm: 0.0,
+            probe_count: 1,
+            max_curvature_per_mm: 1.0 / 3.0,
+            data_support_exponent: 1.0,
+            min_data_support: 0.05,
+            rejection_sampling_max_try: 100,
+        }
+    }
+}
+
 /// Parameters and inputs for a GPU/CPU tractography run.
 #[derive(Clone)]
-pub struct TractographyPlan {
+pub struct DipyTractographyPlan {
     pub node_uuid: WorkflowNodeUuid,
     pub label: String,
     pub odx_source_id: FileId,
@@ -1230,6 +1366,9 @@ pub struct TractographyPlan {
     /// `TrackingPlan::fixel_otsu`). Drives the CPU tracker's
     /// `fixel_threshold <= 0` randomization base.
     pub fixel_otsu: Option<f32>,
+    /// Which DIPY direction-getter to use. Defaults to `Probabilistic`
+    /// (the only variant currently implemented on CPU).
+    pub direction_getter: DipyDirectionGetter,
 }
 
 #[derive(Clone)]
@@ -1292,7 +1431,7 @@ pub enum WorkflowJobKind {
     TubeGeometry,
     BundleSurface,
     BoundaryField,
-    Tractography,
+    DipyTractography,
     YehTractography,
 }
 
@@ -1310,8 +1449,8 @@ pub enum WorkflowJobPayload {
     BoundaryField {
         plan: BoundaryFieldPlan,
     },
-    Tractography {
-        plan: TractographyPlan,
+    DipyTractography {
+        plan: DipyTractographyPlan,
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     },
@@ -1335,7 +1474,7 @@ pub enum WorkflowJobOutput {
     BoundaryField {
         field: Option<Arc<BoundaryContactField>>,
     },
-    Tractography {
+    DipyTractography {
         flow: StreamlineFlow,
     },
     YehTractography {

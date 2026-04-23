@@ -55,11 +55,29 @@ pub struct MeshDrawStyle {
     pub model_matrix: [[f32; 4]; 4],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SurfaceColormap {
     BlueWhiteRed = 0,
     Viridis = 1,
     Inferno = 2,
+}
+
+impl Default for SurfaceColormap {
+    fn default() -> Self {
+        Self::BlueWhiteRed
+    }
+}
+
+impl SurfaceColormap {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::BlueWhiteRed => "Blue → white → red",
+            Self::Viridis => "Viridis",
+            Self::Inferno => "Inferno",
+        }
+    }
+
+    pub const ALL: [Self; 3] = [Self::BlueWhiteRed, Self::Viridis, Self::Inferno];
 }
 
 #[repr(C)]

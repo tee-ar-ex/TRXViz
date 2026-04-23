@@ -118,6 +118,7 @@ impl YehTractographyOp {
             scalar_auto_range: true,
             scalar_range_min: 0.0,
             scalar_range_max: 1.0,
+            scalar_colormap: crate::renderer::mesh_renderer::SurfaceColormap::default(),
         }
     }
 }

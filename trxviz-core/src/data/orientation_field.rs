@@ -30,6 +30,45 @@ impl BoundaryGlyphNormalization {
     ];
 }
 
+/// How a `BoundaryContactField` accumulates direction information from
+/// streamlines. Two distinct statistics, depending on what the
+/// downstream consumer wants.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+pub enum DirectionFieldBinningMode {
+    /// Original boundary-glyph behavior. Each segment that crosses a
+    /// voxel face contributes **+1.0** to the histogram of both the
+    /// voxel it left and the voxel it entered, at the bin nearest
+    /// the segment's tangent at the crossing. **Asymmetric** (`dir`
+    /// and `-dir` go to different bins) and **not length-weighted**.
+    /// Within-voxel-only segments contribute nothing. This statistic
+    /// is what boundary-glyph rendering was originally tuned for —
+    /// it visualizes voxel-face crossing patterns.
+    BoundaryCrossings,
+    /// Within-voxel segment-tangent histogram (the sTODI used by
+    /// nibrary's purifibre). For each segment, the segment's full
+    /// length is added to its midpoint-voxel's histogram at *both*
+    /// `bin(tangent)` and `bin(-tangent)` — **symmetric** (matches
+    /// the symmetric SH FOD convention) and **length-weighted**.
+    /// This is the right statistic for FOD-coherence scoring; it's
+    /// also a more general-purpose direction-density estimate.
+    /// Default.
+    #[default]
+    WithinVoxelTangent,
+}
+
+impl DirectionFieldBinningMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::BoundaryCrossings => "Boundary crossings",
+            Self::WithinVoxelTangent => "Within-voxel tangent",
+        }
+    }
+
+    pub const ALL: [Self; 2] = [Self::WithinVoxelTangent, Self::BoundaryCrossings];
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BoundaryGlyphColorMode {
     DirectionRgb,
@@ -52,6 +91,7 @@ pub struct BoundaryGlyphParams {
     pub sphere_lod: u32,
     pub scale: f32,
     pub normalization: BoundaryGlyphNormalization,
+    pub binning_mode: DirectionFieldBinningMode,
     pub density_3d_step: usize,
     pub slice_density_step: usize,
     pub color_mode: BoundaryGlyphColorMode,
@@ -65,6 +105,7 @@ impl Default for BoundaryGlyphParams {
             sphere_lod: 12,
             scale: 2.0,
             normalization: BoundaryGlyphNormalization::GlobalPeak,
+            binning_mode: DirectionFieldBinningMode::default(),
             density_3d_step: 2,
             slice_density_step: 1,
             color_mode: BoundaryGlyphColorMode::DirectionRgb,
@@ -293,60 +334,132 @@ impl BoundaryContactField {
         let mut summary_vectors = Vec::<[f32; 3]>::new();
         let mut summary_tensors = Vec::<[f32; 6]>::new();
 
-        for set in streamlines {
-            for win in set.offsets.windows(2) {
-                let start = win[0] as usize;
-                let end = win[1] as usize;
-                if end.saturating_sub(start) < 2 {
-                    continue;
-                }
-                for vi in start..(end - 1) {
-                    let p0 = Vec3::from(set.positions[vi]);
-                    let p1 = Vec3::from(set.positions[vi + 1]);
-                    let Some(v0) = grid.point_to_voxel(p0) else {
-                        continue;
-                    };
-                    let Some(v1) = grid.point_to_voxel(p1) else {
-                        continue;
-                    };
-                    if v0 == v1 {
-                        continue;
-                    }
+        // The two binning modes feed the same per-voxel × sphere-bin
+        // histogram structure, but accumulate from segments very
+        // differently. Branch outside the per-segment loop so the
+        // hot path doesn't pay for a per-iteration check.
+        match params.binning_mode {
+            DirectionFieldBinningMode::BoundaryCrossings => {
+                for set in streamlines {
+                    for win in set.offsets.windows(2) {
+                        let start = win[0] as usize;
+                        let end = win[1] as usize;
+                        if end.saturating_sub(start) < 2 {
+                            continue;
+                        }
+                        for vi in start..(end - 1) {
+                            let p0 = Vec3::from(set.positions[vi]);
+                            let p1 = Vec3::from(set.positions[vi + 1]);
+                            let Some(v0) = grid.point_to_voxel(p0) else {
+                                continue;
+                            };
+                            let Some(v1) = grid.point_to_voxel(p1) else {
+                                continue;
+                            };
+                            if v0 == v1 {
+                                // Boundary-crossings mode counts only
+                                // segments that cross a voxel face.
+                                continue;
+                            }
 
-                    let flat0 = grid.flat_index(v0[0], v0[1], v0[2]);
-                    let flat1 = grid.flat_index(v1[0], v1[1], v1[2]);
+                            let flat0 = grid.flat_index(v0[0], v0[1], v0[2]);
+                            let flat1 = grid.flat_index(v1[0], v1[1], v1[2]);
 
-                    if segment_exit_from_voxel_box(p0, p1, v0, &grid).is_some() {
-                        let dir = (p1 - p0).normalize_or_zero();
-                        if dir.length_squared() > 0.0 {
-                            let compact = ensure_voxel(
-                                flat0,
-                                nbins,
-                                &mut flat_to_compact,
-                                &mut occupied_voxels,
-                                &mut histograms,
-                                &mut contact_counts,
-                                &mut summary_vectors,
-                                &mut summary_tensors,
-                            );
-                            accumulate_contact(
-                                compact,
-                                dir,
-                                &sphere,
-                                nbins,
-                                &mut histograms,
-                                &mut contact_counts,
-                                &mut summary_vectors,
-                                &mut summary_tensors,
-                            );
+                            if segment_exit_from_voxel_box(p0, p1, v0, &grid).is_some() {
+                                let dir = (p1 - p0).normalize_or_zero();
+                                if dir.length_squared() > 0.0 {
+                                    let compact = ensure_voxel(
+                                        flat0,
+                                        nbins,
+                                        &mut flat_to_compact,
+                                        &mut occupied_voxels,
+                                        &mut histograms,
+                                        &mut contact_counts,
+                                        &mut summary_vectors,
+                                        &mut summary_tensors,
+                                    );
+                                    accumulate_contact(
+                                        compact,
+                                        dir,
+                                        &sphere,
+                                        nbins,
+                                        &mut histograms,
+                                        &mut contact_counts,
+                                        &mut summary_vectors,
+                                        &mut summary_tensors,
+                                    );
+                                }
+                            }
+
+                            if segment_exit_from_voxel_box(p1, p0, v1, &grid).is_some() {
+                                let dir = (p1 - p0).normalize_or_zero();
+                                if dir.length_squared() > 0.0 {
+                                    let compact = ensure_voxel(
+                                        flat1,
+                                        nbins,
+                                        &mut flat_to_compact,
+                                        &mut occupied_voxels,
+                                        &mut histograms,
+                                        &mut contact_counts,
+                                        &mut summary_vectors,
+                                        &mut summary_tensors,
+                                    );
+                                    accumulate_contact(
+                                        compact,
+                                        dir,
+                                        &sphere,
+                                        nbins,
+                                        &mut histograms,
+                                        &mut contact_counts,
+                                        &mut summary_vectors,
+                                        &mut summary_tensors,
+                                    );
+                                }
+                            }
                         }
                     }
-
-                    if segment_exit_from_voxel_box(p1, p0, v1, &grid).is_some() {
-                        let dir = (p1 - p0).normalize_or_zero();
-                        if dir.length_squared() > 0.0 {
+                }
+            }
+            DirectionFieldBinningMode::WithinVoxelTangent => {
+                // For each segment: bin its tangent at the segment
+                // midpoint's voxel, weighted by segment length, and
+                // mirror to the antipodal bin so the histogram is
+                // symmetric (matches symmetric SH FOD convention,
+                // matches nibrary's purifibre lookup).
+                //
+                // Approximation: a segment that straddles two voxels
+                // is wholly attributed to its midpoint's voxel rather
+                // than split between them. For typical neuroimaging
+                // step sizes (~1 mm) and grid spacing (~2-4 mm),
+                // segments rarely cross more than one face, and this
+                // approximation tracks the proper segment-length-
+                // density estimate closely enough for FICO scoring.
+                // A future enhancement could do proper 3D-DDA voxel
+                // traversal if downstream consumers need exact
+                // per-voxel mass.
+                for set in streamlines {
+                    for win in set.offsets.windows(2) {
+                        let start = win[0] as usize;
+                        let end = win[1] as usize;
+                        if end.saturating_sub(start) < 2 {
+                            continue;
+                        }
+                        for vi in start..(end - 1) {
+                            let p0 = Vec3::from(set.positions[vi]);
+                            let p1 = Vec3::from(set.positions[vi + 1]);
+                            let delta = p1 - p0;
+                            let length = delta.length();
+                            if length < 1e-6 {
+                                continue;
+                            }
+                            let tangent = delta / length;
+                            let midpoint = 0.5 * (p0 + p1);
+                            let Some(voxel) = grid.point_to_voxel(midpoint) else {
+                                continue;
+                            };
+                            let flat = grid.flat_index(voxel[0], voxel[1], voxel[2]);
                             let compact = ensure_voxel(
-                                flat1,
+                                flat,
                                 nbins,
                                 &mut flat_to_compact,
                                 &mut occupied_voxels,
@@ -355,9 +468,10 @@ impl BoundaryContactField {
                                 &mut summary_vectors,
                                 &mut summary_tensors,
                             );
-                            accumulate_contact(
+                            accumulate_within_voxel_tangent(
                                 compact,
-                                dir,
+                                tangent,
+                                length,
                                 &sphere,
                                 nbins,
                                 &mut histograms,
@@ -461,6 +575,24 @@ impl BoundaryContactField {
         let nbins = self.sphere.vertices.len();
         let start = compact_index * nbins;
         &self.histograms[start..start + nbins]
+    }
+
+    /// Compact index for a flat voxel (from `grid.flat_index`), or `None`
+    /// when that voxel had no contacts during the field build (voxels
+    /// outside the bundle footprint aren't stored). Lets downstream
+    /// consumers (e.g. purifibre) look up histograms by RAS point
+    /// without needing access to the private sparse-lookup table.
+    pub fn compact_index_for(&self, flat: u32) -> Option<usize> {
+        self.compact_lookup.get(&flat).copied()
+    }
+
+    /// The full flat histogram buffer backing the field (contact counts
+    /// × `n_dirs` per occupied voxel, laid out `[compact_idx * n_dirs +
+    /// bin]`). Exposed so purifibre can run a one-shot on-sphere
+    /// smoothing pass into a scratch copy without reaching through
+    /// `histogram_for_voxel` one voxel at a time.
+    pub fn histograms_flat(&self) -> &[f32] {
+        &self.histograms
     }
 
     pub fn contact_count(&self, compact_index: usize) -> u32 {
@@ -591,6 +723,63 @@ fn accumulate_contact(
     t[3] += dir.y * dir.y;
     t[4] += dir.y * dir.z;
     t[5] += dir.z * dir.z;
+}
+
+/// Within-voxel-tangent accumulator (the sTODI statistic used by
+/// nibrary's purifibre). Adds `length` to both `bin(tangent)` and
+/// `bin(-tangent)` of `compact`'s histogram so the result is
+/// symmetric — fiber orientation is a direction-modulo-sign quantity.
+///
+/// Summary vectors are accumulated using a sign-aligned `tangent`
+/// (flipped to point into the +Z hemisphere for stability) so that
+/// glyph rendering produces well-defined arrows. Summary tensors are
+/// outer-product-symmetric anyway so they don't need the flip.
+fn accumulate_within_voxel_tangent(
+    compact: usize,
+    tangent: Vec3,
+    length: f32,
+    sphere: &SphereTemplate,
+    nbins: usize,
+    histograms: &mut [f32],
+    contact_counts: &mut [u32],
+    summary_vectors: &mut [[f32; 3]],
+    summary_tensors: &mut [[f32; 6]],
+) {
+    let bin_pos = sphere.nearest_bin(tangent);
+    let bin_neg = sphere.nearest_bin(-tangent);
+    histograms[compact * nbins + bin_pos] += length;
+    if bin_neg != bin_pos {
+        // Defensive: with a full sphere mesh this is the typical case.
+        // If the sphere only has one hemisphere worth of vertices
+        // (unlikely for our LOD-12 detail-2 icosphere), the antipodal
+        // map could collapse onto the same bin; avoid double-counting.
+        histograms[compact * nbins + bin_neg] += length;
+    }
+    contact_counts[compact] += 1;
+
+    // Sign-flip the tangent into a canonical hemisphere before
+    // accumulating into summary_vectors so that bidirectional fibers
+    // don't cancel out when their tangents come in flipped.
+    let canonical = if tangent.z >= 0.0 || (tangent.z == 0.0 && tangent.y >= 0.0) {
+        tangent
+    } else {
+        -tangent
+    };
+    let sum = Vec3::from(summary_vectors[compact]) + canonical * length;
+    summary_vectors[compact] = sum.to_array();
+
+    // Outer product is symmetric under sign flip, so we use raw
+    // tangent here. Length-weighted to match the histogram.
+    let t = &mut summary_tensors[compact];
+    let dx = tangent.x;
+    let dy = tangent.y;
+    let dz = tangent.z;
+    t[0] += dx * dx * length;
+    t[1] += dx * dy * length;
+    t[2] += dx * dz * length;
+    t[3] += dy * dy * length;
+    t[4] += dy * dz * length;
+    t[5] += dz * dz * length;
 }
 
 fn segment_exit_from_voxel_box(

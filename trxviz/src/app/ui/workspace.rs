@@ -457,12 +457,21 @@ impl super::super::TrxVizApp {
                 .get(&node_uuid)
                 .map(|s| (s.overridden_fields.clone(), s.overridden_values.clone()))
                 .unwrap_or_default();
+            let (available_dps_fields, available_dpv_fields): (Vec<String>, Vec<String>) = self
+                .workflow
+                .runtime
+                .node_state
+                .get(&node_uuid)
+                .map(|s| (s.available_dps_fields.clone(), s.available_dpv_fields.clone()))
+                .unwrap_or_default();
             let edit_result = workflow::edit_node_op(
                 ui,
                 node_uuid,
                 &mut node.op,
                 workflow::NodeEditorContext {
                     available_groups: &available_groups,
+                    available_dps_fields: &available_dps_fields,
+                    available_dpv_fields: &available_dpv_fields,
                     odx_selector_names: odx_selector_names.as_ref(),
                     sh_detail_limit,
                     save_ready,

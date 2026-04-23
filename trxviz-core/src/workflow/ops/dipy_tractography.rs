@@ -6,9 +6,10 @@ use crate::error::WorkflowResult;
 use crate::units::StreamlineIndex;
 
 use super::super::{
-    CachedTractographyResult, EvalCtx, PortKind, StreamlineDataset, StreamlineFlow,
-    TractographyPlan, VoxelMask, WorkflowNodeKind, WorkflowOp, WorkflowValue,
-    mark_expensive_success, prime_expensive_record, sync_node_state_from_run_record,
+    CachedTractographyResult, DipyDirectionGetter, EvalCtx, PortKind, StreamlineDataset,
+    StreamlineFlow, DipyTractographyPlan, VoxelMask, WorkflowNodeKind, WorkflowOp,
+    WorkflowValue, mark_expensive_success, prime_expensive_record,
+    sync_node_state_from_run_record,
 };
 use crate::data::trx_data::ColorMode;
 use crate::data::loaded_files::StreamlineBacking;
@@ -23,7 +24,7 @@ fn default_seeds_per_voxel() -> u32 { 1 }
 fn default_max_points() -> u32 { 501 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct TractographyOp {
+pub struct DipyTractographyOp {
     #[serde(default = "default_step_size")]
     pub step_size_mm: f32,
     #[serde(default = "default_max_angle")]
@@ -42,9 +43,10 @@ pub struct TractographyOp {
     pub max_points: u32,
     #[serde(default)]
     pub rng_seed: u64,
+    pub direction_getter: DipyDirectionGetter,
 }
 
-impl Default for TractographyOp {
+impl Default for DipyTractographyOp {
     fn default() -> Self {
         Self {
             step_size_mm: default_step_size(),
@@ -56,11 +58,12 @@ impl Default for TractographyOp {
             seeds_per_voxel: default_seeds_per_voxel(),
             max_points: default_max_points(),
             rng_seed: 42,
+            direction_getter: DipyDirectionGetter::default(),
         }
     }
 }
 
-impl TractographyOp {
+impl DipyTractographyOp {
     fn fingerprint(&self, odx_source_id: crate::data::loaded_files::FileId, mask: &VoxelMask) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         odx_source_id.hash(&mut h);
@@ -83,6 +86,31 @@ impl TractographyOp {
         self.seeds_per_voxel.hash(&mut h);
         self.max_points.hash(&mut h);
         self.rng_seed.hash(&mut h);
+        // Include the DG variant tag (and any inline params) in the
+        // fingerprint so switching DGs invalidates cached results.
+        match self.direction_getter {
+            DipyDirectionGetter::Probabilistic => 0u8.hash(&mut h),
+            DipyDirectionGetter::Ptt {
+                probe_length_mm,
+                probe_quality,
+                probe_radius_mm,
+                probe_count,
+                max_curvature_per_mm,
+                data_support_exponent,
+                min_data_support,
+                rejection_sampling_max_try,
+            } => {
+                1u8.hash(&mut h);
+                probe_length_mm.to_bits().hash(&mut h);
+                probe_quality.hash(&mut h);
+                probe_radius_mm.to_bits().hash(&mut h);
+                probe_count.hash(&mut h);
+                max_curvature_per_mm.to_bits().hash(&mut h);
+                data_support_exponent.to_bits().hash(&mut h);
+                min_data_support.to_bits().hash(&mut h);
+                rejection_sampling_max_try.hash(&mut h);
+            }
+        }
         h.finish()
     }
 
@@ -101,11 +129,12 @@ impl TractographyOp {
             scalar_auto_range: true,
             scalar_range_min: 0.0,
             scalar_range_max: 1.0,
+            scalar_colormap: crate::renderer::mesh_renderer::SurfaceColormap::default(),
         }
     }
 }
 
-impl WorkflowOp for TractographyOp {
+impl WorkflowOp for DipyTractographyOp {
     fn tag(&self) -> &'static str {
         "tractography"
     }
@@ -254,7 +283,7 @@ impl WorkflowOp for TractographyOp {
         // Check the tractography-specific result cache
         let cached = ctx
             .execution_cache
-            .tractography_results
+            .dipy_tractography_results
             .get(&ctx.node.uuid)
             .cloned();
 
@@ -268,7 +297,7 @@ impl WorkflowOp for TractographyOp {
             (Self::empty_flow(&ctx.node.label), true)
         };
 
-        // If stale, push a TractographyPlan so the app can queue the job.
+        // If stale, push a DipyTractographyPlan so the app can queue the job.
         if stale {
             let (
                 limiting_mask,
@@ -291,7 +320,7 @@ impl WorkflowOp for TractographyOp {
             } else {
                 (None, None, None, Vec::new(), Vec::new(), None, None)
             };
-            ctx.scene_plan.tractography_plans.push(TractographyPlan {
+            ctx.scene_plan.dipy_tractography_plans.push(DipyTractographyPlan {
                 node_uuid: ctx.node.uuid,
                 label: ctx.node.label.clone(),
                 odx_source_id,
@@ -316,6 +345,7 @@ impl WorkflowOp for TractographyOp {
                 fixel_otsu: plan_input
                     .as_ref()
                     .and_then(|p| p.fixel_otsu),
+                direction_getter: self.direction_getter,
             });
         }
 
@@ -326,9 +356,9 @@ impl WorkflowOp for TractographyOp {
     }
 }
 
-impl From<TractographyOp> for WorkflowNodeKind {
-    fn from(op: TractographyOp) -> Self {
-        Self::Tractography {
+impl From<DipyTractographyOp> for WorkflowNodeKind {
+    fn from(op: DipyTractographyOp) -> Self {
+        Self::DipyTractography {
             step_size_mm: op.step_size_mm,
             max_angle_deg: op.max_angle_deg,
             min_len_mm: op.min_len_mm,
@@ -338,6 +368,7 @@ impl From<TractographyOp> for WorkflowNodeKind {
             seeds_per_voxel: op.seeds_per_voxel,
             max_points: op.max_points,
             rng_seed: op.rng_seed,
+            direction_getter: op.direction_getter,
         }
     }
 }
