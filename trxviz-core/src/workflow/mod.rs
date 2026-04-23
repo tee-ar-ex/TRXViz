@@ -53,6 +53,10 @@ pub use seed_odx::*;
 pub use simple_workflow::*;
 pub use types::*;
 
+pub use op::{ContentHash, Diagnostic, DiagnosticSeverity, FingerprintCtx, ValidateCtx};
+pub use ops::fingerprint as fingerprint_op;
+pub use ops::validate as validate_op;
+
 pub(crate) use evaluate::{
     compose_surface_appearance, expect_boundary_field_input, expect_bundle_surface_input,
     expect_cifti_input, expect_surface_appearance_input, expect_volume_input,

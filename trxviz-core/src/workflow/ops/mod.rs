@@ -1134,6 +1134,14 @@ pub(super) fn evaluate(
     with_workflow_op!(kind, |op| op.evaluate(ctx))
 }
 
+pub fn validate(kind: &WorkflowNodeKind, env: &super::ValidateCtx) -> Vec<super::Diagnostic> {
+    with_workflow_op!(kind, |op| op.validate(env))
+}
+
+pub fn fingerprint(kind: &WorkflowNodeKind, ctx: &super::FingerprintCtx) -> super::ContentHash {
+    with_workflow_op!(kind, |op| op.fingerprint(ctx))
+}
+
 pub(super) fn title(kind: &WorkflowNodeKind) -> &'static str {
     with_workflow_op!(kind, |op| op.title())
 }

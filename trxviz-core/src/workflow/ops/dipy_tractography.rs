@@ -180,6 +180,21 @@ impl WorkflowOp for DipyTractographyOp {
         &[PortKind::Streamline]
     }
 
+    fn validate(&self, env: &super::super::ValidateCtx) -> Vec<super::super::Diagnostic> {
+        let mut diagnostics = Vec::new();
+        if matches!(self.direction_getter, DipyDirectionGetter::Ptt { .. }) && !env.gpu_available {
+            diagnostics.push(
+                super::super::Diagnostic::error(
+                    "PTT requires a GPU and no wgpu device is available. \
+                     Switch the direction getter to Probabilistic, or run on a \
+                     GPU-capable build.",
+                )
+                .on_field("direction_getter"),
+            );
+        }
+        diagnostics
+    }
+
     fn evaluate(
         &self,
         ctx: &mut EvalCtx<'_, '_>,

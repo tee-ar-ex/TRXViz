@@ -482,6 +482,7 @@ impl super::super::TrxVizApp {
                     save_ready,
                     overridden_fields: &overridden_fields,
                     overridden_values: &overridden_values,
+                    gpu_available: self.gpu_device.is_some(),
                 },
             );
             (

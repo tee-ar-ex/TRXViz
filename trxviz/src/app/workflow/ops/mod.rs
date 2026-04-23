@@ -35,6 +35,10 @@ pub(crate) struct NodeEditorContext<'a> {
     /// Editor panels bind this to the greyed-out slider so the user sees
     /// the plan's number instead of the op's own.
     pub(crate) overridden_values: &'a std::collections::BTreeMap<String, f32>,
+    /// Is a wgpu device available in this session? Passed to
+    /// `WorkflowOp::validate` so GPU-only op variants (currently PTT)
+    /// can surface an inline error when there's no GPU.
+    pub(crate) gpu_available: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -50,6 +54,32 @@ pub(crate) fn edit_node_op(
     ctx: NodeEditorContext<'_>,
 ) -> NodeEditorResult {
     let mut result = NodeEditorResult::default();
+
+    // Pre-dispatch diagnostics (e.g. "PTT requires a GPU; none
+    // available"). Rendered at the top of the inspector so the user
+    // sees the problem before scrolling through the knobs. Errors are
+    // advisory for now — the GUI still allows "Run" to be clicked,
+    // and the worker returns a descriptive failure.
+    let diagnostics = workflow::validate_op(
+        op,
+        &workflow::ValidateCtx {
+            gpu_available: ctx.gpu_available,
+        },
+    );
+    for diag in &diagnostics {
+        let color = match diag.severity {
+            workflow::DiagnosticSeverity::Error => egui::Color32::from_rgb(230, 100, 100),
+            workflow::DiagnosticSeverity::Warning => egui::Color32::from_rgb(220, 180, 96),
+        };
+        let prefix = match diag.severity {
+            workflow::DiagnosticSeverity::Error => "⛔",
+            workflow::DiagnosticSeverity::Warning => "⚠",
+        };
+        ui.colored_label(color, format!("{prefix} {}", diag.message));
+    }
+    if !diagnostics.is_empty() {
+        ui.separator();
+    }
 
     match op {
         workflow::WorkflowNodeKind::LimitStreamlines {
