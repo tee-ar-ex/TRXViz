@@ -32,6 +32,7 @@ struct FixelUniforms {
     fog_params: [f32; 4],     // [144..160]
     post_params: [f32; 4],    // [160..176]
     color_params: [f32; 4],   // [176..192] x=colormap, y=scalar_min, z=scalar_max, w=reserved
+    opacity_gate: [f32; 4],   // [192..208] x=range_min, y=range_max, z=below, w=above
 }
 
 /// Unit quad: 4 vertices, 2 triangles.
@@ -85,6 +86,8 @@ impl FixelResources {
             fog_params: [0.0, 1.0, 0.0, 0.0],
             post_params: [1.0, 1.0, 0.12, 0.0],
             color_params: [0.0, 0.0, 1.0, 0.0],
+            // Default opacity gate is pass-through (every scalar → 1.0).
+            opacity_gate: [0.0, 0.0, 1.0, 1.0],
         };
 
         let viewports =
@@ -210,6 +213,7 @@ impl FixelResources {
         draw_step: u32,
         line_width: f32,
         opacity: f32,
+        opacity_gate: [f32; 4],
         scene_lighting: SceneLightingParams,
         render_3d: &WorkflowRender3D,
         fog_near: f32,
@@ -241,6 +245,7 @@ impl FixelResources {
                 0.0,
             ],
             color_params: [0.0, 0.0, 1.0, 0.0],
+            opacity_gate,
         };
         self.viewports.update(queue, viewport, &uniforms);
     }

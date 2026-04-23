@@ -80,7 +80,7 @@ pub(super) fn build_render_data(
     let bundle_draws = if view == HeadlessView::InflatedStage {
         Vec::new()
     } else {
-        workflow
+        let mut out = workflow
             .runtime
             .scene_plan
             .bundle_draws
@@ -89,7 +89,21 @@ pub(super) fn build_render_data(
                 file_id: draw.draw_id,
                 opacity: draw.opacity,
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        // Voxel-mask meshes reuse the bundle-surface renderer via their own
+        // draw_ids; they share the opaque pass.
+        out.extend(
+            workflow
+                .runtime
+                .scene_plan
+                .voxel_mask_mesh_draws
+                .iter()
+                .map(|draw| BundleDrawInfo {
+                    file_id: draw.draw_id,
+                    opacity: draw.opacity,
+                }),
+        );
+        out
     };
     let glyph_draw = if view == HeadlessView::InflatedStage {
         None
@@ -155,6 +169,16 @@ pub(super) fn build_render_data(
         fixel_3d_scalar_range: fixel_3d_draw
             .map(|p| [p.scalar_range.0, p.scalar_range.1])
             .unwrap_or([0.0, 1.0]),
+        fixel_3d_opacity_gate: fixel_3d_draw
+            .map(|p| {
+                [
+                    p.opacity_gate.range.0,
+                    p.opacity_gate.range.1,
+                    p.opacity_gate.below,
+                    p.opacity_gate.above,
+                ]
+            })
+            .unwrap_or([0.0, 0.0, 1.0, 1.0]),
         fixel_2d_line_width: fixel_2d_draw.map(|p| p.line_width).unwrap_or(0.006),
         fixel_2d_slab_half_width_mm: fixel_2d_draw
             .map(|p| (p.slab_thickness_mm * 0.5).max(Millimeters(0.0)))
@@ -164,6 +188,16 @@ pub(super) fn build_render_data(
         fixel_2d_scalar_range: fixel_2d_draw
             .map(|p| [p.scalar_range.0, p.scalar_range.1])
             .unwrap_or([0.0, 1.0]),
+        fixel_2d_opacity_gate: fixel_2d_draw
+            .map(|p| {
+                [
+                    p.opacity_gate.range.0,
+                    p.opacity_gate.range.1,
+                    p.opacity_gate.below,
+                    p.opacity_gate.above,
+                ]
+            })
+            .unwrap_or([0.0, 0.0, 1.0, 1.0]),
         odf_glyph_opacity: workflow
             .runtime
             .scene_plan

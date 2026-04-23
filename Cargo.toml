@@ -3,6 +3,12 @@ members = ["trxviz", "trxviz-core", "trxviz-cli"]
 exclude = ["trx-rs"]
 resolver = "2"
 
+# During local Otsu / tracking-plan development we override the git
+# dependency with the sibling checkout. Revert to the upstream git
+# source before shipping.
+[patch."https://github.com/PennLINC/odx-rs"]
+odx-rs = { path = "../odx-rs" }
+
 [workspace.lints.rust]
 unused_imports = "warn"
 dead_code = "warn"

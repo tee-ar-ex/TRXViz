@@ -207,6 +207,7 @@ mod tests {
             save_targets: &mut save_targets,
             execution_cache: &mut execution_cache,
             node_state: &mut node_state,
+            eval_mode: crate::workflow::WorkflowEvalMode::Settled,
         })
         .unwrap();
 

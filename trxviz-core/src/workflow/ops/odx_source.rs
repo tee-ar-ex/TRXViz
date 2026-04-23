@@ -51,7 +51,21 @@ impl WorkflowOp for OdxSourceOp {
             source_id: self.source_id,
             scene: scene.clone(),
         };
-        let catalog = OdxCatalog::from_scene(self.source_id, scene);
+        let catalog = OdxCatalog::from_scene(self.source_id, scene.clone());
+
+        // Advertise the default fixel-Otsu in the node's summary so users
+        // can see at a glance which tracking metric and threshold every
+        // downstream display / plan op will default to.
+        if let Some(otsu) = scene.default_fixel_otsu() {
+            ctx.node_state.summary = format!(
+                "{}: Otsu = {:.4} ({} fixels)",
+                otsu.metric_name, otsu.threshold, otsu.n_values,
+            );
+        } else {
+            ctx.node_state.summary =
+                "(no DPF tracking metric; Otsu unavailable)".to_string();
+        }
+
         Ok(vec![
             WorkflowValue::Fixels(field).into(),
             WorkflowValue::OdfField(odf).into(),

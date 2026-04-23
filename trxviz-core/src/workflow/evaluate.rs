@@ -122,6 +122,8 @@ pub fn evaluate_scene_plan_with_mode(
             fingerprint: None,
             last_result_summary: None,
             available_streamline_groups: Vec::new(),
+            overridden_fields: Vec::new(),
+            overridden_values: std::collections::BTreeMap::new(),
         };
         let result = evaluate_node(
             node,
@@ -248,7 +250,7 @@ fn evaluate_node(
     projection_by_surface: &mut HashMap<FileId, SurfaceScalars>,
     save_targets: &mut HashMap<WorkflowNodeUuid, SaveStreamlinePlan>,
     execution_cache: &mut WorkflowExecutionCache,
-    _mode: WorkflowEvalMode,
+    mode: WorkflowEvalMode,
     node_state: &mut NodeEvalState,
 ) -> WorkflowResult<Vec<EvaluatedValue>> {
     let mut op_ctx = EvalCtx {
@@ -267,6 +269,7 @@ fn evaluate_node(
         save_targets,
         execution_cache,
         node_state,
+        eval_mode: mode,
     };
     super::ops::evaluate(&node.op, &mut op_ctx)
 }

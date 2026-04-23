@@ -129,11 +129,13 @@ struct HeadlessRenderData {
     fixel_3d_opacity: f32,
     fixel_3d_colormap_code: u32,
     fixel_3d_scalar_range: [f32; 2],
+    fixel_3d_opacity_gate: [f32; 4],
     fixel_2d_line_width: f32,
     fixel_2d_slab_half_width_mm: Millimeters,
     fixel_2d_opacity: f32,
     fixel_2d_colormap_code: u32,
     fixel_2d_scalar_range: [f32; 2],
+    fixel_2d_opacity_gate: [f32; 4],
     odf_glyph_opacity: f32,
     odf_glyph_gloss: f32,
 }
@@ -378,6 +380,7 @@ mod tests {
             visible,
             colormap_code,
             scalar_range,
+            opacity_gate: crate::workflow::OpacityGate::default(),
         }
     }
 

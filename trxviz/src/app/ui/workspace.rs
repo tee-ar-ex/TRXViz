@@ -438,7 +438,7 @@ impl super::super::TrxVizApp {
             .save_streamline_targets
             .contains_key(&node_uuid);
 
-        let (save_now, node_changed) = {
+        let (save_now, run_requested, node_changed) = {
             let node = self
                 .workflow
                 .document
@@ -447,6 +447,16 @@ impl super::super::TrxVizApp {
                 .expect("node must still exist while inspector is open");
             ui.text_edit_singleline(&mut node.label);
             ui.separator();
+            let (overridden_fields, overridden_values): (
+                Vec<String>,
+                std::collections::BTreeMap<String, f32>,
+            ) = self
+                .workflow
+                .runtime
+                .node_state
+                .get(&node_uuid)
+                .map(|s| (s.overridden_fields.clone(), s.overridden_values.clone()))
+                .unwrap_or_default();
             let edit_result = workflow::edit_node_op(
                 ui,
                 node_uuid,
@@ -456,10 +466,16 @@ impl super::super::TrxVizApp {
                     odx_selector_names: odx_selector_names.as_ref(),
                     sh_detail_limit,
                     save_ready,
+                    overridden_fields: &overridden_fields,
+                    overridden_values: &overridden_values,
                 },
             );
-            (edit_result.save_now, *node != original_node)
+            (edit_result.save_now, edit_result.run_expensive_requested, *node != original_node)
         };
+
+        if run_requested {
+            self.workflow.run_expensive_requested = true;
+        }
 
         if let Some(state) = self.workflow.runtime.node_state.get(&node_uuid) {
             ui.separator();

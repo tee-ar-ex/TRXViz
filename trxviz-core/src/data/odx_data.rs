@@ -12,6 +12,8 @@ use crate::data::loaded_files::FileId;
 use crate::data::nifti_data::NiftiVolume;
 use crate::renderer::glyph_renderer::GlyphInstance;
 
+pub use odx_rs::qc::{FixelOtsu, OtsuScope};
+
 /// Loaded ODX dataset with precomputed spatial lookups for slice-local rendering.
 pub struct OdxScene {
     dataset: OdxDataset,
@@ -26,6 +28,12 @@ pub struct OdxScene {
     glyph_warnings: Vec<String>,
     odf_slice_cache: Mutex<OdfSliceMetadataCache>,
     sh_render_mesh_cache: Mutex<HashMap<u32, Arc<ShRenderMesh>>>,
+    /// Memoized per-(metric, scope) Otsu thresholds. Pre-populated with
+    /// the "default" entry (auto-resolved metric, all-fixel scope) at
+    /// scene construction time so display ops can query without paying
+    /// compute latency.
+    fixel_otsu_cache: Arc<std::sync::RwLock<HashMap<(String, OtsuScope), FixelOtsu>>>,
+    default_fixel_otsu: Option<FixelOtsu>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -89,7 +97,7 @@ impl ShRenderMesh {
         self.sample_plan.source_dir_count()
     }
 
-    fn sample_plan(&self) -> &mrtrix_sh::RowSamplePlan {
+    pub fn sample_plan(&self) -> &mrtrix_sh::RowSamplePlan {
         &self.sample_plan
     }
 }
@@ -184,6 +192,16 @@ impl OdxScene {
         let odf_source = resolve_odf_source(&dataset, &mut glyph_warnings);
         let sh_source = resolve_sh_source(&dataset, &mut glyph_warnings);
 
+        // Eagerly resolve the default Otsu so every display op sees it
+        // without paying compute latency. Silent on failure — data
+        // without a usable DPF metric simply has no default threshold.
+        let default_fixel_otsu =
+            odx_rs::qc::compute_fixel_otsu(&dataset, None, OtsuScope::AllFixels).ok();
+        let mut cache = HashMap::new();
+        if let Some(otsu) = &default_fixel_otsu {
+            cache.insert((otsu.metric_name.clone(), otsu.scope), otsu.clone());
+        }
+
         Ok(Self {
             dataset,
             ijk_lookup,
@@ -194,7 +212,49 @@ impl OdxScene {
             glyph_warnings,
             odf_slice_cache: Mutex::new(OdfSliceMetadataCache::default()),
             sh_render_mesh_cache: Mutex::new(HashMap::new()),
+            fixel_otsu_cache: Arc::new(std::sync::RwLock::new(cache)),
+            default_fixel_otsu,
         })
+    }
+
+    /// Return the Otsu threshold for the given metric + scope, computing
+    /// and memoizing it on first request. `metric = None` auto-resolves
+    /// in the odx-rs priority order (amplitude → afd → qa).
+    pub fn fixel_otsu(
+        &self,
+        metric: Option<&str>,
+        scope: OtsuScope,
+    ) -> anyhow::Result<FixelOtsu> {
+        // Fast path: if the caller's `metric` matches the eager default
+        // entry's resolved name, skip the lookup-then-write dance.
+        if let Some(entry) = self.default_fixel_otsu.as_ref() {
+            if scope == entry.scope
+                && (metric.is_none() || metric == Some(entry.metric_name.as_str()))
+            {
+                return Ok(entry.clone());
+            }
+        }
+        // Try the cache.
+        if let Some(name) = metric {
+            let key = (name.to_string(), scope);
+            if let Some(hit) = self.fixel_otsu_cache.read().ok().and_then(|c| c.get(&key).cloned()) {
+                return Ok(hit);
+            }
+        }
+        // Compute + memoize. For `metric = None` the resolved name isn't
+        // known until after the call, so we key by the resolved name.
+        let result = odx_rs::qc::compute_fixel_otsu(&self.dataset, metric, scope)?;
+        if let Ok(mut cache) = self.fixel_otsu_cache.write() {
+            cache.insert((result.metric_name.clone(), result.scope), result.clone());
+        }
+        Ok(result)
+    }
+
+    /// Eager default Otsu, computed at scene construction time from the
+    /// auto-resolved tracking metric and `AllFixels` scope. `None` when
+    /// the ODX has no usable DPF metric.
+    pub fn default_fixel_otsu(&self) -> Option<&FixelOtsu> {
+        self.default_fixel_otsu.as_ref()
     }
 
     /// Number of full-volume masked voxels.

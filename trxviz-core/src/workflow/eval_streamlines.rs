@@ -98,6 +98,23 @@ pub(crate) fn summarize_value(value: &WorkflowValue) -> String {
             c.dpv_names.len(),
             c.dpf_names.len()
         ),
+        WorkflowValue::VoxelMask(m) => format!("{} voxels", m.count()),
+        WorkflowValue::TrackingPlan(p) => {
+            let parts = [
+                p.seed_mask.as_ref().map(|_| "seed"),
+                p.limiting_mask.as_ref().map(|_| "limiting"),
+                p.roa_mask.as_ref().map(|_| "roa"),
+                p.term_mask.as_ref().map(|_| "term"),
+                p.no_end_mask.as_ref().map(|_| "no_end"),
+                p.post_filter.as_ref().map(|_| "post_filter"),
+            ];
+            let active: Vec<&str> = parts.iter().filter_map(|p| *p).collect();
+            if active.is_empty() {
+                "tracking plan (empty)".to_string()
+            } else {
+                format!("tracking plan ({})", active.join(", "))
+            }
+        }
     }
 }
 

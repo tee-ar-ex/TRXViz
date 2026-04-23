@@ -5,8 +5,8 @@ use crate::scene::LoadedGiftiSurface;
 
 use super::{
     EvaluatedValue, LoadedParcellation, NodeEvalState, SaveStreamlinePlan, SceneFramePlan,
-    StreamlineDisplayRuntime, WorkflowExecutionCache, WorkflowNode, WorkflowNodeUuid,
-    WorkflowResult,
+    StreamlineDisplayRuntime, WorkflowEvalMode, WorkflowExecutionCache, WorkflowNode,
+    WorkflowNodeUuid, WorkflowResult,
 };
 
 #[allow(dead_code)]
@@ -40,6 +40,9 @@ pub struct EvalCtx<'a, 'assets> {
     pub save_targets: &'a mut HashMap<WorkflowNodeUuid, SaveStreamlinePlan>,
     pub execution_cache: &'a mut WorkflowExecutionCache,
     pub node_state: &'a mut NodeEvalState,
+    /// Interactive = per-frame redraw (do not spend on heavy recompute);
+    /// Settled = user requested a run (OK to do heavy work).
+    pub eval_mode: WorkflowEvalMode,
 }
 
 impl EvalCtx<'_, '_> {

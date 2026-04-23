@@ -33,6 +33,8 @@ pub(crate) fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
         WorkflowJobKind::TubeGeometry => "tube geometry",
         WorkflowJobKind::BundleSurface => "bundle surface",
         WorkflowJobKind::BoundaryField => "boundary field",
+        WorkflowJobKind::Tractography => "tractography",
+        WorkflowJobKind::YehTractography => "yeh tractography",
     }
 }
 
@@ -649,6 +651,26 @@ impl crate::app::TrxVizApp {
                                     changed = true;
                                 }
                             }
+                            WorkflowJobOutput::Tractography { flow } => {
+                                let summary =
+                                    format!("{} streamlines", flow.selected_streamlines.len());
+                                self.workflow
+                                    .execution_cache
+                                    .tractography_results
+                                    .insert(node_uuid, CachedTractographyResult { fingerprint, flow });
+                                mark_expensive_success(record, fingerprint, summary);
+                                changed = true;
+                            }
+                            WorkflowJobOutput::YehTractography { flow } => {
+                                let summary =
+                                    format!("{} streamlines", flow.selected_streamlines.len());
+                                self.workflow
+                                    .execution_cache
+                                    .yeh_tractography_results
+                                    .insert(node_uuid, CachedTractographyResult { fingerprint, flow });
+                                mark_expensive_success(record, fingerprint, summary);
+                                changed = true;
+                            }
                         },
                         Err(error) => {
                             mark_expensive_failure(record, fingerprint, &error.to_string());
@@ -818,6 +840,72 @@ impl crate::app::TrxVizApp {
             }
         }
 
+        for plan in self
+            .workflow
+            .runtime
+            .scene_plan
+            .tractography_plans
+            .clone()
+        {
+            let node_uuid = plan.node_uuid;
+            let fingerprint = self
+                .workflow
+                .execution_cache
+                .node_runs
+                .get(&node_uuid)
+                .and_then(|r| r.current_fingerprint)
+                .unwrap_or(0);
+            if should_queue_expensive_job(
+                self.workflow.execution_cache.node_runs.get(&node_uuid),
+                fingerprint,
+                &self.workflow.jobs_in_flight,
+                node_uuid,
+            ) {
+                self.queue_workflow_job(
+                    node_uuid,
+                    fingerprint,
+                    WorkflowJobKind::Tractography,
+                    WorkflowJobPayload::Tractography {
+                        plan,
+                        device: self.gpu_device.clone(),
+                        queue: self.gpu_queue.clone(),
+                    },
+                );
+                queued_any = true;
+            }
+        }
+
+        for plan in self
+            .workflow
+            .runtime
+            .scene_plan
+            .yeh_tractography_plans
+            .clone()
+        {
+            let node_uuid = plan.node_uuid;
+            let fingerprint = self
+                .workflow
+                .execution_cache
+                .node_runs
+                .get(&node_uuid)
+                .and_then(|r| r.current_fingerprint)
+                .unwrap_or(0);
+            if should_queue_expensive_job(
+                self.workflow.execution_cache.node_runs.get(&node_uuid),
+                fingerprint,
+                &self.workflow.jobs_in_flight,
+                node_uuid,
+            ) {
+                self.queue_workflow_job(
+                    node_uuid,
+                    fingerprint,
+                    WorkflowJobKind::YehTractography,
+                    WorkflowJobPayload::YehTractography { plan },
+                );
+                queued_any = true;
+            }
+        }
+
         for draw in self.workflow.runtime.scene_plan.bundle_draws.clone() {
             let boundary_field = draw.boundary_field_node_uuid.and_then(|uuid| {
                 self.workflow
@@ -935,6 +1023,11 @@ impl crate::app::TrxVizApp {
             return;
         };
 
+        if self.gpu_device.is_none() {
+            self.gpu_device = Some(rs.device.clone());
+            self.gpu_queue = Some(rs.queue.clone());
+        }
+
         let mut renderer = rs.renderer.write();
 
         if renderer
@@ -986,6 +1079,14 @@ impl crate::app::TrxVizApp {
             .bundle_draws
             .iter()
             .map(|draw| draw.draw_id)
+            .chain(
+                self.workflow
+                    .runtime
+                    .scene_plan
+                    .voxel_mask_mesh_draws
+                    .iter()
+                    .map(|draw| draw.draw_id),
+            )
             .collect();
         let workflow_ids: HashSet<FileId> = self
             .workflow
@@ -1212,6 +1313,20 @@ impl crate::app::TrxVizApp {
                     mesh_resources.clear_bundle_mesh(draw.draw_id);
                 } else {
                     mesh_resources.set_bundle_meshes(draw.draw_id, &rs.device, &cache.meshes);
+                }
+            }
+
+            // Voxel-mask iso-surface meshes reuse the same bundle-mesh pipeline.
+            for draw in &self.workflow.runtime.scene_plan.voxel_mask_mesh_draws {
+                if let Some(cache) = self
+                    .workflow
+                    .execution_cache
+                    .voxel_mask_mesh_cache
+                    .get(&draw.node_uuid)
+                    .filter(|cache| cache.fingerprint == draw.fingerprint)
+                {
+                    let one = [(cache.mesh.clone(), draw.label.clone())];
+                    mesh_resources.set_bundle_meshes(draw.draw_id, &rs.device, &one);
                 }
             }
 

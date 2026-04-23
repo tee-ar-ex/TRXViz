@@ -4,6 +4,7 @@
 //! rendering behavior and workflow execution stay aligned across both surfaces.
 
 pub mod asset_loader;
+pub mod gpu;
 pub mod data;
 /// Structured error types for the workflow evaluator and persistence layer.
 pub mod error;

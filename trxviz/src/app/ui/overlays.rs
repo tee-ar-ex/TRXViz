@@ -457,6 +457,131 @@ impl crate::app::TrxVizApp {
         }
     }
 
+    pub(super) fn draw_voxel_mask_mesh_intersections(
+        &self,
+        ui: &egui::Ui,
+        rect: egui::Rect,
+        axis_index: usize,
+        view_proj: glam::Mat4,
+        slice_pos: f32,
+    ) {
+        if self
+            .workflow
+            .runtime
+            .scene_plan
+            .voxel_mask_mesh_draws
+            .is_empty()
+        {
+            return;
+        }
+
+        let painter = ui.painter_at(rect);
+        let eps = 1e-4f32;
+
+        let project = |world: glam::Vec3| -> egui::Pos2 {
+            let clip = view_proj * world.extend(1.0);
+            let ndc_x = clip.x / clip.w;
+            let ndc_y = clip.y / clip.w;
+            egui::pos2(
+                rect.left() + (ndc_x + 1.0) * 0.5 * rect.width(),
+                rect.top() + (1.0 - ndc_y) * 0.5 * rect.height(),
+            )
+        };
+
+        for draw in &self.workflow.runtime.scene_plan.voxel_mask_mesh_draws {
+            if draw.opacity <= 0.01 {
+                continue;
+            }
+            let Some(cache) = self
+                .workflow
+                .execution_cache
+                .voxel_mask_mesh_cache
+                .get(&draw.node_uuid)
+                .filter(|c| c.fingerprint == draw.fingerprint)
+            else {
+                continue;
+            };
+            let mesh = &cache.mesh;
+            if mesh.vertices.is_empty() || mesh.indices.is_empty() {
+                continue;
+            }
+
+            let mut bbox_min = glam::Vec3::splat(f32::INFINITY);
+            let mut bbox_max = glam::Vec3::splat(f32::NEG_INFINITY);
+            for vertex in &mesh.vertices {
+                let pos = glam::Vec3::from(vertex.position);
+                bbox_min = bbox_min.min(pos);
+                bbox_max = bbox_max.max(pos);
+            }
+            let (smin, smax) = match axis_index {
+                0 => (bbox_min.z, bbox_max.z),
+                1 => (bbox_min.y, bbox_max.y),
+                _ => (bbox_min.x, bbox_max.x),
+            };
+            if slice_pos < smin - eps || slice_pos > smax + eps {
+                continue;
+            }
+
+            let color = egui::Color32::from_rgba_unmultiplied(
+                (draw.color[0].clamp(0.0, 1.0) * 255.0) as u8,
+                (draw.color[1].clamp(0.0, 1.0) * 255.0) as u8,
+                (draw.color[2].clamp(0.0, 1.0) * 255.0) as u8,
+                (draw.opacity.clamp(0.0, 1.0) * 255.0) as u8,
+            );
+            let stroke = egui::Stroke::new(1.5, color);
+
+            for tri in mesh.indices.chunks_exact(3) {
+                let a = glam::Vec3::from(mesh.vertices[tri[0] as usize].position);
+                let b = glam::Vec3::from(mesh.vertices[tri[1] as usize].position);
+                let c = glam::Vec3::from(mesh.vertices[tri[2] as usize].position);
+
+                let tmin = tri_axis_value(a, axis_index)
+                    .min(tri_axis_value(b, axis_index))
+                    .min(tri_axis_value(c, axis_index));
+                let tmax = tri_axis_value(a, axis_index)
+                    .max(tri_axis_value(b, axis_index))
+                    .max(tri_axis_value(c, axis_index));
+                if slice_pos < tmin - eps || slice_pos > tmax + eps {
+                    continue;
+                }
+
+                let mut pts = Vec::with_capacity(3);
+                for (p0, p1) in [(a, b), (b, c), (c, a)] {
+                    if let Some(p) = intersect_edge_with_slice(p0, p1, axis_index, slice_pos, eps)
+                    {
+                        if !pts
+                            .iter()
+                            .any(|q: &glam::Vec3| (*q - p).length_squared() <= eps * eps)
+                        {
+                            pts.push(p);
+                        }
+                    }
+                }
+                if pts.len() < 2 {
+                    continue;
+                }
+                let (p0, p1) = if pts.len() == 2 {
+                    (pts[0], pts[1])
+                } else {
+                    let mut best = (pts[0], pts[1]);
+                    let mut best_d2 = (pts[1] - pts[0]).length_squared();
+                    for i in 0..pts.len() {
+                        for j in (i + 1)..pts.len() {
+                            let d2 = (pts[j] - pts[i]).length_squared();
+                            if d2 > best_d2 {
+                                best = (pts[i], pts[j]);
+                                best_d2 = d2;
+                            }
+                        }
+                    }
+                    best
+                };
+
+                painter.line_segment([project(p0), project(p1)], stroke);
+            }
+        }
+    }
+
     pub(super) fn draw_parcellation_intersections(
         &self,
         ui: &egui::Ui,

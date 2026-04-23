@@ -164,6 +164,28 @@ pub(crate) fn group_name_color(name: &str) -> Option<[f32; 4]> {
 }
 
 impl TrxGpuData {
+    /// Build from raw positions and offsets only (no per-vertex/streamline metadata).
+    /// Used to package synthetic tractography output into the standard data type.
+    pub fn from_positions_and_offsets(
+        positions: Vec<[f32; 3]>,
+        offsets: Vec<u32>,
+    ) -> Self {
+        let nb_streamlines = offsets.len().saturating_sub(1);
+        let nb_vertices = positions.len();
+        Self::from_components(
+            positions,
+            offsets,
+            nb_streamlines,
+            nb_vertices,
+            ExtractedMetadata {
+                dpv_data: Vec::new(),
+                dps_data: Vec::new(),
+                groups: Vec::new(),
+                group_colors: Vec::new(),
+            },
+        )
+    }
+
     pub fn from_tractogram(tractogram: &Tractogram) -> anyhow::Result<Self> {
         let positions = tractogram.positions().to_vec();
         let nb_vertices = positions.len();

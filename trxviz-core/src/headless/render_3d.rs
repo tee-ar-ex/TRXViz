@@ -180,6 +180,7 @@ pub(super) fn render_scene3d_to_png(
             1,
             render_data.fixel_3d_line_width,
             render_data.fixel_3d_opacity,
+            render_data.fixel_3d_opacity_gate,
             lighting,
             render_3d,
             fog_near,

@@ -2,6 +2,10 @@
 
 pub use crate::error::{WorkflowError, WorkflowResult};
 
+pub(super) mod cpu_tractography;
+pub(super) mod cpu_yeh;
+pub(super) mod tip;
+pub(super) mod tracking_filters;
 mod eval_inputs;
 mod eval_streamlines;
 mod eval_surface;
@@ -67,10 +71,14 @@ pub use ops::{
     Fixel2DDisplayOp, Fixel3DDisplayOp, GroupSelectOp, LimitStreamlinesOp, MergeOp,
     OdfGlyphRendererOp, OdxFixelScalarSelectOp, OdxSourceOp, OdxVolumeSelectOp, ParcelCropOp,
     ParcelEndOp, ParcelRoaOp, ParcelRoiOp, ParcelSelectOp, ParcelSurfaceBuildOp,
-    ParcellationDisplayOp, ParcellationSourceOp, RandomSubsetOp, RemoveDuplicatesOp,
-    SaveStreamlinesOp, SphereQueryOp, StreamlineDisplayOp, StreamlineSourceOp, SurfaceDepthQueryOp,
+    AddEndRegionOp, AddLimitingOp, AddNoEndOp, AddRoaOp, AddRoiOp, AddTermOp,
+    ParcellationDisplayOp, ParcellationSourceOp, PrepareHausdorffPlanOp, PrepareSimplePlanOp,
+    RandomSubsetOp, RemoveDuplicatesOp,
+    RoiFromParcelOp, RoiFromShapeOp, RoiFromVolumeOp, RoiShape,
+    SaveStreamlinesOp, SphereQueryOp, StreamlineDisplayOp, StreamlineSourceOp, SurfaceDepthQueryOp, TipPruneOp,
     SurfaceDisplayOp, SurfaceOverlayStackOp, SurfaceProjectionDensityOp,
-    SurfaceProjectionMeanDpsOp, SurfaceSourceOp, UniformColorOp, VolumeDisplayOp,
-    VolumeScalarsDisplayOp, VolumeSourceOp, WorkflowNodeKind,
+    SurfaceProjectionMeanDpsOp, SurfaceSourceOp, TractographyOp, UniformColorOp, VolumeDisplayOp,
+    VolumeScalarsDisplayOp, VolumeSourceOp, VoxelMaskDisplayOp, WorkflowNodeKind,
+    YehTractographyOp,
 };
 pub(crate) use types::{EvaluatedValue, WorkflowValue};

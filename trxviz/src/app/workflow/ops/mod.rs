@@ -18,11 +18,21 @@ pub(crate) struct NodeEditorContext<'a> {
     pub(crate) odx_selector_names: Option<&'a OdxSelectorNames>,
     pub(crate) sh_detail_limit: Option<u32>,
     pub(crate) save_ready: bool,
+    /// Names of this node's op params that a wired `TrackingPlan` is
+    /// overriding on the most recent evaluation. Editor panels should
+    /// disable the corresponding sliders so the user can see which values
+    /// the tracker will actually use.
+    pub(crate) overridden_fields: &'a [String],
+    /// For each overridden numeric field, the effective value from the plan.
+    /// Editor panels bind this to the greyed-out slider so the user sees
+    /// the plan's number instead of the op's own.
+    pub(crate) overridden_values: &'a std::collections::BTreeMap<String, f32>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct NodeEditorResult {
     pub(crate) save_now: bool,
+    pub(crate) run_expensive_requested: bool,
 }
 
 pub(crate) fn edit_node_op(
@@ -98,6 +108,25 @@ pub(crate) fn edit_node_op(
         }
         workflow::WorkflowNodeKind::UniformColor { color } => {
             ui.color_edit_button_rgba_unmultiplied(color);
+        }
+        workflow::WorkflowNodeKind::TipPrune {
+            voxel_size_mm,
+            iterations,
+            min_support,
+            max_unsupported_fraction,
+        } => {
+            ui.add(
+                egui::Slider::new(voxel_size_mm, 0.25..=4.0)
+                    .text("Voxel size (mm)")
+                    .logarithmic(true),
+            );
+            ui.add(egui::Slider::new(iterations, 1..=64).text("Iterations"));
+            ui.add(egui::DragValue::new(min_support).range(0..=10).prefix("Min support "));
+            ui.add(
+                egui::Slider::new(max_unsupported_fraction, 0.0..=1.0)
+                    .text("Max unsupported fraction"),
+            );
+            ui.small("0.0 = strict DSI-Studio parity; 1.0 = passthrough");
         }
         workflow::WorkflowNodeKind::RemoveDuplicates { params } => {
             egui::ComboBox::from_id_salt(format!("duplicate_mode_{}", node_uuid.0))
@@ -583,6 +612,8 @@ pub(crate) fn edit_node_op(
             opacity,
             offset_from_slice,
             visible,
+            auto_gate_from_otsu,
+            opacity_gate,
         } => {
             ui.checkbox(visible, "Visible");
             ui.add(egui::Slider::new(line_width, 0.001..=0.05).text("Line width"));
@@ -593,6 +624,7 @@ pub(crate) fn edit_node_op(
                     .speed(0.25)
                     .prefix("Slice offset "),
             );
+            fixel_opacity_gate_editor(ui, auto_gate_from_otsu, opacity_gate);
         }
         workflow::WorkflowNodeKind::Fixel2DDisplay {
             line_width,
@@ -600,6 +632,8 @@ pub(crate) fn edit_node_op(
             slab_thickness_mm,
             length_scale,
             visible,
+            auto_gate_from_otsu,
+            opacity_gate,
         } => {
             ui.checkbox(visible, "Visible");
             ui.add(egui::Slider::new(line_width, 0.001..=0.05).text("Line width"));
@@ -608,6 +642,7 @@ pub(crate) fn edit_node_op(
             ui.add(
                 egui::Slider::new(&mut slab_thickness_mm.0, 0.1..=20.0).text("Slab thickness (mm)"),
             );
+            fixel_opacity_gate_editor(ui, auto_gate_from_otsu, opacity_gate);
         }
         workflow::WorkflowNodeKind::OdxFixelScalarSelect { dpf_name } => {
             ui.label("DPF");
@@ -687,12 +722,301 @@ pub(crate) fn edit_node_op(
                 });
             }
         }
+        workflow::WorkflowNodeKind::RoiFromParcel { labels } => {
+            ui.label("Parcel labels (comma-separated IDs):");
+            edit_parcel_id_set(ui, labels);
+        }
+        workflow::WorkflowNodeKind::RoiFromVolume { threshold } => {
+            ui.add(egui::Slider::new(threshold, 0.0..=1.0).text("Threshold"));
+        }
+        workflow::WorkflowNodeKind::RoiFromShape {
+            center_ras,
+            radius_or_half_extent_mm,
+            shape,
+        } => {
+            ui.label("Center (RAS+ mm)");
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut center_ras[0]).speed(0.5).prefix("X "));
+                ui.add(egui::DragValue::new(&mut center_ras[1]).speed(0.5).prefix("Y "));
+                ui.add(egui::DragValue::new(&mut center_ras[2]).speed(0.5).prefix("Z "));
+            });
+            ui.add(
+                egui::DragValue::new(&mut radius_or_half_extent_mm.0)
+                    .speed(0.5)
+                    .prefix("Radius/half-extent "),
+            );
+            egui::ComboBox::from_id_salt(("roi_shape", node_uuid))
+                .selected_text(match shape {
+                    workflow::RoiShape::Sphere => "Sphere",
+                    workflow::RoiShape::Box => "Box",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(shape, workflow::RoiShape::Sphere, "Sphere");
+                    ui.selectable_value(shape, workflow::RoiShape::Box, "Box");
+                });
+        }
+        workflow::WorkflowNodeKind::Tractography {
+            step_size_mm,
+            max_angle_deg,
+            min_len_mm,
+            max_len_mm,
+            fixel_threshold,
+            relative_peak_threshold,
+            seeds_per_voxel,
+            max_points,
+            rng_seed,
+        } => {
+            ui.add(egui::Slider::new(step_size_mm, 0.1..=2.0).text("Step size (mm)"));
+            ui.add(egui::Slider::new(max_angle_deg, 10.0..=90.0).text("Max angle (°)"));
+            ui.add(egui::Slider::new(min_len_mm, 5.0..=100.0).text("Min length (mm)"));
+            ui.add(egui::Slider::new(max_len_mm, 20.0..=500.0).text("Max length (mm)"));
+            ui.add(egui::Slider::new(fixel_threshold, 0.0..=0.5).text("Fixel threshold"));
+            if let Some(&v) = ctx.overridden_values.get("fixel_otsu") {
+                ui.small(format!("plan fixel_otsu = {:.4}", v));
+            }
+            ui.add(
+                egui::Slider::new(relative_peak_threshold, 0.0..=1.0)
+                    .text("Relative peak threshold"),
+            );
+            ui.add(
+                egui::Slider::new(seeds_per_voxel, 1..=10).text("Seeds per voxel"),
+            );
+            ui.add(egui::Slider::new(max_points, 50..=2000).text("Max points"));
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(rng_seed).speed(1.0).prefix("RNG seed "));
+                if ui.button("Randomize").clicked() {
+                    *rng_seed = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos() as u64)
+                        .unwrap_or(42);
+                    result.run_expensive_requested = true;
+                }
+            });
+            if ui.button("Run Tractography").clicked() {
+                result.run_expensive_requested = true;
+            }
+        }
+        workflow::WorkflowNodeKind::YehTractography {
+            step_size_mm,
+            max_angle_deg,
+            min_len_mm,
+            max_len_mm,
+            fixel_threshold,
+            smooth_fraction,
+            max_points,
+            target_streamlines,
+            max_seed_attempts,
+            rng_seed,
+        } => {
+            if !ctx.overridden_fields.is_empty() {
+                ui.colored_label(
+                    egui::Color32::from_rgb(220, 180, 96),
+                    "⚠ Greyed sliders are overridden by the wired TrackingPlan; \
+                     their displayed value comes from the plan.",
+                );
+            }
+            // For each slider: if the plan overrides this field, show the
+            // plan's value in a greyed-out slider; otherwise show the op's
+            // own editable slider.
+            let override_slider = |ui: &mut egui::Ui,
+                                   field: &str,
+                                   value_if_live: &mut f32,
+                                   range: std::ops::RangeInclusive<f32>,
+                                   text: &str| {
+                if let Some(&plan_value) = ctx.overridden_values.get(field) {
+                    let mut displayed = plan_value;
+                    // Extend the slider range if the plan's value falls
+                    // outside the op's slider bounds, so the thumb is
+                    // visible rather than clamped to an endpoint.
+                    let lo = range.start().min(plan_value);
+                    let hi = range.end().max(plan_value);
+                    ui.add_enabled(
+                        false,
+                        egui::Slider::new(&mut displayed, lo..=hi).text(text),
+                    );
+                } else {
+                    ui.add(egui::Slider::new(value_if_live, range).text(text));
+                }
+            };
+            override_slider(ui, "step_size_mm", step_size_mm, 0.0..=2.0, "Step size mm (0 = random)");
+            override_slider(ui, "max_angle_deg", max_angle_deg, 0.0..=90.0, "Max angle ° (0 = random)");
+            override_slider(ui, "min_len_mm", min_len_mm, 5.0..=100.0, "Min length (mm)");
+            override_slider(ui, "max_len_mm", max_len_mm, 20.0..=500.0, "Max length (mm)");
+            override_slider(ui, "fixel_threshold", fixel_threshold, 0.0..=0.5, "Fixel threshold (0 = random)");
+            if let Some(&v) = ctx.overridden_values.get("fixel_otsu") {
+                ui.small(format!(
+                    "plan fixel_otsu = {:.4} (random threshold centered on 0.6·this)",
+                    v
+                ));
+            }
+            override_slider(ui, "smooth_fraction", smooth_fraction, 0.0..=1.0, "Smoothing (1 = random)");
+            ui.add(egui::Slider::new(max_points, 50..=2000).text("Max points per streamline"));
+            ui.add(
+                egui::Slider::new(target_streamlines, 1_000..=1_000_000)
+                    .text("Target streamlines"),
+            );
+            ui.add(
+                egui::Slider::new(max_seed_attempts, 100_000..=10_000_000)
+                    .text("Max seed attempts"),
+            );
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(rng_seed).speed(1.0).prefix("RNG seed "));
+                if ui.button("Randomize").clicked() {
+                    *rng_seed = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos() as u64)
+                        .unwrap_or(42);
+                    result.run_expensive_requested = true;
+                }
+            });
+            if ui.button("Run Yeh Tracking").clicked() {
+                result.run_expensive_requested = true;
+            }
+        }
+        workflow::WorkflowNodeKind::VoxelMaskDisplay {
+            color,
+            opacity,
+            smooth_sigma,
+            min_component_volume_mm3,
+        } => {
+            ui.horizontal(|ui| {
+                ui.label("Color");
+                let mut rgb = [color[0], color[1], color[2]];
+                if ui.color_edit_button_rgb(&mut rgb).changed() {
+                    color[0] = rgb[0];
+                    color[1] = rgb[1];
+                    color[2] = rgb[2];
+                }
+            });
+            ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
+            ui.add(egui::Slider::new(smooth_sigma, 0.0..=3.0).text("Smooth σ (voxels)"));
+            ui.add(
+                egui::Slider::new(&mut min_component_volume_mm3.0, 0.0..=1000.0)
+                    .text("Min component vol (mm³)"),
+            );
+        }
+        workflow::WorkflowNodeKind::PrepareSimplePlan {
+            override_step,
+            step_size_mm,
+            override_angle,
+            max_angle_deg,
+            override_min_len,
+            min_len_mm,
+            override_max_len,
+            max_len_mm,
+            override_fixel_threshold,
+            fixel_threshold,
+            override_smooth,
+            smooth_fraction,
+            override_fixel_otsu,
+            fixel_otsu,
+        } => {
+            ui.small("Each override, when enabled, replaces the tracker's slider value.");
+            let row = |ui: &mut egui::Ui,
+                           enabled: &mut bool,
+                           value: &mut f32,
+                           range: std::ops::RangeInclusive<f32>,
+                           label: &str| {
+                ui.horizontal(|ui| {
+                    ui.checkbox(enabled, "");
+                    ui.add_enabled(*enabled, egui::Slider::new(value, range).text(label));
+                });
+            };
+            row(ui, override_step, step_size_mm, 0.25..=2.0, "Step size (mm)");
+            row(ui, override_angle, max_angle_deg, 30.0..=90.0, "Max angle (°)");
+            row(ui, override_min_len, min_len_mm, 5.0..=100.0, "Min length (mm)");
+            row(ui, override_max_len, max_len_mm, 20.0..=500.0, "Max length (mm)");
+            row(ui, override_fixel_threshold, fixel_threshold, 0.0..=0.5, "Fixel threshold");
+            row(ui, override_smooth, smooth_fraction, 0.0..=0.95, "Smoothing");
+            row(ui, override_fixel_otsu, fixel_otsu, 0.0..=1.0, "Fixel Otsu");
+        }
+        workflow::WorkflowNodeKind::PrepareHausdorffPlan {
+            tolerance_mm,
+            seed_tolerance_mm,
+            tracking_metric,
+            otsu_scope,
+            seed_fixel_otsu_factor,
+            not_end_fixel_otsu_factor,
+            max_reference_points,
+        } => {
+            use trxviz_core::data::odx_data::OtsuScope;
+            ui.add(egui::Slider::new(tolerance_mm, 0.5..=20.0).text("Tolerance (mm)"));
+            ui.small(
+                "DSI-Studio tolerance: limiting-mask dilation, post-filter distance, \
+                and ±2·tol on min/max length.",
+            );
+            ui.add(
+                egui::Slider::new(seed_tolerance_mm, 0.0..=*tolerance_mm)
+                    .text("Seed tolerance (mm)"),
+            );
+            ui.small("Small seed tolerance keeps seeds near the reference bundle.");
+            ui.horizontal(|ui| {
+                ui.label("Metric");
+                let current = tracking_metric.clone().unwrap_or_else(|| "auto".into());
+                egui::ComboBox::from_id_salt(("hausdorff_metric", node_uuid))
+                    .selected_text(&current)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(tracking_metric, None, "auto");
+                        if let Some(names) = ctx.odx_selector_names {
+                            for name in &names.dpf_names {
+                                ui.selectable_value(
+                                    tracking_metric,
+                                    Some(name.clone()),
+                                    name,
+                                );
+                            }
+                        }
+                    });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Otsu scope");
+                ui.selectable_value(otsu_scope, OtsuScope::AllFixels, "All fixels");
+                ui.selectable_value(otsu_scope, OtsuScope::PrimaryPeak, "Primary peak");
+            });
+            ui.add(
+                egui::Slider::new(seed_fixel_otsu_factor, 0.0..=2.0)
+                    .text("Seed factor × Otsu"),
+            );
+            ui.add(
+                egui::Slider::new(not_end_fixel_otsu_factor, 0.0..=2.0)
+                    .text("No-end factor × Otsu"),
+            );
+            ui.add(
+                egui::Slider::new(max_reference_points, 1_000..=50_000)
+                    .text("Max reference points"),
+            );
+        }
         _ => {
             ui.small("This node has no editable parameters yet.");
         }
     }
 
     result
+}
+
+/// Shared edit widget for `auto_gate_from_otsu` + `opacity_gate` on fixel
+/// display ops. When auto is on, the gate is hidden (the scene's
+/// `default_fixel_otsu()` drives it at eval time); when off, expose the
+/// four gate parameters explicitly.
+fn fixel_opacity_gate_editor(
+    ui: &mut egui::Ui,
+    auto: &mut bool,
+    gate: &mut workflow::OpacityGate,
+) {
+    ui.separator();
+    ui.checkbox(auto, "Auto-gate from tracking Otsu");
+    if !*auto {
+        ui.add(
+            egui::Slider::new(&mut gate.range.0, 0.0..=1.0).text("Gate range min"),
+        );
+        ui.add(
+            egui::Slider::new(&mut gate.range.1, 0.0..=1.0).text("Gate range max"),
+        );
+        ui.add(egui::Slider::new(&mut gate.below, 0.0..=1.0).text("Alpha below"));
+        ui.add(egui::Slider::new(&mut gate.above, 0.0..=1.0).text("Alpha above"));
+    } else {
+        ui.small("Sub-threshold fixels ghost to 10 % alpha.");
+    }
 }
 
 fn edit_field_name<T>(ui: &mut egui::Ui, field: &mut T)

@@ -636,6 +636,7 @@ fn evaluate_streamline_op(
         save_targets: &mut save_targets,
         execution_cache: &mut execution_cache,
         node_state: &mut node_state,
+        eval_mode: crate::workflow::WorkflowEvalMode::Settled,
     };
     let outputs = op.evaluate(&mut ctx).expect("streamline op output");
     match outputs.into_iter().next().expect("first output").value {

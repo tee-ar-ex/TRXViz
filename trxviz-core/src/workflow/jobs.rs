@@ -21,6 +21,8 @@ pub fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
         WorkflowJobKind::TubeGeometry => "tube geometry",
         WorkflowJobKind::BundleSurface => "bundle surface",
         WorkflowJobKind::BoundaryField => "boundary field",
+        WorkflowJobKind::Tractography => "tractography",
+        WorkflowJobKind::YehTractography => "yeh tractography",
     }
 }
 
@@ -129,6 +131,18 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
                 boundary_field.as_deref(),
             ),
         }),
+        WorkflowJobPayload::Tractography { plan, device, queue } => {
+            let flow = if let (Some(device), Some(queue)) = (device, queue) {
+                crate::gpu::tractography::run_gpu_tractography(&plan, &device, &queue)?
+            } else {
+                super::cpu_tractography::run_cpu_tractography(&plan)?
+            };
+            Ok(WorkflowJobOutput::Tractography { flow })
+        }
+        WorkflowJobPayload::YehTractography { plan } => {
+            let flow = super::cpu_yeh::run_cpu_yeh(&plan)?;
+            Ok(WorkflowJobOutput::YehTractography { flow })
+        }
         WorkflowJobPayload::BoundaryField { plan } => {
             let subset = materialize_flow_gpu(plan.flow);
             let selected = (0..subset.nb_streamlines as u32)

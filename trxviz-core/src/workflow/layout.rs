@@ -494,6 +494,8 @@ fn port_kind_label(port: super::PortKind) -> &'static str {
         super::PortKind::FixelScalars => "Fixel Scalars",
         super::PortKind::OdfField => "ODF Field",
         super::PortKind::OdxCatalog => "ODX Catalog",
+        super::PortKind::VoxelMask => "Voxel Mask",
+        super::PortKind::TrackingPlan => "Tracking Plan",
     }
 }
 
@@ -558,6 +560,8 @@ mod tests {
                     opacity: 1.0,
                     offset_from_slice: 0.0,
                     visible: true,
+                    auto_gate_from_otsu: true,
+                    opacity_gate: crate::workflow::OpacityGate::default(),
                 },
             )
             .node,

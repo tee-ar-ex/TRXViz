@@ -33,6 +33,10 @@ pub struct TrxVizApp {
     /// Slice-local ODX glyph amplitude normalization used by the shader LUT path.
     pub(crate) odx_amp_norm: f32,
     pub(crate) max_storage_buffer_binding_size: Option<usize>,
+    /// Cloned wgpu device for background GPU compute (tractography, etc.).
+    pub(crate) gpu_device: Option<wgpu::Device>,
+    /// Cloned wgpu queue for background GPU compute.
+    pub(crate) gpu_queue: Option<wgpu::Queue>,
 }
 
 impl TrxVizApp {
@@ -323,6 +327,8 @@ impl TrxVizApp {
             merge_streamlines_dialog: MergeStreamlinesDialogState::default(),
             odx_amp_norm: 1.0,
             max_storage_buffer_binding_size: None,
+            gpu_device: None,
+            gpu_queue: None,
         };
 
         if cc.wgpu_render_state.is_some() {

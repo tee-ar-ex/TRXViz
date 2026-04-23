@@ -1,9 +1,9 @@
 use crate::units::Millimeters;
 
 use super::super::{
-    EvalCtx, FixelDrawPlan, PortKind, WorkflowNodeKind, WorkflowOp, default_fixel_length_scale,
-    default_fixel_line_width, default_fixel_slab_thickness_mm, default_full_opacity,
-    expect_fixels_input,
+    EvalCtx, FixelDrawPlan, OpacityGate, PortKind, WorkflowNodeKind, WorkflowOp,
+    default_fixel_length_scale, default_fixel_line_width, default_fixel_slab_thickness_mm,
+    default_full_opacity, expect_fixels_input,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -13,6 +13,12 @@ pub struct Fixel3DDisplayOp {
     pub opacity: f32,
     pub offset_from_slice: f32,
     pub visible: bool,
+    /// When `true`, the per-fixel opacity gate auto-derives from the
+    /// scene's `default_fixel_otsu()` (fixels below the tracking Otsu
+    /// band are ghosted at 10 % alpha). Uncheck to use `opacity_gate`
+    /// verbatim.
+    pub auto_gate_from_otsu: bool,
+    pub opacity_gate: OpacityGate,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -22,6 +28,8 @@ pub struct Fixel2DDisplayOp {
     pub slab_thickness_mm: Millimeters,
     pub length_scale: f32,
     pub visible: bool,
+    pub auto_gate_from_otsu: bool,
+    pub opacity_gate: OpacityGate,
 }
 
 impl Default for Fixel3DDisplayOp {
@@ -32,6 +40,8 @@ impl Default for Fixel3DDisplayOp {
             opacity: default_full_opacity(),
             offset_from_slice: 0.0,
             visible: true,
+            auto_gate_from_otsu: true,
+            opacity_gate: OpacityGate::default(),
         }
     }
 }
@@ -44,7 +54,33 @@ impl Default for Fixel2DDisplayOp {
             slab_thickness_mm: default_fixel_slab_thickness_mm(),
             length_scale: default_fixel_length_scale(),
             visible: true,
+            auto_gate_from_otsu: true,
+            opacity_gate: OpacityGate::default(),
         }
+    }
+}
+
+/// Compute the effective opacity gate for a fixel-family display op.
+/// When `auto` is true and the scene exposes a default Otsu, the gate
+/// ghosts sub-threshold fixels at `below = 0.1` alpha; above the
+/// 0.7·otsu mark fixels are full alpha. When `auto` is false the user's
+/// explicit `opacity_gate` is used verbatim.
+fn resolve_opacity_gate(
+    auto: bool,
+    user: OpacityGate,
+    scene: &crate::data::odx_data::OdxScene,
+) -> OpacityGate {
+    if !auto {
+        return user;
+    }
+    let Some(otsu) = scene.default_fixel_otsu() else {
+        // No tracking metric available → fall back to pass-through.
+        return OpacityGate::default();
+    };
+    OpacityGate {
+        range: (0.5 * otsu.threshold, 0.7 * otsu.threshold),
+        below: 0.1,
+        above: 1.0,
     }
 }
 
@@ -72,6 +108,8 @@ impl WorkflowOp for Fixel3DDisplayOp {
         let field = expect_fixels_input(ctx.inputs, self.title())?;
         let colormap_code = field.colormap_code;
         let scalar_range = field.scalar_range;
+        let opacity_gate =
+            resolve_opacity_gate(self.auto_gate_from_otsu, self.opacity_gate, &field.scene);
         ctx.scene_plan.fixel_3d_draws.push(FixelDrawPlan {
             node_uuid: ctx.node.uuid,
             field,
@@ -83,6 +121,7 @@ impl WorkflowOp for Fixel3DDisplayOp {
             visible: self.visible,
             colormap_code,
             scalar_range,
+            opacity_gate,
         });
         Ok(Vec::new())
     }
@@ -112,6 +151,8 @@ impl WorkflowOp for Fixel2DDisplayOp {
         let field = expect_fixels_input(ctx.inputs, self.title())?;
         let colormap_code = field.colormap_code;
         let scalar_range = field.scalar_range;
+        let opacity_gate =
+            resolve_opacity_gate(self.auto_gate_from_otsu, self.opacity_gate, &field.scene);
         ctx.scene_plan.fixel_2d_draws.push(FixelDrawPlan {
             node_uuid: ctx.node.uuid,
             field,
@@ -123,6 +164,7 @@ impl WorkflowOp for Fixel2DDisplayOp {
             visible: self.visible,
             colormap_code,
             scalar_range,
+            opacity_gate,
         });
         Ok(Vec::new())
     }
@@ -136,6 +178,8 @@ impl From<Fixel3DDisplayOp> for WorkflowNodeKind {
             opacity: op.opacity,
             offset_from_slice: op.offset_from_slice,
             visible: op.visible,
+            auto_gate_from_otsu: op.auto_gate_from_otsu,
+            opacity_gate: op.opacity_gate,
         }
     }
 }
@@ -148,6 +192,8 @@ impl From<Fixel2DDisplayOp> for WorkflowNodeKind {
             slab_thickness_mm: op.slab_thickness_mm,
             length_scale: op.length_scale,
             visible: op.visible,
+            auto_gate_from_otsu: op.auto_gate_from_otsu,
+            opacity_gate: op.opacity_gate,
         }
     }
 }

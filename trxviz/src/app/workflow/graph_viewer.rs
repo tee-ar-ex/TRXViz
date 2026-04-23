@@ -253,7 +253,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 port,
             ));
             // Reserve space so the pin circle doesn't overlap the trailing label glyphs.
-            ui.add_space(10.0);
+            ui.add_space(18.0);
         });
         pin_info_for_port(port)
     }
@@ -445,6 +445,13 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 snarl,
                 pos,
                 RemoveDuplicatesOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                TipPruneOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(ui, snarl, pos, MergeOp.into(), measured_node_sizes);
@@ -653,6 +660,107 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 measured_node_sizes,
             );
         });
+
+        ui.menu_button("Tractography", |ui| {
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                TractographyOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                YehTractographyOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                RoiFromParcelOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                RoiFromVolumeOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                RoiFromShapeOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                PrepareHausdorffPlanOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                PrepareSimplePlanOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                AddRoiOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                AddRoaOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                AddEndRegionOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                AddNoEndOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                AddLimitingOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                AddTermOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                VoxelMaskDisplayOp::default().into(),
+                measured_node_sizes,
+            );
+        });
     }
 
     fn current_transform(&mut self, to_global: &mut TSTransform, _snarl: &mut Snarl<WorkflowNode>) {
@@ -741,6 +849,8 @@ fn port_name(port: PortKind) -> &'static str {
         PortKind::FixelScalars => "Fixel Scalars",
         PortKind::OdfField => "ODF Field",
         PortKind::OdxCatalog => "ODX Catalog",
+        PortKind::VoxelMask => "Voxel Mask",
+        PortKind::TrackingPlan => "Tracking Plan",
     }
 }
 
@@ -783,6 +893,17 @@ fn output_port_label(node_kind: &WorkflowNodeKind, output_index: usize, port: Po
         WorkflowNodeKind::OdxVolumeSelect { .. } => match output_index {
             0 => "Volume".to_string(),
             1 => "Volume Scalars".to_string(),
+            _ => port_name(port).to_string(),
+        },
+        WorkflowNodeKind::PrepareHausdorffPlan { .. } => match output_index {
+            0 => "Plan".to_string(),
+            1 => "Seed Mask".to_string(),
+            2 => "Limiting Mask".to_string(),
+            3 => "No-End Mask".to_string(),
+            _ => port_name(port).to_string(),
+        },
+        WorkflowNodeKind::PrepareSimplePlan { .. } => match output_index {
+            0 => "Plan".to_string(),
             _ => port_name(port).to_string(),
         },
         _ => port_name(port).to_string(),
@@ -914,6 +1035,8 @@ fn pin_info_for_port(port: PortKind) -> PinInfo {
         PortKind::FixelScalars => egui::Color32::from_rgb(232, 112, 180),
         PortKind::OdfField => egui::Color32::from_rgb(196, 112, 232),
         PortKind::OdxCatalog => egui::Color32::from_rgb(160, 120, 220),
+        PortKind::VoxelMask => egui::Color32::from_rgb(112, 220, 160),
+        PortKind::TrackingPlan => egui::Color32::from_rgb(200, 180, 96),
     };
     PinInfo::circle().with_fill(color)
 }

@@ -173,6 +173,7 @@ pub(super) fn render_scene2d_to_png(
                 1,
                 render_data.fixel_2d_line_width,
                 render_data.fixel_2d_opacity,
+                render_data.fixel_2d_opacity_gate,
                 lighting,
                 &neutral_render,
                 0.0,
