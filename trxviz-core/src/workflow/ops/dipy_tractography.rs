@@ -82,19 +82,25 @@ impl DipyTractographyOp {
     fn fingerprint(
         &self,
         odx_source_id: crate::data::loaded_files::FileId,
-        mask: &VoxelMask,
+        mask: Option<&VoxelMask>,
     ) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         odx_source_id.hash(&mut h);
-        mask.dims.hash(&mut h);
-        for c in mask.voxel_to_ras.to_cols_array() {
-            c.to_bits().hash(&mut h);
-        }
-        mask.data.len().hash(&mut h);
-        // Hash a stride-sampled subset of bytes for cheap fingerprinting.
-        let stride = (mask.data.len() / 256).max(1);
-        for i in (0..mask.data.len()).step_by(stride) {
-            mask.data[i].hash(&mut h);
+        match mask {
+            Some(m) => {
+                1u8.hash(&mut h);
+                m.dims.hash(&mut h);
+                for c in m.voxel_to_ras.to_cols_array() {
+                    c.to_bits().hash(&mut h);
+                }
+                m.data.len().hash(&mut h);
+                // Hash a stride-sampled subset of bytes for cheap fingerprinting.
+                let stride = (m.data.len() / 256).max(1);
+                for i in (0..m.data.len()).step_by(stride) {
+                    m.data[i].hash(&mut h);
+                }
+            }
+            None => 0u8.hash(&mut h),
         }
         self.step_size_mm.to_bits().hash(&mut h);
         self.max_angle_deg.to_bits().hash(&mut h);
@@ -227,91 +233,44 @@ impl WorkflowOp for DipyTractographyOp {
                 None => None,
             };
 
-        let seed_mask: Arc<VoxelMask> = plan_input
+        // Seed mask: plan > direct input > whole-brain (None). The old
+        // "no mask → hard error" path is gone; downstream handles None
+        // by seeding every voxel in the ODX mask (matches Yeh's default).
+        let seed_mask: Option<Arc<VoxelMask>> = plan_input
             .as_ref()
             .and_then(|p| p.seed_mask.clone())
-            .or(direct_mask)
-            .ok_or_else(|| {
-                crate::error::WorkflowError::Evaluation(
-                    "Dipy/GPUStreamlines tractography needs either a VoxelMask input \
-                     or a TrackingPlan with a seed_mask"
-                        .into(),
-                )
-            })?;
+            .or(direct_mask);
 
         let loaded_odx = ctx.odx_assets.get(&odf_field.source_id).ok_or_else(|| {
             crate::error::WorkflowError::Evaluation("Missing ODX asset for tractography".into())
         })?;
 
-        // Param overrides from the plan.
-        let effective_min_len = plan_input
-            .as_ref()
-            .and_then(|p| p.min_len_mm)
-            .unwrap_or(self.min_len_mm);
-        let effective_max_len = plan_input
-            .as_ref()
-            .and_then(|p| p.max_len_mm)
-            .unwrap_or(self.max_len_mm);
-        let effective_max_angle = plan_input
-            .as_ref()
-            .and_then(|p| p.max_angle_deg)
-            .unwrap_or(self.max_angle_deg);
-        let effective_step_size = plan_input
-            .as_ref()
-            .and_then(|p| p.step_size_mm)
-            .unwrap_or(self.step_size_mm);
-        let effective_fixel_threshold = plan_input
-            .as_ref()
-            .and_then(|p| p.fixel_threshold)
-            .unwrap_or(self.fixel_threshold);
+        let effective = super::tracking_params::EffectiveTrackingParams::merge(
+            super::tracking_params::OpTrackingDefaults {
+                min_len_mm: self.min_len_mm,
+                max_len_mm: self.max_len_mm,
+                max_angle_deg: self.max_angle_deg,
+                step_size_mm: self.step_size_mm,
+                fixel_threshold: self.fixel_threshold,
+                smooth_fraction: None,
+            },
+            plan_input.as_deref(),
+        );
 
-        // Record which fields the plan is overriding so the UI can grey out
-        // the corresponding sliders and show their effective values.
         if let Some(p) = plan_input.as_ref() {
-            let mut ov: Vec<String> = Vec::new();
-            let mut vals: std::collections::BTreeMap<String, f32> =
-                std::collections::BTreeMap::new();
-            if p.seed_mask.is_some() {
-                ov.push("seed_mask".into());
-            }
-            if let Some(v) = p.min_len_mm {
-                ov.push("min_len_mm".into());
-                vals.insert("min_len_mm".into(), v);
-            }
-            if let Some(v) = p.max_len_mm {
-                ov.push("max_len_mm".into());
-                vals.insert("max_len_mm".into(), v);
-            }
-            if let Some(v) = p.max_angle_deg {
-                ov.push("max_angle_deg".into());
-                vals.insert("max_angle_deg".into(), v);
-            }
-            if let Some(v) = p.step_size_mm {
-                ov.push("step_size_mm".into());
-                vals.insert("step_size_mm".into(), v);
-            }
-            if let Some(v) = p.fixel_threshold {
-                ov.push("fixel_threshold".into());
-                vals.insert("fixel_threshold".into(), v);
-            }
-            // Informational only — sentinel-driven random thresholds
-            // center on 0.6·fixel_otsu.
-            if let Some(v) = p.fixel_otsu {
-                vals.insert("fixel_otsu".into(), v);
-            }
-            ctx.node_state.overridden_fields = ov;
-            ctx.node_state.overridden_values = vals;
+            super::tracking_params::record_plan_overrides(
+                ctx.node_state,
+                p,
+                super::tracking_params::TrackingFieldSet::DIPY,
+            );
         }
 
         let odx_source_id = odf_field.source_id;
         let fingerprint = {
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            self.fingerprint(odx_source_id, &seed_mask).hash(&mut h);
-            effective_min_len.to_bits().hash(&mut h);
-            effective_max_len.to_bits().hash(&mut h);
-            effective_max_angle.to_bits().hash(&mut h);
-            effective_step_size.to_bits().hash(&mut h);
-            effective_fixel_threshold.to_bits().hash(&mut h);
+            self.fingerprint(odx_source_id, seed_mask.as_deref())
+                .hash(&mut h);
+            effective.hash_into(&mut h);
             h.finish()
         };
         let upstream_stale = ctx.upstream_stale();
@@ -372,11 +331,11 @@ impl WorkflowOp for DipyTractographyOp {
                     odx_source_id,
                     odx_scene: loaded_odx.scene.clone(),
                     seed_mask,
-                    step_size_mm: effective_step_size,
-                    max_angle_deg: effective_max_angle,
-                    min_len_mm: effective_min_len,
-                    max_len_mm: effective_max_len,
-                    fixel_threshold: effective_fixel_threshold,
+                    step_size_mm: effective.step_size_mm,
+                    max_angle_deg: effective.max_angle_deg,
+                    min_len_mm: effective.min_len_mm,
+                    max_len_mm: effective.max_len_mm,
+                    fixel_threshold: effective.fixel_threshold,
                     relative_peak_threshold: self.relative_peak_threshold,
                     seeds_per_voxel: self.seeds_per_voxel,
                     max_points: self.max_points,

@@ -251,7 +251,7 @@ fn dipy_benchmark_cst_l() {
         label: "dipy-bench CST-L".into(),
         odx_source_id: odx_id,
         odx_scene: odx_asset.scene.clone(),
-        seed_mask: haus.seed_mask.clone(),
+        seed_mask: Some(haus.seed_mask.clone()),
         step_size_mm: 0.5,
         max_angle_deg: 30.0,
         min_len_mm: haus.plan.min_len_mm.unwrap_or(10.0),
@@ -276,7 +276,7 @@ fn dipy_benchmark_cst_l() {
         fixel_otsu: None,
         direction_getter: DipyDirectionGetter::Probabilistic,
     };
-    let n_seeds_planned = plan.seed_mask.count();
+    let n_seeds_planned = plan.seed_mask.as_ref().map_or(0, |m| m.count());
 
     let t0 = std::time::Instant::now();
     let output = run_workflow_job(WorkflowJobPayload::DipyTractography {

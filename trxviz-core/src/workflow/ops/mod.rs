@@ -35,6 +35,7 @@ mod surface_display;
 mod surface_projection;
 mod surface_source;
 mod tip_prune;
+mod tracking_params;
 mod uniform_color;
 mod volume_display;
 mod volume_source;

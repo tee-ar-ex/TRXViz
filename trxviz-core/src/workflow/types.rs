@@ -1345,7 +1345,9 @@ pub struct DipyTractographyPlan {
     pub label: String,
     pub odx_source_id: FileId,
     pub odx_scene: Arc<crate::data::odx_data::OdxScene>,
-    pub seed_mask: Arc<VoxelMask>,
+    /// When `None`, seed from every voxel in the ODX mask (whole-brain,
+    /// mirroring Yeh's default when no mask is wired).
+    pub seed_mask: Option<Arc<VoxelMask>>,
     pub step_size_mm: f32,
     pub max_angle_deg: f32,
     pub min_len_mm: f32,

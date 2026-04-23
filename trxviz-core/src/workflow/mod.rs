@@ -22,6 +22,7 @@ mod seed;
 mod seed_odx;
 mod simple_workflow;
 pub(super) mod tip;
+pub(crate) mod tracking;
 pub(crate) mod tracking_filters;
 mod types;
 

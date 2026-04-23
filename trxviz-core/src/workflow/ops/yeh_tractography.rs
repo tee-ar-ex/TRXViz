@@ -217,76 +217,25 @@ impl WorkflowOp for YehTractographyOp {
             .and_then(|p| p.seed_mask.clone())
             .or(direct_mask);
 
-        // Record which fields the plan is overriding + their effective
-        // values so the UI can grey out the sliders and show what the plan
-        // is contributing.
-        if let Some(p) = plan_input.as_ref() {
-            let mut ov: Vec<String> = Vec::new();
-            let mut vals: std::collections::BTreeMap<String, f32> =
-                std::collections::BTreeMap::new();
-            if p.seed_mask.is_some() {
-                ov.push("seed_mask".into());
-            }
-            if let Some(v) = p.min_len_mm {
-                ov.push("min_len_mm".into());
-                vals.insert("min_len_mm".into(), v);
-            }
-            if let Some(v) = p.max_len_mm {
-                ov.push("max_len_mm".into());
-                vals.insert("max_len_mm".into(), v);
-            }
-            if let Some(v) = p.max_angle_deg {
-                ov.push("max_angle_deg".into());
-                vals.insert("max_angle_deg".into(), v);
-            }
-            if let Some(v) = p.step_size_mm {
-                ov.push("step_size_mm".into());
-                vals.insert("step_size_mm".into(), v);
-            }
-            if let Some(v) = p.fixel_threshold {
-                ov.push("fixel_threshold".into());
-                vals.insert("fixel_threshold".into(), v);
-            }
-            if let Some(v) = p.smooth_fraction {
-                ov.push("smooth_fraction".into());
-                vals.insert("smooth_fraction".into(), v);
-            }
-            // Informational only — sentinel-driven random thresholds
-            // center on 0.6·fixel_otsu, so users want to see the value
-            // the plan derived from the ODX.
-            if let Some(v) = p.fixel_otsu {
-                vals.insert("fixel_otsu".into(), v);
-            }
-            ctx.node_state.overridden_fields = ov;
-            ctx.node_state.overridden_values = vals;
-        }
+        let effective = super::tracking_params::EffectiveTrackingParams::merge(
+            super::tracking_params::OpTrackingDefaults {
+                min_len_mm: self.min_len_mm,
+                max_len_mm: self.max_len_mm,
+                max_angle_deg: self.max_angle_deg,
+                step_size_mm: self.step_size_mm,
+                fixel_threshold: self.fixel_threshold,
+                smooth_fraction: Some(self.smooth_fraction),
+            },
+            plan_input.as_deref(),
+        );
 
-        // Param overrides from the plan. Each field falls back to the op's
-        // own slider value when the plan didn't set it.
-        let effective_min_len = plan_input
-            .as_ref()
-            .and_then(|p| p.min_len_mm)
-            .unwrap_or(self.min_len_mm);
-        let effective_max_len = plan_input
-            .as_ref()
-            .and_then(|p| p.max_len_mm)
-            .unwrap_or(self.max_len_mm);
-        let effective_max_angle = plan_input
-            .as_ref()
-            .and_then(|p| p.max_angle_deg)
-            .unwrap_or(self.max_angle_deg);
-        let effective_step_size = plan_input
-            .as_ref()
-            .and_then(|p| p.step_size_mm)
-            .unwrap_or(self.step_size_mm);
-        let effective_fixel_threshold = plan_input
-            .as_ref()
-            .and_then(|p| p.fixel_threshold)
-            .unwrap_or(self.fixel_threshold);
-        let effective_smooth = plan_input
-            .as_ref()
-            .and_then(|p| p.smooth_fraction)
-            .unwrap_or(self.smooth_fraction);
+        if let Some(p) = plan_input.as_ref() {
+            super::tracking_params::record_plan_overrides(
+                ctx.node_state,
+                p,
+                super::tracking_params::TrackingFieldSet::YEH,
+            );
+        }
 
         let loaded_odx = ctx.odx_assets.get(&fixels.source_id).ok_or_else(|| {
             crate::error::WorkflowError::Evaluation("Missing ODX asset for Yeh tracking".into())
@@ -299,12 +248,7 @@ impl WorkflowOp for YehTractographyOp {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             self.fingerprint(odx_source_id, seed_mask.as_deref())
                 .hash(&mut h);
-            effective_min_len.to_bits().hash(&mut h);
-            effective_max_len.to_bits().hash(&mut h);
-            effective_max_angle.to_bits().hash(&mut h);
-            effective_step_size.to_bits().hash(&mut h);
-            effective_fixel_threshold.to_bits().hash(&mut h);
-            effective_smooth.to_bits().hash(&mut h);
+            effective.hash_into(&mut h);
             h.finish()
         };
         let upstream_stale = ctx.upstream_stale();
@@ -367,12 +311,12 @@ impl WorkflowOp for YehTractographyOp {
                     end_masks,
                     no_end_mask,
                     post_filter,
-                    step_size_mm: effective_step_size,
-                    max_angle_deg: effective_max_angle,
-                    min_len_mm: effective_min_len,
-                    max_len_mm: effective_max_len,
-                    fixel_threshold: effective_fixel_threshold,
-                    smooth_fraction: effective_smooth,
+                    step_size_mm: effective.step_size_mm,
+                    max_angle_deg: effective.max_angle_deg,
+                    min_len_mm: effective.min_len_mm,
+                    max_len_mm: effective.max_len_mm,
+                    fixel_threshold: effective.fixel_threshold,
+                    smooth_fraction: effective.smooth_fraction.unwrap_or(self.smooth_fraction),
                     max_points: self.max_points,
                     target_streamlines: self.target_streamlines,
                     max_seed_attempts: self.max_seed_attempts,
