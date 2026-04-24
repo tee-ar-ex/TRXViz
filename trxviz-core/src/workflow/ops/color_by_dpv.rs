@@ -1,4 +1,5 @@
 use crate::data::trx_data::ColorMode;
+use crate::renderer::mesh_renderer::SurfaceColormap;
 
 use super::super::{
     DpvFieldName, EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue,
@@ -8,12 +9,14 @@ use super::super::{
 #[derive(Debug, Clone)]
 pub struct ColorByDpvOp {
     pub field: DpvFieldName,
+    pub colormap: SurfaceColormap,
 }
 
 impl Default for ColorByDpvOp {
     fn default() -> Self {
         Self {
             field: DpvFieldName::default(),
+            colormap: SurfaceColormap::default(),
         }
     }
 }
@@ -43,6 +46,7 @@ impl WorkflowOp for ColorByDpvOp {
         Ok(vec![
             WorkflowValue::Streamline(super::super::StreamlineFlow {
                 color_mode: ColorMode::Dpv(self.field.as_str().to_string()),
+                scalar_colormap: self.colormap,
                 ..flow
             })
             .into(),
@@ -52,6 +56,9 @@ impl WorkflowOp for ColorByDpvOp {
 
 impl From<ColorByDpvOp> for WorkflowNodeKind {
     fn from(op: ColorByDpvOp) -> Self {
-        Self::ColorByDPV { field: op.field }
+        Self::ColorByDPV {
+            field: op.field,
+            colormap: op.colormap,
+        }
     }
 }

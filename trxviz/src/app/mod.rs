@@ -13,6 +13,7 @@ use state::{
     SceneState, UiMode, ViewportState, WorkerMessage, WorkerReceiver, WorkerSender, WorkflowState,
 };
 use trxviz_core::renderer::slice_renderer::{AllSliceResources, SliceAxis};
+use trxviz_core::workflow::WorkflowNodeUuid;
 use workflow::workflow_job_kind_title;
 
 /// Main application state.
@@ -33,6 +34,10 @@ pub struct TrxVizApp {
     /// Slice-local ODX glyph amplitude normalization used by the shader LUT path.
     pub(crate) odx_amp_norm: f32,
     pub(crate) max_storage_buffer_binding_size: Option<usize>,
+    /// Cloned wgpu device for background GPU compute (tractography, etc.).
+    pub(crate) gpu_device: Option<wgpu::Device>,
+    /// Cloned wgpu queue for background GPU compute.
+    pub(crate) gpu_queue: Option<wgpu::Queue>,
 }
 
 impl TrxVizApp {
@@ -203,41 +208,52 @@ impl TrxVizApp {
         }
     }
 
-    fn active_task_labels(&self) -> Vec<String> {
-        let mut labels: Vec<String> = self
-            .pending_file_loads
+    /// Non-interactive tasks (file loads) that show in the activity
+    /// overlay but can't be cancelled. Kept separate from workflow
+    /// jobs because those get a Cancel button.
+    fn pending_file_load_labels(&self) -> Vec<String> {
+        self.pending_file_loads
             .iter()
             .map(|job| job.label.clone())
-            .collect();
-
-        for (node_uuid, (kind, _)) in &self.workflow.jobs_in_flight {
-            let label = self
-                .workflow
-                .document
-                .graph
-                .get(*node_uuid)
-                .map(|node| node.label.clone())
-                .filter(|label| !label.is_empty())
-                .unwrap_or_else(|| workflow_job_kind_title(*kind).to_string());
-            labels.push(format!(
-                "Building {} for {}",
-                workflow_job_kind_title(*kind),
-                label
-            ));
-        }
-
-        labels
+            .collect()
     }
 
-    fn draw_activity_overlay(&self, ctx: &egui::Context) {
-        let tasks = self.active_task_labels();
-        if tasks.is_empty() {
+    /// In-flight workflow jobs with their node UUIDs so the overlay
+    /// can render a per-job Cancel button.
+    fn in_flight_workflow_jobs(&self) -> Vec<(WorkflowNodeUuid, String)> {
+        self.workflow
+            .jobs_in_flight
+            .iter()
+            .map(|(node_uuid, (kind, _))| {
+                let label = self
+                    .workflow
+                    .document
+                    .graph
+                    .get(*node_uuid)
+                    .map(|node| node.label.clone())
+                    .filter(|label| !label.is_empty())
+                    .unwrap_or_else(|| workflow_job_kind_title(*kind).to_string());
+                (
+                    *node_uuid,
+                    format!("Building {} for {}", workflow_job_kind_title(*kind), label),
+                )
+            })
+            .collect()
+    }
+
+    fn draw_activity_overlay(&mut self, ctx: &egui::Context) {
+        let file_loads = self.pending_file_load_labels();
+        let jobs = self.in_flight_workflow_jobs();
+        if file_loads.is_empty() && jobs.is_empty() {
             return;
         }
 
+        // Needs to be interactable so the Cancel buttons can receive
+        // clicks. The overlay itself is positioned in the top-right
+        // corner and doesn't get in the way of the viewport.
+        let mut cancel_requests: Vec<WorkflowNodeUuid> = Vec::new();
         egui::Area::new("activity_overlay".into())
             .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-16.0, 16.0))
-            .interactable(false)
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_min_width(280.0);
@@ -246,11 +262,39 @@ impl TrxVizApp {
                         ui.label("Working");
                     });
                     ui.separator();
-                    for task in tasks {
-                        ui.small(task);
+                    for label in &file_loads {
+                        ui.small(label);
+                    }
+                    for (node_uuid, label) in &jobs {
+                        ui.horizontal(|ui| {
+                            ui.small(label);
+                            ui.add_space(8.0);
+                            if ui.small_button("Cancel").clicked() {
+                                cancel_requests.push(*node_uuid);
+                            }
+                        });
+                        // Render a progress bar whenever the worker
+                        // has reported at least one `(done, total)`
+                        // pair for this node. Jobs that finish before
+                        // their first progress tick (reactive
+                        // streamlines, small surface queries) get just
+                        // the spinner.
+                        if let Some(&(done, total)) = self.workflow.job_progress.get(node_uuid)
+                            && total > 0
+                        {
+                            let frac = (done as f32 / total as f32).clamp(0.0, 1.0);
+                            ui.add(
+                                egui::ProgressBar::new(frac)
+                                    .desired_width(240.0)
+                                    .text(format!("{done} / {total}")),
+                            );
+                        }
                     }
                 });
             });
+        for node_uuid in cancel_requests {
+            self.request_cancel_workflow_job(node_uuid);
+        }
     }
 
     fn open_import_dialog(&mut self, path: Option<PathBuf>) {
@@ -323,6 +367,8 @@ impl TrxVizApp {
             merge_streamlines_dialog: MergeStreamlinesDialogState::default(),
             odx_amp_norm: 1.0,
             max_storage_buffer_binding_size: None,
+            gpu_device: None,
+            gpu_queue: None,
         };
 
         if cc.wgpu_render_state.is_some() {
@@ -588,7 +634,7 @@ impl eframe::App for TrxVizApp {
         }
 
         self.draw_activity_overlay(ctx);
-        if !self.active_task_labels().is_empty() {
+        if !self.pending_file_loads.is_empty() || !self.workflow.jobs_in_flight.is_empty() {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
     }

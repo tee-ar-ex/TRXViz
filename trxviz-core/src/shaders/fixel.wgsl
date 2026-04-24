@@ -14,6 +14,30 @@ struct Uniforms {
     fog_params: vec4<f32>,
     post_params: vec4<f32>,
     color_params: vec4<f32>, // x=colormap u32-as-f32, y=scalar_min, z=scalar_max, w=reserved
+    opacity_gate: vec4<f32>, // x=range_min, y=range_max, z=below, w=above
+}
+
+// Piecewise-linear opacity gate. Below `range_min` → `below`; above
+// `range_max` → `above`; linearly interpolated in between. Matches the
+// semantics used in `shaders/glyph.wgsl::gate_factor`.
+fn gate_factor(sample: f32, params: vec4<f32>) -> f32 {
+    // NaN / ±Inf → treat as gate-disabled (full alpha) so renders don't
+    // blank out when a scalar stream is missing.
+    if sample != sample || sample == sample * 0.5 + 1e30 {
+        return 1.0;
+    }
+    let range_min = params.x;
+    let range_max = params.y;
+    let below = params.z;
+    let above = params.w;
+    if sample <= range_min {
+        return below;
+    }
+    if sample >= range_max {
+        return above;
+    }
+    let t = (sample - range_min) / max(range_max - range_min, 1e-6);
+    return mix(below, above, t);
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -127,7 +151,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
         out.color = sample_palette(cmap, t);
     }
     out.center = in.center;
-    out.draw_alpha = 1.0;
+    out.draw_alpha = gate_factor(in.scalar, uniforms.opacity_gate);
 
     if uniforms.draw_step > 1u && (in.instance_index % uniforms.draw_step) != 0u {
         out.draw_alpha = 0.0;
@@ -173,5 +197,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let lit = in.color * (uniforms.ambient_strength + uniforms.key_strength);
     let faded = apply_depth_fade(lit, in.center);
-    return vec4<f32>(apply_post_color(faded, in.ndc_xy), uniforms.opacity);
+    return vec4<f32>(apply_post_color(faded, in.ndc_xy), uniforms.opacity * in.draw_alpha);
 }

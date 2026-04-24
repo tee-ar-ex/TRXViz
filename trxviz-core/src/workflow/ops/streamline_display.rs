@@ -14,6 +14,8 @@ pub struct StreamlineDisplayOp {
     pub tube_radius_mm: Millimeters,
     pub tube_sides: u32,
     pub slab_half_width_mm: Millimeters,
+    /// 0.0 → fully transparent, 1.0 → fully opaque.
+    pub opacity: f32,
 }
 
 impl Default for StreamlineDisplayOp {
@@ -24,6 +26,7 @@ impl Default for StreamlineDisplayOp {
             tube_radius_mm: Millimeters(0.4),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         }
     }
 }
@@ -68,6 +71,7 @@ impl WorkflowOp for StreamlineDisplayOp {
             tube_radius_mm: self.tube_radius_mm,
             tube_sides: self.tube_sides,
             slab_half_width_mm: self.slab_half_width_mm,
+            opacity: self.opacity.clamp(0.0, 1.0),
         };
         ctx.node_state.summary = if self.enabled {
             "Visible".to_string()
@@ -103,6 +107,7 @@ impl From<StreamlineDisplayOp> for WorkflowNodeKind {
             tube_radius_mm: op.tube_radius_mm,
             tube_sides: op.tube_sides,
             slab_half_width_mm: op.slab_half_width_mm,
+            opacity: op.opacity,
         }
     }
 }

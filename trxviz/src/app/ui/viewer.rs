@@ -58,11 +58,13 @@ struct OdxFrameData {
     glyph_gloss: f32,
     fixel_line_width: f32,
     fixel_opacity: f32,
+    fixel_opacity_gate: [f32; 4],
     fixel_slab_half_width_mm: f32,
     glyph_scale: f32,
     fixel_length_scale: f32,
     fixel_2d_line_width: f32,
     fixel_2d_opacity: f32,
+    fixel_2d_opacity_gate: [f32; 4],
     fixel_2d_length_scale: f32,
     fixel_2d_visible: bool,
     fixel_3d_visible: bool,
@@ -935,6 +937,7 @@ impl super::super::TrxVizApp {
                 odx_amp_norm: render_data.odx.amp_norm,
                 odx_fixel_line_width: render_data.odx.fixel_line_width,
                 odx_fixel_opacity: render_data.odx.fixel_opacity,
+                odx_fixel_opacity_gate: render_data.odx.fixel_opacity_gate,
                 odx_fixel_length_scale: render_data.odx.fixel_length_scale,
                 odx_fixel_visible: render_data.odx.fixel_3d_visible,
                 odx_fixel_colormap_code: render_data.odx.fixel_colormap_code,
@@ -1025,6 +1028,7 @@ impl super::super::TrxVizApp {
                 odx_amp_norm: 1.0,
                 odx_fixel_line_width: 0.006,
                 odx_fixel_opacity: 1.0,
+                odx_fixel_opacity_gate: [0.0, 0.0, 1.0, 1.0],
                 odx_fixel_length_scale: 1.0,
                 odx_fixel_visible: false,
                 odx_fixel_colormap_code: 0,
@@ -1148,6 +1152,7 @@ impl super::super::TrxVizApp {
                 odx_glyph_gloss: render_data.odx.glyph_gloss,
                 odx_fixel_line_width: render_data.odx.fixel_2d_line_width,
                 odx_fixel_opacity: render_data.odx.fixel_2d_opacity,
+                odx_fixel_opacity_gate: render_data.odx.fixel_2d_opacity_gate,
                 odx_fixel_slab_half_width_mm: render_data.odx.fixel_slab_half_width_mm,
                 odx_glyph_scale: render_data.odx.glyph_scale,
                 odx_fixel_length_scale: render_data.odx.fixel_2d_length_scale,
@@ -1168,6 +1173,7 @@ impl super::super::TrxVizApp {
         self.draw_orientation_labels(ui, rect, axis_index, vp);
         self.draw_mesh_intersections(ui, rect, axis_index, vp, slice_pos);
         self.draw_bundle_mesh_intersections(ui, rect, axis_index, vp, slice_pos);
+        self.draw_voxel_mask_mesh_intersections(ui, rect, axis_index, vp, slice_pos);
         self.draw_parcellation_intersections(ui, rect, axis_index, vp, slice_pos);
     }
 
@@ -1225,6 +1231,7 @@ impl super::super::TrxVizApp {
                 render_style: draw.render_style,
                 tube_radius: draw.tube_radius_mm.0,
                 slab_half_width: draw.slab_half_width_mm.0,
+                opacity: draw.opacity,
             })
             .collect::<Vec<_>>();
 
@@ -1238,6 +1245,17 @@ impl super::super::TrxVizApp {
                 file_id: draw.draw_id,
                 opacity: draw.opacity,
             })
+            .chain(
+                self.workflow
+                    .runtime
+                    .scene_plan
+                    .voxel_mask_mesh_draws
+                    .iter()
+                    .map(|draw| BundleDrawInfo {
+                        file_id: draw.draw_id,
+                        opacity: draw.opacity,
+                    }),
+            )
             .collect::<Vec<_>>();
 
         let glyph_draw = self
@@ -1304,6 +1322,16 @@ impl super::super::TrxVizApp {
                 glyph_gloss: odf_draw.map(|p| p.gloss).unwrap_or(0.0),
                 fixel_line_width: fixel_3d_draw.map(|p| p.line_width).unwrap_or(0.006),
                 fixel_opacity: fixel_3d_draw.map(|p| p.opacity).unwrap_or(1.0),
+                fixel_opacity_gate: fixel_3d_draw
+                    .map(|p| {
+                        [
+                            p.opacity_gate.range.0,
+                            p.opacity_gate.range.1,
+                            p.opacity_gate.below,
+                            p.opacity_gate.above,
+                        ]
+                    })
+                    .unwrap_or([0.0, 0.0, 1.0, 1.0]),
                 fixel_slab_half_width_mm: fixel_2d_draw
                     .map(|p| (p.slab_thickness_mm * 0.5).max(trxviz_core::units::Millimeters(0.0)))
                     .unwrap_or(trxviz_core::units::Millimeters(1.5))
@@ -1312,6 +1340,16 @@ impl super::super::TrxVizApp {
                 fixel_length_scale: fixel_3d_draw.map(|p| p.length_scale).unwrap_or(1.0),
                 fixel_2d_line_width: fixel_2d_draw.map(|p| p.line_width).unwrap_or(0.006),
                 fixel_2d_opacity: fixel_2d_draw.map(|p| p.opacity).unwrap_or(1.0),
+                fixel_2d_opacity_gate: fixel_2d_draw
+                    .map(|p| {
+                        [
+                            p.opacity_gate.range.0,
+                            p.opacity_gate.range.1,
+                            p.opacity_gate.below,
+                            p.opacity_gate.above,
+                        ]
+                    })
+                    .unwrap_or([0.0, 0.0, 1.0, 1.0]),
                 fixel_2d_length_scale: fixel_2d_draw.map(|p| p.length_scale).unwrap_or(1.0),
                 fixel_2d_visible: fixel_2d_draw
                     .map(|p| p.visible)
@@ -1380,11 +1418,13 @@ impl super::super::TrxVizApp {
                 glyph_gloss: 0.0,
                 fixel_line_width: 0.006,
                 fixel_opacity: 1.0,
+                fixel_opacity_gate: [0.0, 0.0, 1.0, 1.0],
                 fixel_slab_half_width_mm: 1.5,
                 glyph_scale: 1.0,
                 fixel_length_scale: 1.0,
                 fixel_2d_line_width: 0.006,
                 fixel_2d_opacity: 1.0,
+                fixel_2d_opacity_gate: [0.0, 0.0, 1.0, 1.0],
                 fixel_2d_length_scale: 1.0,
                 fixel_2d_visible: true,
                 fixel_3d_visible: true,

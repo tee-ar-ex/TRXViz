@@ -722,6 +722,96 @@ pub fn build_bundle_mesh(
     Some(BundleMesh { vertices, indices })
 }
 
+/// Extract an iso-surface mesh from a binary voxel mask. Isovalue 0.5 on a
+/// 0/1 field; `voxel_to_ras` is applied to vertices so the mesh ends up in
+/// world space. Vertices are uniformly tinted with `color`.
+///
+/// `smooth_sigma` is in voxels (set to 0 for a sharp blocky surface; 1–2 for
+/// a smoother blob). `min_component_volume` drops small disconnected blobs.
+pub fn build_voxel_mask_mesh(
+    dims: [u32; 3],
+    voxel_to_ras: glam::Mat4,
+    mask: &[u8],
+    color: [f32; 4],
+    smooth_sigma: f32,
+    min_component_volume: Millimeters,
+) -> Option<BundleMesh> {
+    let nx = dims[0] as usize;
+    let ny = dims[1] as usize;
+    let nz = dims[2] as usize;
+    if nx < 2 || ny < 2 || nz < 2 {
+        return None;
+    }
+    let n = nx * ny * nz;
+    if mask.len() != n {
+        return None;
+    }
+
+    // 1. Density grid: 0.0 / 1.0.
+    let mut density: Vec<f32> = mask
+        .iter()
+        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+        .collect();
+    if !density.iter().any(|&v| v > 0.0) {
+        return None;
+    }
+
+    // 2. Optional Gaussian smoothing in voxels.
+    if smooth_sigma >= 0.5 {
+        density = gaussian_blur_3d(&density, nx, ny, nz, smooth_sigma);
+    }
+
+    // 3. Run marching cubes in voxel-index space with uniform unit voxels;
+    //    we transform vertices to RAS afterwards via `voxel_to_ras`.
+    let mc = MarchingCubes::new(
+        (nx, ny, nz),
+        (1.0, 1.0, 1.0),
+        (1.0, 1.0, 1.0),
+        LinVec3::new(0.0, 0.0, 0.0),
+        density,
+        0.5,
+    )
+    .ok()?;
+    let mesh = mc.generate(MeshSide::OutsideOnly);
+    if mesh.indices.is_empty() {
+        return None;
+    }
+
+    // 4. Vertices in RAS; normals are recomputed later (weld_and_recompute).
+    let mut vertices: Vec<BundleMeshVertex> = mesh
+        .vertices
+        .iter()
+        .map(|v| {
+            let p = voxel_to_ras.transform_point3(glam::Vec3::new(v.posit.x, v.posit.y, v.posit.z));
+            BundleMeshVertex {
+                position: [p.x, p.y, p.z],
+                normal: [0.0, 0.0, 1.0],
+                color,
+            }
+        })
+        .collect();
+
+    let raw_indices: Vec<u32> = mesh.indices.iter().map(|&i| i as u32).collect();
+
+    // 5. Connected-component filter by world-space volume.
+    let min_component_volume_mm3 = min_component_volume.0.max(0.0);
+    let indices = connected_components(&vertices, &raw_indices)
+        .into_iter()
+        .filter(|c| c.volume_mm3 >= min_component_volume_mm3)
+        .flat_map(|c| c.indices)
+        .collect::<Vec<_>>();
+    if indices.is_empty() {
+        return None;
+    }
+
+    // 6. Weld colocated vertices + recompute per-vertex normals from triangles
+    //    in RAS. This gives correct lighting under anisotropic or rotated
+    //    voxel affines.
+    weld_and_recompute_normals(&mut vertices, &indices);
+
+    Some(BundleMesh { vertices, indices })
+}
+
 pub fn build_streamtube_bundle_mesh(
     positions: &[[f32; 3]],
     colors: &[[f32; 4]],

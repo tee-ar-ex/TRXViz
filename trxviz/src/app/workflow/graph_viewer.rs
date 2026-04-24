@@ -253,7 +253,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 port,
             ));
             // Reserve space so the pin circle doesn't overlap the trailing label glyphs.
-            ui.add_space(10.0);
+            ui.add_space(18.0);
         });
         pin_info_for_port(port)
     }
@@ -404,7 +404,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
 
     fn show_graph_menu(&mut self, pos: Pos2, ui: &mut egui::Ui, snarl: &mut Snarl<WorkflowNode>) {
         let measured_node_sizes = &*self.measured_node_sizes;
-        ui.menu_button("Streamline Filters", |ui| {
+        ui.menu_button("Streamlines", |ui| {
             add_node_button(
                 ui,
                 snarl,
@@ -445,6 +445,20 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 snarl,
                 pos,
                 RemoveDuplicatesOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                TipPruneOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                PurifibreOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(ui, snarl, pos, MergeOp.into(), measured_node_sizes);
@@ -504,7 +518,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
             );
         });
 
-        ui.menu_button("Styling", |ui| {
+        ui.menu_button("Color & Style", |ui| {
             add_node_button(
                 ui,
                 snarl,
@@ -548,9 +562,16 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 SurfaceProjectionMeanDpsOp::default().into(),
                 measured_node_sizes,
             );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                ColorByFixelScalarsOp::default().into(),
+                measured_node_sizes,
+            );
         });
 
-        ui.menu_button("Rendering", |ui| {
+        ui.menu_button("Display", |ui| {
             add_node_button(
                 ui,
                 snarl,
@@ -590,7 +611,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
-                BoundaryFieldBuildOp::default().into(),
+                StreamlineDirectionFieldOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
@@ -604,31 +625,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
-                SaveStreamlinesOp::default().into(),
-                measured_node_sizes,
-            );
-        });
-
-        ui.menu_button("ODX", |ui| {
-            add_node_button(
-                ui,
-                snarl,
-                pos,
-                OdxFixelScalarSelectOp::default().into(),
-                measured_node_sizes,
-            );
-            add_node_button(
-                ui,
-                snarl,
-                pos,
-                ColorByFixelScalarsOp::default().into(),
-                measured_node_sizes,
-            );
-            add_node_button(
-                ui,
-                snarl,
-                pos,
-                OdxVolumeSelectOp::default().into(),
+                VoxelMaskDisplayOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
@@ -650,6 +647,127 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 snarl,
                 pos,
                 OdfGlyphRendererOp::default().into(),
+                measured_node_sizes,
+            );
+        });
+
+        ui.menu_button("Fixel & ODF", |ui| {
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                OdxFixelScalarSelectOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                OdxVolumeSelectOp::default().into(),
+                measured_node_sizes,
+            );
+        });
+
+        ui.menu_button("Tractography", |ui| {
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                DipyTractographyOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                YehTractographyOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                RoiFromParcelOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                RoiFromVolumeOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                RoiFromShapeOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                PrepareHausdorffPlanOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                PrepareSimplePlanOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                AddRoiOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                AddRoaOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                AddEndRegionOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                AddNoEndOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                AddLimitingOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                AddTermOp::default().into(),
+                measured_node_sizes,
+            );
+        });
+
+        ui.menu_button("Export", |ui| {
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                SaveStreamlinesOp::default().into(),
                 measured_node_sizes,
             );
         });
@@ -741,6 +859,8 @@ fn port_name(port: PortKind) -> &'static str {
         PortKind::FixelScalars => "Fixel Scalars",
         PortKind::OdfField => "ODF Field",
         PortKind::OdxCatalog => "ODX Catalog",
+        PortKind::VoxelMask => "Voxel Mask",
+        PortKind::TrackingPlan => "Tracking Plan",
     }
 }
 
@@ -750,6 +870,11 @@ fn input_port_label(node_kind: &WorkflowNodeKind, input_index: usize, port: Port
             0 => "ODF Field".to_string(),
             1 => "Opacity Scalars".to_string(),
             2 => "Size Scalars".to_string(),
+            _ => port_name(port).to_string(),
+        },
+        WorkflowNodeKind::Purifibre { .. } => match input_index {
+            0 => "Streamlines".to_string(),
+            1 => "Direction field".to_string(),
             _ => port_name(port).to_string(),
         },
         WorkflowNodeKind::SurfaceOverlayStack { layers } => {
@@ -783,6 +908,27 @@ fn output_port_label(node_kind: &WorkflowNodeKind, output_index: usize, port: Po
         WorkflowNodeKind::OdxVolumeSelect { .. } => match output_index {
             0 => "Volume".to_string(),
             1 => "Volume Scalars".to_string(),
+            _ => port_name(port).to_string(),
+        },
+        WorkflowNodeKind::PrepareHausdorffPlan { .. } => match output_index {
+            0 => "Plan".to_string(),
+            1 => "Seed Mask".to_string(),
+            2 => "Limiting Mask".to_string(),
+            3 => "No-End Mask".to_string(),
+            _ => port_name(port).to_string(),
+        },
+        WorkflowNodeKind::PrepareSimplePlan { .. } => match output_index {
+            0 => "Plan".to_string(),
+            _ => port_name(port).to_string(),
+        },
+        WorkflowNodeKind::Purifibre { .. } => match output_index {
+            // Output 0 is the input streamlines passthrough with the
+            // FICO DPS field attached — useful for visualizing the
+            // score distribution before any filtering happens.
+            0 => "Scored (all)".to_string(),
+            // Output 1 has only streamlines that survived the
+            // discard-fraction cutoff.
+            1 => "Filtered".to_string(),
             _ => port_name(port).to_string(),
         },
         _ => port_name(port).to_string(),
@@ -914,6 +1060,8 @@ fn pin_info_for_port(port: PortKind) -> PinInfo {
         PortKind::FixelScalars => egui::Color32::from_rgb(232, 112, 180),
         PortKind::OdfField => egui::Color32::from_rgb(196, 112, 232),
         PortKind::OdxCatalog => egui::Color32::from_rgb(160, 120, 220),
+        PortKind::VoxelMask => egui::Color32::from_rgb(112, 220, 160),
+        PortKind::TrackingPlan => egui::Color32::from_rgb(200, 180, 96),
     };
     PinInfo::circle().with_fill(color)
 }
@@ -1014,6 +1162,7 @@ mod tests {
                 tube_radius_mm: trxviz_core::units::Millimeters(0.4),
                 tube_sides: 8,
                 slab_half_width_mm: trxviz_core::units::Millimeters(5.0),
+                opacity: 1.0,
             },
         };
 

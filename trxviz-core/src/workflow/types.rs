@@ -515,6 +515,21 @@ pub struct NodeEvalState {
     pub fingerprint: Option<u64>,
     pub last_result_summary: Option<String>,
     pub available_streamline_groups: Vec<String>,
+    /// DPS / DPV field names present on the streamline output of this
+    /// node's last evaluation. The inspector uses these to populate
+    /// comboboxes in `ColorByDps` / `ColorByDpv` so the user can pick
+    /// from the actual available fields rather than typing the name.
+    pub available_dps_fields: Vec<String>,
+    pub available_dpv_fields: Vec<String>,
+    /// Names of op params whose value was overridden by a `TrackingPlan` on
+    /// the last evaluation. The UI uses this to grey out the corresponding
+    /// sliders and advertise that the plan is winning.
+    pub overridden_fields: Vec<String>,
+    /// For each overridden numeric field, the effective value. The UI binds
+    /// this to the greyed-out slider so the user sees the plan's value in
+    /// place of the op's own. Non-numeric overrides (e.g. `seed_mask`) only
+    /// appear in `overridden_fields`.
+    pub overridden_values: std::collections::BTreeMap<String, f32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -556,7 +571,14 @@ impl BundleSurfaceColorMode {
     pub fn label(self) -> &'static str {
         match self {
             Self::Solid => "Solid",
-            Self::BoundaryField => "Boundary field",
+            // Display label only — the enum variant is still named
+            // `BoundaryField` internally so the data type
+            // `BoundaryContactField` and `boundary_field_cache` keep
+            // their names. The user-facing language is "direction
+            // field" because the producer (StreamlineDirectionField)
+            // and one of the consumers (Purifibre) aren't
+            // boundary-glyph-specific.
+            Self::BoundaryField => "Direction field",
             Self::SourceColors => "Source colors",
         }
     }
@@ -588,6 +610,13 @@ impl WorkflowExecutionStatus {
 pub struct ExpensiveNodeRunRecord {
     pub current_fingerprint: Option<u64>,
     pub last_success_fingerprint: Option<u64>,
+    /// Fingerprint at which the user most recently cancelled this node.
+    /// The GUI's `should_queue_expensive_job` treats a match here the
+    /// same as a `last_success_fingerprint` match: don't auto-re-run.
+    /// Cleared when the user clicks a Run button (so a second click
+    /// retries at the same fingerprint) or when the fingerprint
+    /// changes (because it won't match anymore).
+    pub last_cancelled_fingerprint: Option<u64>,
     pub status: WorkflowExecutionStatus,
     pub last_result_summary: Option<String>,
 }
@@ -597,6 +626,7 @@ impl Default for ExpensiveNodeRunRecord {
         Self {
             current_fingerprint: None,
             last_success_fingerprint: None,
+            last_cancelled_fingerprint: None,
             status: WorkflowExecutionStatus::NeverRun,
             last_result_summary: None,
         }
@@ -654,6 +684,82 @@ pub struct WorkflowExecutionCache {
     pub bundle_surface_mesh_cache: HashMap<WorkflowNodeUuid, CachedBundleSurfaceMeshes>,
     pub boundary_field_cache: HashMap<WorkflowNodeUuid, CachedBoundaryField>,
     pub odx_dpv_materializations: HashMap<WorkflowNodeUuid, OdxDpvMaterialization>,
+    pub dipy_tractography_results: HashMap<WorkflowNodeUuid, CachedTractographyResult>,
+    pub yeh_tractography_results: HashMap<WorkflowNodeUuid, CachedTractographyResult>,
+    pub voxel_mask_mesh_cache: HashMap<WorkflowNodeUuid, CachedVoxelMaskMesh>,
+    pub hausdorff_plan_cache: HashMap<WorkflowNodeUuid, CachedHausdorffPlan>,
+    pub tip_prune_cache: HashMap<WorkflowNodeUuid, CachedTipPrune>,
+    pub purifibre_cache: HashMap<WorkflowNodeUuid, CachedPurifibre>,
+    /// `StreamlineSourceOp` evaluates on every refresh; without
+    /// caching it would `Arc::new` a fresh `StreamlineDataset`
+    /// each time and downstream `Arc::as_ptr`-based fingerprints
+    /// (see `hash_flow`) would rebuild caches on every eval.
+    /// Reusing the cached Arc when the underlying `gpu_data`
+    /// pointer is unchanged keeps fingerprints stable.
+    pub streamline_source_datasets: HashMap<WorkflowNodeUuid, Arc<StreamlineDataset>>,
+}
+
+#[derive(Clone)]
+pub struct CachedHausdorffPlan {
+    pub fingerprint: u64,
+    pub plan: Arc<TrackingPlan>,
+    pub seed_mask: Arc<VoxelMask>,
+    pub limiting_mask: Arc<VoxelMask>,
+    pub no_end_mask: Arc<VoxelMask>,
+    pub summary: String,
+}
+
+#[derive(Clone)]
+pub struct CachedTipPrune {
+    pub fingerprint: u64,
+    pub selected: Vec<crate::units::StreamlineIndex>,
+    pub summary: String,
+}
+
+/// Purifibre result cache entry.
+///
+/// The op produces *two* outputs — the scored passthrough (all input
+/// streamlines, with FICO attached) and the filtered survivors — but
+/// both share the same underlying `StreamlineDataset` (differing only
+/// in the `selected_streamlines` list).
+///
+/// Cache shape splits "scoring" from "thresholding" so dragging the
+/// `puri_fraction` slider doesn't trigger a full re-score:
+///
+/// - `score_fingerprint` covers params and inputs that affect the
+///   per-streamline FICO computation (trim_fraction,
+///   spherical_smoothing_deg, upstream streamlines + boundary field).
+/// - `filter_fingerprint` adds `puri_fraction` on top.
+///
+/// On evaluation:
+///   - score_fingerprint matches → reuse `scored_dataset` + raw
+///     `fico_scores`; just re-threshold to get a new
+///     `filtered_selection`. Cheap (sort + filter).
+///   - score_fingerprint mismatches → re-score from scratch.
+#[derive(Clone)]
+pub struct CachedPurifibre {
+    pub score_fingerprint: u64,
+    pub filter_fingerprint: u64,
+    /// Input streamlines dataset with the `"fico"` DPS field attached.
+    /// Shared between the scored-passthrough and filtered outputs.
+    pub scored_dataset: Arc<StreamlineDataset>,
+    /// Selection for output 0 (scored passthrough) — equals the input
+    /// `selected_streamlines`, unmodified.
+    pub scored_selection: Vec<crate::units::StreamlineIndex>,
+    /// Per-streamline FICO scores (length = `nb_streamlines`, NaN for
+    /// unscored). Kept around so re-thresholding doesn't need to
+    /// re-walk segments.
+    pub fico_scores: Vec<f32>,
+    /// Selection for output 1 (filtered) — streamlines that survived
+    /// the puri_fraction cutoff.
+    pub filtered_selection: Vec<crate::units::StreamlineIndex>,
+    pub summary: String,
+}
+
+#[derive(Clone)]
+pub struct CachedTractographyResult {
+    pub fingerprint: u64,
+    pub flow: StreamlineFlow,
 }
 
 #[derive(Clone)]
@@ -671,9 +777,40 @@ pub struct SceneFramePlan {
     pub parcellation_draws: Vec<ParcellationDrawPlan>,
     pub boundary_field_plans: Vec<BoundaryFieldPlan>,
     pub boundary_glyph_draws: Vec<BoundaryGlyphDrawPlan>,
+    /// Node UUIDs of `StreamlineDirectionField` (or other BoundaryField-
+    /// producing) nodes whose cached field is being *consumed* by a
+    /// downstream op for its own computation (not just for rendering).
+    /// The GUI's post-render cache-pruning sweep keeps
+    /// `boundary_field_cache` entries for any UUID in this set in
+    /// addition to those referenced by `bundle_draws` /
+    /// `boundary_glyph_draws`. Populated by inline ops like Purifibre
+    /// that hold a `BoundaryField` input but don't emit a draw plan —
+    /// without this, the retain() sweep would silently drop their
+    /// upstream field and leave them forever stale.
+    pub boundary_fields_in_use: std::collections::HashSet<WorkflowNodeUuid>,
     pub fixel_3d_draws: Vec<FixelDrawPlan>,
     pub fixel_2d_draws: Vec<FixelDrawPlan>,
     pub odf_glyph_draws: Vec<OdfGlyphDrawPlan>,
+    pub dipy_tractography_plans: Vec<DipyTractographyPlan>,
+    pub yeh_tractography_plans: Vec<YehTractographyPlan>,
+    pub voxel_mask_mesh_draws: Vec<VoxelMaskMeshDrawPlan>,
+}
+
+#[derive(Clone)]
+pub struct VoxelMaskMeshDrawPlan {
+    pub node_uuid: WorkflowNodeUuid,
+    pub draw_id: FileId,
+    pub label: String,
+    pub fingerprint: u64,
+    pub color: [f32; 4],
+    pub opacity: f32,
+}
+
+#[derive(Clone)]
+pub struct CachedVoxelMaskMesh {
+    pub fingerprint: u64,
+    pub mesh: crate::data::bundle_mesh::BundleMesh,
+    pub draw_id: FileId,
 }
 
 #[derive(Clone)]
@@ -688,6 +825,12 @@ pub struct FixelDrawPlan {
     pub visible: bool,
     pub colormap_code: u32,
     pub scalar_range: (f32, f32),
+    /// Per-fixel opacity gate applied in-shader to the instance scalar.
+    /// `OpacityGate::default()` (pass-through) leaves all fixels at full
+    /// alpha. When auto-wired from `scene.default_fixel_otsu()`, fixels
+    /// below the tracking-Otsu band fade to `below` alpha so the user
+    /// sees which fixels feed tracking vs which are sub-threshold.
+    pub opacity_gate: OpacityGate,
 }
 
 #[derive(Clone)]
@@ -723,12 +866,16 @@ impl Default for SceneFramePlan {
             volume_scalar_draws: Vec::new(),
             bundle_surface_plans: Vec::new(),
             bundle_draws: Vec::new(),
+            boundary_fields_in_use: std::collections::HashSet::new(),
             parcellation_draws: Vec::new(),
             boundary_field_plans: Vec::new(),
             boundary_glyph_draws: Vec::new(),
             fixel_3d_draws: Vec::new(),
             fixel_2d_draws: Vec::new(),
             odf_glyph_draws: Vec::new(),
+            dipy_tractography_plans: Vec::new(),
+            yeh_tractography_plans: Vec::new(),
+            voxel_mask_mesh_draws: Vec::new(),
         }
     }
 }
@@ -741,6 +888,10 @@ pub struct StreamlineFlow {
     pub scalar_auto_range: bool,
     pub scalar_range_min: f32,
     pub scalar_range_max: f32,
+    /// Colormap used when `color_mode` is a scalar mode
+    /// (`Dps` / `Dpv`). Ignored for `DirectionRgb`, `Group`,
+    /// `Uniform`. Defaults to `BlueWhiteRed`.
+    pub scalar_colormap: SurfaceColormap,
 }
 
 #[derive(Clone)]
@@ -777,6 +928,10 @@ pub struct StreamlineDrawPlan {
     pub tube_radius_mm: Millimeters,
     pub tube_sides: u32,
     pub slab_half_width_mm: Millimeters,
+    /// Per-display opacity multiplier in [0, 1]. Multiplied with the
+    /// per-vertex color alpha by the streamline / tube fragment
+    /// shader. 1.0 = fully opaque (default).
+    pub opacity: f32,
 }
 
 #[derive(Clone)]
@@ -938,6 +1093,7 @@ pub struct BoundaryFieldPlan {
     pub voxel_size_mm: Millimeters,
     pub sphere_lod: u32,
     pub normalization: BoundaryGlyphNormalization,
+    pub binning_mode: crate::data::orientation_field::DirectionFieldBinningMode,
 }
 
 #[derive(Clone)]
@@ -990,6 +1146,106 @@ pub(crate) enum WorkflowValue {
     FixelScalars(crate::data::odx_data::FixelScalars),
     OdfField(crate::data::odx_data::OdfField),
     OdxCatalog(crate::data::odx_data::OdxCatalog),
+    VoxelMask(Arc<VoxelMask>),
+    TrackingPlan(Arc<TrackingPlan>),
+}
+
+/// A voxel-space binary mask. Replaces the earlier point-cloud `SeedRoi`; now
+/// fills every region role in a `TrackingPlan` (seed / limiting / roa / term /
+/// end / no_end).
+#[derive(Clone, Debug)]
+pub struct VoxelMask {
+    pub dims: [u32; 3],
+    pub voxel_to_ras: glam::Mat4,
+    /// Row-major over (x, y, z): linear index = x + dims.x * (y + dims.y * z).
+    /// One byte per voxel; non-zero = inside the mask.
+    pub data: Vec<u8>,
+}
+
+impl VoxelMask {
+    pub fn lin_idx(&self, x: u32, y: u32, z: u32) -> usize {
+        (x as usize)
+            + (self.dims[0] as usize) * ((y as usize) + (self.dims[1] as usize) * (z as usize))
+    }
+
+    pub fn count(&self) -> usize {
+        self.data.iter().filter(|&&b| b != 0).count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.iter().all(|&b| b == 0)
+    }
+
+    /// Enumerate RAS+mm centers of every non-zero voxel.
+    pub fn nonzero_voxel_centers_ras(&self) -> Vec<[f32; 3]> {
+        let [nx, ny, nz] = self.dims;
+        let mut out = Vec::new();
+        for z in 0..nz {
+            for y in 0..ny {
+                for x in 0..nx {
+                    let idx = self.lin_idx(x, y, z);
+                    if self.data[idx] != 0 {
+                        let p = self
+                            .voxel_to_ras
+                            .transform_point3(glam::Vec3::new(x as f32, y as f32, z as f32));
+                        out.push([p.x, p.y, p.z]);
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
+/// A plan bundling every spatial role a tractography method may consult.
+/// Fields are optional; any subset may be populated. An unwired input to a
+/// tracking op synthesizes a plan from the ODX/fixel whole-mask with no
+/// constraints.
+#[derive(Clone, Debug)]
+pub struct TrackingPlan {
+    pub label: String,
+    pub grid_dims: [u32; 3],
+    pub voxel_to_ras: glam::Mat4,
+    // Per-step constraints (enforced during GPU propagation).
+    pub seed_mask: Option<Arc<VoxelMask>>,
+    pub limiting_mask: Option<Arc<VoxelMask>>,
+    pub roa_mask: Option<Arc<VoxelMask>>,
+    pub term_mask: Option<Arc<VoxelMask>>,
+    // Post-hoc whole-streamline filters (applied after GPU readback).
+    /// Waypoint regions — a streamline must pass through **every** mask in
+    /// this list to be kept (AND semantics). Applied post-hoc.
+    pub roi_masks: Vec<Arc<VoxelMask>>,
+    pub end_masks: Vec<Arc<VoxelMask>>,
+    pub no_end_mask: Option<Arc<VoxelMask>>,
+    pub post_filter: Option<PostFilter>,
+    // Optional per-parameter overrides. When `Some`, a consuming tracker
+    // should use the plan's value instead of its own slider. Anything left
+    // `None` falls back to the tracker's own setting. `tolerance_mm` is
+    // carried for informational purposes and for future limiting-mask
+    // enforcement.
+    pub min_len_mm: Option<f32>,
+    pub max_len_mm: Option<f32>,
+    pub max_angle_deg: Option<f32>,
+    pub step_size_mm: Option<f32>,
+    pub fixel_threshold: Option<f32>,
+    /// Yeh-specific direction-smoothing fraction. Other trackers ignore.
+    pub smooth_fraction: Option<f32>,
+    pub tolerance_mm: Option<f32>,
+    /// Otsu threshold of the tracking-metric scalar, in its native
+    /// units. When `Some`, consuming trackers scale their fixel-threshold
+    /// sentinel randomization (`fixel_threshold <= 0`) to
+    /// `[0.5·fixel_otsu, 0.7·fixel_otsu]`, matching DSI-Studio.
+    pub fixel_otsu: Option<f32>,
+}
+
+#[derive(Clone, Debug)]
+pub enum PostFilter {
+    /// Reject a candidate streamline if its mean min-distance to the
+    /// reference point cloud exceeds `max_mm`.
+    Hausdorff {
+        reference_points_ras: Arc<Vec<[f32; 3]>>,
+        max_mm: f32,
+    },
 }
 
 #[derive(Clone)]
@@ -1032,6 +1288,179 @@ impl Default for StreamlineDisplayRuntime {
     }
 }
 
+/// Direction-getter variant used by the DIPY-style local tracker.
+///
+/// Mirrors DIPY's swappable direction-getter abstraction: every variant
+/// shares the same outer `LocalTracking` skeleton (seed loop, forward/
+/// backward branches, stitching, post-filters) and differs only in how
+/// the per-step direction is chosen. Pure-data variants (`Probabilistic`)
+/// are parameter-free here — they read what they need from the parent
+/// `DipyTractographyPlan` (e.g. `relative_peak_threshold`). Variants
+/// with their own knobs (`Ptt`) carry them inline.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum DipyDirectionGetter {
+    /// PMF-on-sphere sampling (the existing implementation in cpu_dipy.rs).
+    Probabilistic,
+    /// Parallel Transport Tractography (Aydogan & Shi 2021).
+    ///
+    /// Implementation lives in `gpu/dipy.rs::run_gpu_dipy_ptt` (GPU
+    /// only — no CPU reference yet). See `docs/ptt-implementation-notes.md`
+    /// for the algorithm overview and parameter mapping vs. nibrary/DIPY.
+    Ptt {
+        /// Length (mm) of each candidate arc evaluated per step.
+        probe_length_mm: f32,
+        /// Number of FOD samples taken along each candidate arc when
+        /// scoring it. (DIPY parameter name: `probe_quality`.)
+        probe_quality: u32,
+        /// Radius (mm) of the circumferential probe samples around
+        /// each arc point. `0.0` means a degenerate probe — single
+        /// sample at the arc point itself.
+        probe_radius_mm: f32,
+        /// Number of circumferential samples around each arc point at
+        /// `probe_radius_mm`. `1` collapses to a single on-axis sample.
+        probe_count: u32,
+        /// Maximum frame curvature (1/mm) considered when generating
+        /// candidate arcs. Larger = sharper turns allowed.
+        max_curvature_per_mm: f32,
+        /// Exponent applied to the per-candidate data support (FOD
+        /// integral). DIPY default 1.0; values > 1 sharpen the
+        /// posterior toward the strongest candidates.
+        data_support_exponent: f32,
+        /// Floor on candidate data support. Candidates below this are
+        /// rejected outright. DIPY default 0.05.
+        min_data_support: f32,
+        /// Maximum candidate evaluations per step before giving up
+        /// the streamline. DIPY default 100.
+        rejection_sampling_max_try: u32,
+    },
+}
+
+impl Default for DipyDirectionGetter {
+    fn default() -> Self {
+        DipyDirectionGetter::Probabilistic
+    }
+}
+
+impl DipyDirectionGetter {
+    /// DIPY-equivalent default PTT parameters. Convenience constructor
+    /// so callers don't need to remember every field.
+    pub fn ptt_default() -> Self {
+        DipyDirectionGetter::Ptt {
+            probe_length_mm: 0.5,
+            probe_quality: 4,
+            probe_radius_mm: 0.0,
+            probe_count: 1,
+            max_curvature_per_mm: 1.0 / 3.0,
+            data_support_exponent: 1.0,
+            min_data_support: 0.05,
+            rejection_sampling_max_try: 100,
+        }
+    }
+}
+
+/// Parameters and inputs for a GPU/CPU tractography run.
+#[derive(Clone)]
+pub struct DipyTractographyPlan {
+    pub node_uuid: WorkflowNodeUuid,
+    pub label: String,
+    /// Authoritative fingerprint for this plan — the hash the GUI keys
+    /// the in-flight job and result cache on. Computed by the op
+    /// during `evaluate()` from its config + upstream identity and
+    /// persists unchanged through dispatch / completion / caching.
+    /// Replaces the previous "GUI reads fingerprint from
+    /// `node_runs.current_fingerprint` with an `unwrap_or(0)` fallback"
+    /// pattern that produced PR 1's silent-discard race.
+    pub fingerprint: crate::workflow::op::ContentHash,
+    pub odx_source_id: FileId,
+    pub odx_scene: Arc<crate::data::odx_data::OdxScene>,
+    /// When `None`, seed from every voxel in the ODX mask (whole-brain,
+    /// mirroring Yeh's default when no mask is wired).
+    pub seed_mask: Option<Arc<VoxelMask>>,
+    pub step_size_mm: f32,
+    pub max_angle_deg: f32,
+    pub min_len_mm: f32,
+    pub max_len_mm: f32,
+    pub fixel_threshold: f32,
+    pub relative_peak_threshold: f32,
+    pub seeds_per_voxel: u32,
+    pub max_points: u32,
+    pub rng_seed: u64,
+    // Constraint masks populated from a wired `TrackingPlan`. Enforced by
+    // the CPU tracker (per-step for limiting/roa/term; post-hoc for
+    // roi/end/no_end/post_filter). The current GPU path ignores them.
+    pub limiting_mask: Option<Arc<VoxelMask>>,
+    pub roa_mask: Option<Arc<VoxelMask>>,
+    pub term_mask: Option<Arc<VoxelMask>>,
+    pub roi_masks: Vec<Arc<VoxelMask>>,
+    pub end_masks: Vec<Arc<VoxelMask>>,
+    pub no_end_mask: Option<Arc<VoxelMask>>,
+    pub post_filter: Option<PostFilter>,
+    /// Otsu threshold in the tracking metric's native units (see
+    /// `TrackingPlan::fixel_otsu`). Drives the CPU tracker's
+    /// `fixel_threshold <= 0` randomization base.
+    pub fixel_otsu: Option<f32>,
+    /// Which DIPY direction-getter to use. Defaults to `Probabilistic`
+    /// (the only variant currently implemented on CPU).
+    pub direction_getter: DipyDirectionGetter,
+}
+
+#[derive(Clone)]
+pub struct YehTractographyPlan {
+    pub node_uuid: WorkflowNodeUuid,
+    pub label: String,
+    /// Authoritative fingerprint for this plan — see the note on
+    /// `DipyTractographyPlan::fingerprint`. The GUI reads this field
+    /// directly when queueing a job; no more `unwrap_or(0)` fallback
+    /// through the cache.
+    pub fingerprint: crate::workflow::op::ContentHash,
+    pub odx_source_id: FileId,
+    pub odx_scene: Arc<crate::data::odx_data::OdxScene>,
+    /// When `None`, seed from every voxel with at least one fixel peak.
+    pub seed_mask: Option<Arc<VoxelMask>>,
+    /// Per-step: streamline terminates if it leaves this mask.
+    pub limiting_mask: Option<Arc<VoxelMask>>,
+    /// Per-step: streamline is rejected if it enters this mask.
+    pub roa_mask: Option<Arc<VoxelMask>>,
+    /// Per-step: streamline terminates cleanly if it enters this mask.
+    pub term_mask: Option<Arc<VoxelMask>>,
+    /// Post-hoc: streamline must pass through **every** mask in this list
+    /// (AND-semantics waypoints).
+    pub roi_masks: Vec<Arc<VoxelMask>>,
+    /// Post-hoc: streamline must touch each of these end regions at an
+    /// endpoint (DSI-Studio-style end_region logic, simplified to "at least
+    /// one endpoint per end_mask").
+    pub end_masks: Vec<Arc<VoxelMask>>,
+    /// Post-hoc: streamline is rejected if either endpoint lies in this
+    /// mask.
+    pub no_end_mask: Option<Arc<VoxelMask>>,
+    /// Post-hoc: additional filter (e.g. Hausdorff distance to reference).
+    pub post_filter: Option<PostFilter>,
+    /// Base step size (mm). Per-seed step ∈ [0.5, 1.5] × this value.
+    pub step_size_mm: f32,
+    /// Maximum turning angle (degrees). Per-seed angle sampled ∈
+    /// [max_angle_deg/2, max_angle_deg].
+    pub max_angle_deg: f32,
+    pub min_len_mm: f32,
+    pub max_len_mm: f32,
+    /// Base fixel threshold. Per-seed threshold jittered ∈ [base − 0.1, base + 0.1].
+    pub fixel_threshold: f32,
+    /// Direction smoothing fraction. 0.0 = pure new peak, 0.95 = heavy
+    /// carry-over, and the sentinel **1.0** triggers per-seed randomization
+    /// in `[0.0, 0.95]` (matches DSI-Studio).
+    pub smooth_fraction: f32,
+    pub max_points: u32,
+    /// Stop seeding once this many streamlines have been kept.
+    pub target_streamlines: u32,
+    /// Safety cap: stop even if `target_streamlines` hasn't been reached after
+    /// this many random seed attempts.
+    pub max_seed_attempts: u32,
+    pub rng_seed: u64,
+    /// Otsu threshold in the tracking metric's native units (see
+    /// `TrackingPlan::fixel_otsu`). Used as the base value for the
+    /// `fixel_threshold <= 0` sentinel randomization.
+    pub fixel_otsu: Option<f32>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WorkflowJobKind {
     ReactiveStreamline,
@@ -1040,6 +1469,8 @@ pub enum WorkflowJobKind {
     TubeGeometry,
     BundleSurface,
     BoundaryField,
+    DipyTractography,
+    YehTractography,
 }
 
 #[derive(Clone)]
@@ -1055,6 +1486,14 @@ pub enum WorkflowJobPayload {
     },
     BoundaryField {
         plan: BoundaryFieldPlan,
+    },
+    DipyTractography {
+        plan: DipyTractographyPlan,
+        device: Option<wgpu::Device>,
+        queue: Option<wgpu::Queue>,
+    },
+    YehTractography {
+        plan: YehTractographyPlan,
     },
 }
 
@@ -1073,12 +1512,29 @@ pub enum WorkflowJobOutput {
     BoundaryField {
         field: Option<Arc<BoundaryContactField>>,
     },
+    DipyTractography {
+        flow: StreamlineFlow,
+    },
+    YehTractography {
+        flow: StreamlineFlow,
+    },
 }
 
 pub enum WorkflowJobMessage {
     Started {
         node_uuid: WorkflowNodeUuid,
         fingerprint: u64,
+    },
+    /// Incremental progress from a long-running job. Trackers emit
+    /// these every ~1024 attempts (CPU) or every batch (GPU) so the
+    /// GUI can render a real progress bar rather than just a spinner.
+    /// `done` and `total` are in whatever unit makes sense for the op
+    /// (attempts for CPU tractography, seeds for GPU).
+    Progress {
+        node_uuid: WorkflowNodeUuid,
+        fingerprint: u64,
+        done: u64,
+        total: u64,
     },
     Finished {
         node_uuid: WorkflowNodeUuid,
@@ -1104,6 +1560,8 @@ pub enum PortKind {
     FixelScalars,
     OdfField,
     OdxCatalog,
+    VoxelMask,
+    TrackingPlan,
 }
 
 pub struct SeededWorkflowBranch {

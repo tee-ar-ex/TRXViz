@@ -98,6 +98,23 @@ pub(crate) fn summarize_value(value: &WorkflowValue) -> String {
             c.dpv_names.len(),
             c.dpf_names.len()
         ),
+        WorkflowValue::VoxelMask(m) => format!("{} voxels", m.count()),
+        WorkflowValue::TrackingPlan(p) => {
+            let parts = [
+                p.seed_mask.as_ref().map(|_| "seed"),
+                p.limiting_mask.as_ref().map(|_| "limiting"),
+                p.roa_mask.as_ref().map(|_| "roa"),
+                p.term_mask.as_ref().map(|_| "term"),
+                p.no_end_mask.as_ref().map(|_| "no_end"),
+                p.post_filter.as_ref().map(|_| "post_filter"),
+            ];
+            let active: Vec<&str> = parts.iter().filter_map(|p| *p).collect();
+            if active.is_empty() {
+                "tracking plan (empty)".to_string()
+            } else {
+                format!("tracking plan ({})", active.join(", "))
+            }
+        }
     }
 }
 
@@ -184,6 +201,7 @@ pub(crate) fn add_groups_from_parcellation_from_label(
         scalar_auto_range: flow.scalar_auto_range,
         scalar_range_min: flow.scalar_range_min,
         scalar_range_max: flow.scalar_range_max,
+        scalar_colormap: flow.scalar_colormap,
     })
 }
 
@@ -267,6 +285,7 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 scalar_auto_range: left.scalar_auto_range,
                 scalar_range_min: left.scalar_range_min,
                 scalar_range_max: left.scalar_range_max,
+                scalar_colormap: left.scalar_colormap,
             })
         }
         ReactiveStreamlineOp::ParcelROA {
@@ -292,6 +311,7 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 scalar_auto_range: left.scalar_auto_range,
                 scalar_range_min: left.scalar_range_min,
                 scalar_range_max: left.scalar_range_max,
+                scalar_colormap: left.scalar_colormap,
             })
         }
         ReactiveStreamlineOp::ParcelEnd {
@@ -318,6 +338,7 @@ pub(crate) fn materialize_reactive_streamline_flow(
                 scalar_auto_range: left.scalar_auto_range,
                 scalar_range_min: left.scalar_range_min,
                 scalar_range_max: left.scalar_range_max,
+                scalar_colormap: left.scalar_colormap,
             })
         }
         ReactiveStreamlineOp::ParcelCrop {
@@ -360,6 +381,7 @@ fn streamline_flow_from_tractogram(
         scalar_auto_range: true,
         scalar_range_min: 0.0,
         scalar_range_max: 1.0,
+        scalar_colormap: source_flow.scalar_colormap,
     })
 }
 

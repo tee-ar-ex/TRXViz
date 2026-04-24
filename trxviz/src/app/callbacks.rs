@@ -57,6 +57,7 @@ pub(super) struct StreamlineDrawInfo {
     pub render_style: RenderStyle,
     pub tube_radius: f32,
     pub slab_half_width: f32,
+    pub opacity: f32,
 }
 
 #[derive(Clone)]
@@ -89,6 +90,7 @@ pub(super) struct Scene3DCallback {
     pub(super) odx_amp_norm: f32,
     pub(super) odx_fixel_line_width: f32,
     pub(super) odx_fixel_opacity: f32,
+    pub(super) odx_fixel_opacity_gate: [f32; 4],
     pub(super) odx_fixel_length_scale: f32,
     pub(super) odx_fixel_visible: bool,
     pub(super) odx_fixel_colormap_code: u32,
@@ -142,6 +144,7 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                         glam::Vec3::ZERO, // slab_center
                         0.0,              // slab_half_width = 0 → disabled
                         aux,
+                        sd.opacity,
                         self.scene_lighting,
                         &self.render_3d,
                         self.fog_near,
@@ -261,6 +264,7 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                     1, // draw_step
                     self.odx_fixel_line_width,
                     self.odx_fixel_opacity,
+                    self.odx_fixel_opacity_gate,
                     self.scene_lighting,
                     &self.render_3d,
                     self.fog_near,
@@ -429,6 +433,7 @@ pub(super) struct SliceViewCallback {
     pub(super) odx_glyph_gloss: f32,
     pub(super) odx_fixel_line_width: f32,
     pub(super) odx_fixel_opacity: f32,
+    pub(super) odx_fixel_opacity_gate: [f32; 4],
     pub(super) odx_fixel_slab_half_width_mm: f32,
     pub(super) odx_glyph_scale: f32,
     pub(super) odx_fixel_length_scale: f32,
@@ -491,6 +496,7 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                         self.slab_center,
                         hw,
                         0.5,
+                        sd.opacity,
                         self.scene_lighting,
                         &neutral_render,
                         0.0,
@@ -564,6 +570,7 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                     1, // draw_step
                     self.odx_fixel_line_width,
                     self.odx_fixel_opacity,
+                    self.odx_fixel_opacity_gate,
                     self.scene_lighting,
                     &WorkflowRender3D {
                         vignette_strength: 0.0,

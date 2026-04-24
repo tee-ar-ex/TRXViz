@@ -164,6 +164,25 @@ pub(crate) fn group_name_color(name: &str) -> Option<[f32; 4]> {
 }
 
 impl TrxGpuData {
+    /// Build from raw positions and offsets only (no per-vertex/streamline metadata).
+    /// Used to package synthetic tractography output into the standard data type.
+    pub fn from_positions_and_offsets(positions: Vec<[f32; 3]>, offsets: Vec<u32>) -> Self {
+        let nb_streamlines = offsets.len().saturating_sub(1);
+        let nb_vertices = positions.len();
+        Self::from_components(
+            positions,
+            offsets,
+            nb_streamlines,
+            nb_vertices,
+            ExtractedMetadata {
+                dpv_data: Vec::new(),
+                dps_data: Vec::new(),
+                groups: Vec::new(),
+                group_colors: Vec::new(),
+            },
+        )
+    }
+
     pub fn from_tractogram(tractogram: &Tractogram) -> anyhow::Result<Self> {
         let positions = tractogram.positions().to_vec();
         let nb_vertices = positions.len();
@@ -248,14 +267,20 @@ impl TrxGpuData {
     }
 
     /// Recompute vertex colors based on the given color mode.
-    /// For scalar modes (DPV/DPS), `scalar_range` overrides automatic range detection.
-    pub fn recolor(&mut self, mode: &ColorMode, scalar_range: Option<(f32, f32)>) {
+    /// For scalar modes (DPV/DPS), `scalar_range` overrides automatic
+    /// range detection and `colormap` selects the colormap.
+    pub fn recolor(
+        &mut self,
+        mode: &ColorMode,
+        scalar_range: Option<(f32, f32)>,
+        colormap: crate::renderer::mesh_renderer::SurfaceColormap,
+    ) {
         self.colors = match mode {
             ColorMode::DirectionRgb => direction_colors_from_tangents(&self.tangents),
             ColorMode::Dpv(name) => {
                 if let Some((_, data)) = self.dpv_data.iter().find(|(n, _)| n == name) {
                     let (lo, hi) = scalar_range.unwrap_or_else(|| scalar_auto_range(data));
-                    scalar_to_colors_ranged(data, lo, hi)
+                    scalar_to_colors_ranged(data, lo, hi, colormap)
                 } else {
                     vec![[0.5, 0.5, 0.5, 1.0]; self.nb_vertices]
                 }
@@ -263,7 +288,14 @@ impl TrxGpuData {
             ColorMode::Dps(name) => {
                 if let Some((_, data)) = self.dps_data.iter().find(|(n, _)| n == name) {
                     let (lo, hi) = scalar_range.unwrap_or_else(|| scalar_auto_range(data));
-                    expand_dps_to_vertices_ranged(data, &self.offsets, self.nb_vertices, lo, hi)
+                    expand_dps_to_vertices_ranged(
+                        data,
+                        &self.offsets,
+                        self.nb_vertices,
+                        lo,
+                        hi,
+                        colormap,
+                    )
                 } else {
                     vec![[0.5, 0.5, 0.5, 1.0]; self.nb_vertices]
                 }
@@ -772,14 +804,20 @@ pub fn scalar_auto_range(values: &[f32]) -> (f32, f32) {
     (lo, hi.max(lo + 1e-6))
 }
 
-/// Map scalar values to the blue→white→red colormap using an explicit range.
-pub fn scalar_to_colors_ranged(values: &[f32], min_v: f32, max_v: f32) -> Vec<[f32; 4]> {
+/// Map scalar values to the chosen colormap using an explicit range.
+pub fn scalar_to_colors_ranged(
+    values: &[f32],
+    min_v: f32,
+    max_v: f32,
+    colormap: crate::renderer::mesh_renderer::SurfaceColormap,
+) -> Vec<[f32; 4]> {
     let range = (max_v - min_v).max(1e-10);
     values
         .iter()
         .map(|&v| {
             let t = ((v - min_v) / range).clamp(0.0, 1.0);
-            colormap_bwr(t)
+            let [r, g, b] = crate::renderer::colormap::surface_colormap_rgb(t, colormap);
+            [r, g, b, 1.0]
         })
         .collect()
 }
@@ -985,6 +1023,7 @@ fn expand_dps_to_vertices_ranged(
     nb_vertices: usize,
     min_v: f32,
     max_v: f32,
+    colormap: crate::renderer::mesh_renderer::SurfaceColormap,
 ) -> Vec<[f32; 4]> {
     let mut per_vertex = vec![0.0f32; nb_vertices];
     for (si, &val) in dps_values.iter().enumerate() {
@@ -996,7 +1035,7 @@ fn expand_dps_to_vertices_ranged(
             }
         }
     }
-    scalar_to_colors_ranged(&per_vertex, min_v, max_v)
+    scalar_to_colors_ranged(&per_vertex, min_v, max_v, colormap)
 }
 
 fn aabb_overlaps_expanded_surface(aabb: &StreamlineAabb, smin: Vec3, smax: Vec3) -> bool {
@@ -1087,7 +1126,11 @@ mod tests {
         );
 
         let mut gpu = TrxGpuData::from_tractogram(&tractogram).unwrap();
-        gpu.recolor(&ColorMode::Group, None);
+        gpu.recolor(
+            &ColorMode::Group,
+            None,
+            crate::renderer::mesh_renderer::SurfaceColormap::default(),
+        );
         assert_eq!(
             gpu.colors[0],
             [10.0 / 255.0, 20.0 / 255.0, 30.0 / 255.0, 1.0]
@@ -1107,7 +1150,11 @@ mod tests {
         tractogram.insert_group("AF_L", vec![0]);
 
         let mut gpu = TrxGpuData::from_tractogram(&tractogram).unwrap();
-        gpu.recolor(&ColorMode::Group, None);
+        gpu.recolor(
+            &ColorMode::Group,
+            None,
+            crate::renderer::mesh_renderer::SurfaceColormap::default(),
+        );
         assert_eq!(gpu.colors[0], [0.09, 0.745, 0.812, 1.0]);
     }
 }

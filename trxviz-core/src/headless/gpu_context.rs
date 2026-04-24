@@ -170,6 +170,21 @@ pub(super) fn build_gpu_resources(
         streamlines.entries.push((draw.draw_id, resource));
     }
 
+    for draw in &workflow.runtime.scene_plan.voxel_mask_mesh_draws {
+        if let Some(cache) = workflow
+            .execution_cache
+            .voxel_mask_mesh_cache
+            .get(&draw.node_uuid)
+            .filter(|cache| cache.fingerprint == draw.fingerprint)
+        {
+            let one = [(cache.mesh.clone(), draw.label.clone())];
+            meshes.set_bundle_meshes(draw.draw_id, device, &one);
+            for vertex in &cache.mesh.vertices {
+                expand(Vec3::from(vertex.position));
+            }
+        }
+    }
+
     for draw in &workflow.runtime.scene_plan.bundle_draws {
         let fingerprint = workflow_bundle_display_fingerprint(
             draw,

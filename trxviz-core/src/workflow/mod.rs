@@ -2,6 +2,8 @@
 
 pub use crate::error::{WorkflowError, WorkflowResult};
 
+pub(super) mod cpu_dipy;
+pub(super) mod cpu_yeh;
 mod eval_inputs;
 mod eval_streamlines;
 mod eval_surface;
@@ -15,9 +17,13 @@ mod layout;
 mod op;
 mod ops;
 mod project_io;
+pub(super) mod purifibre;
 mod seed;
 mod seed_odx;
 mod simple_workflow;
+pub(super) mod tip;
+pub(crate) mod tracking;
+pub(crate) mod tracking_filters;
 mod types;
 
 pub use evaluate::{evaluate_scene_plan, evaluate_scene_plan_with_mode, save_streamline_plan};
@@ -29,8 +35,8 @@ pub use fingerprint::{
 };
 pub use graph::{GraphPos, GraphRect, InPort, OutPort, Wire, WorkflowGraph, WorkflowNodeEntry};
 pub use jobs::{
-    bundle_surface_component_flows, bundle_surface_solid_color, mark_expensive_success,
-    materialize_flow_gpu, prime_expensive_record, run_workflow_job,
+    bundle_surface_component_flows, bundle_surface_solid_color, mark_expensive_cancelled,
+    mark_expensive_success, materialize_flow_gpu, prime_expensive_record, run_workflow_job,
     sync_node_state_from_run_record, workflow_job_kind_title,
 };
 pub use layout::{
@@ -47,6 +53,11 @@ pub use seed_odx::*;
 pub use simple_workflow::*;
 pub use types::*;
 
+pub use op::{ContentHash, Diagnostic, DiagnosticSeverity, FingerprintCtx, ValidateCtx};
+pub use ops::fingerprint as fingerprint_op;
+pub use ops::validate as validate_op;
+pub use tracking::CancelFlag;
+
 pub(crate) use evaluate::{
     compose_surface_appearance, expect_boundary_field_input, expect_bundle_surface_input,
     expect_cifti_input, expect_surface_appearance_input, expect_volume_input,
@@ -61,16 +72,19 @@ pub(crate) use evaluate::{
 };
 pub(crate) use op::{EvalCtx, WorkflowOp};
 pub use ops::{
-    AddGroupsFromParcellationOp, BoundaryFieldBuildOp, BoundaryGlyphDisplayOp,
-    BundleSurfaceBuildOp, BundleSurfaceDisplayOp, CiftiSourceOp, CiftiStructureOp,
-    ColorByDirectionOp, ColorByDpsOp, ColorByDpvOp, ColorByFixelScalarsOp, ColorByGroupOp,
-    Fixel2DDisplayOp, Fixel3DDisplayOp, GroupSelectOp, LimitStreamlinesOp, MergeOp,
-    OdfGlyphRendererOp, OdxFixelScalarSelectOp, OdxSourceOp, OdxVolumeSelectOp, ParcelCropOp,
-    ParcelEndOp, ParcelRoaOp, ParcelRoiOp, ParcelSelectOp, ParcelSurfaceBuildOp,
-    ParcellationDisplayOp, ParcellationSourceOp, RandomSubsetOp, RemoveDuplicatesOp,
-    SaveStreamlinesOp, SphereQueryOp, StreamlineDisplayOp, StreamlineSourceOp, SurfaceDepthQueryOp,
+    AddEndRegionOp, AddGroupsFromParcellationOp, AddLimitingOp, AddNoEndOp, AddRoaOp, AddRoiOp,
+    AddTermOp, BoundaryGlyphDisplayOp, BundleSurfaceBuildOp, BundleSurfaceDisplayOp, CiftiSourceOp,
+    CiftiStructureOp, ColorByDirectionOp, ColorByDpsOp, ColorByDpvOp, ColorByFixelScalarsOp,
+    ColorByGroupOp, DipyTractographyOp, Fixel2DDisplayOp, Fixel3DDisplayOp, GroupSelectOp,
+    LimitStreamlinesOp, MergeOp, OdfGlyphRendererOp, OdxFixelScalarSelectOp, OdxSourceOp,
+    OdxVolumeSelectOp, ParcelCropOp, ParcelEndOp, ParcelRoaOp, ParcelRoiOp, ParcelSelectOp,
+    ParcelSurfaceBuildOp, ParcellationDisplayOp, ParcellationSourceOp, PrepareHausdorffPlanOp,
+    PrepareSimplePlanOp, PurifibreOp, RandomSubsetOp, RemoveDuplicatesOp, RoiFromParcelOp,
+    RoiFromShapeOp, RoiFromVolumeOp, RoiShape, SaveStreamlinesOp, SphereQueryOp,
+    StreamlineDirectionFieldOp, StreamlineDisplayOp, StreamlineSourceOp, SurfaceDepthQueryOp,
     SurfaceDisplayOp, SurfaceOverlayStackOp, SurfaceProjectionDensityOp,
-    SurfaceProjectionMeanDpsOp, SurfaceSourceOp, UniformColorOp, VolumeDisplayOp,
-    VolumeScalarsDisplayOp, VolumeSourceOp, WorkflowNodeKind,
+    SurfaceProjectionMeanDpsOp, SurfaceSourceOp, TipPruneOp, UniformColorOp, VolumeDisplayOp,
+    VolumeScalarsDisplayOp, VolumeSourceOp, VoxelMaskDisplayOp, WorkflowNodeKind,
+    YehTractographyOp,
 };
 pub(crate) use types::{EvaluatedValue, WorkflowValue};

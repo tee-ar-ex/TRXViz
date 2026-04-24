@@ -26,10 +26,11 @@ pub struct BundleSurfaceBuildOp {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct BoundaryFieldBuildOp {
+pub struct StreamlineDirectionFieldOp {
     pub voxel_size_mm: crate::units::Millimeters,
     pub sphere_lod: u32,
     pub normalization: crate::data::orientation_field::BoundaryGlyphNormalization,
+    pub binning_mode: crate::data::orientation_field::DirectionFieldBinningMode,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -73,12 +74,13 @@ impl Default for BundleSurfaceBuildOp {
     }
 }
 
-impl Default for BoundaryFieldBuildOp {
+impl Default for StreamlineDirectionFieldOp {
     fn default() -> Self {
         Self {
             voxel_size_mm: default_boundary_field_voxel_size_mm(),
             sphere_lod: default_boundary_field_sphere_lod(),
             normalization: default_boundary_field_normalization(),
+            binning_mode: crate::data::orientation_field::DirectionFieldBinningMode::default(),
         }
     }
 }
@@ -158,13 +160,13 @@ impl WorkflowOp for BundleSurfaceBuildOp {
     }
 }
 
-impl WorkflowOp for BoundaryFieldBuildOp {
+impl WorkflowOp for StreamlineDirectionFieldOp {
     fn tag(&self) -> &'static str {
-        "boundary_field_build"
+        "streamline_direction_field"
     }
 
     fn title(&self) -> &'static str {
-        "Boundary Field Build"
+        "Streamline Direction Field"
     }
 
     fn input_ports(&self) -> &'static [PortKind] {
@@ -187,6 +189,7 @@ impl WorkflowOp for BoundaryFieldBuildOp {
             voxel_size_mm: self.voxel_size_mm,
             sphere_lod: self.sphere_lod,
             normalization: self.normalization,
+            binning_mode: self.binning_mode,
         };
         let upstream_stale = ctx.upstream_stale();
         let fingerprint = workflow_boundary_plan_fingerprint(&plan);
@@ -403,12 +406,13 @@ impl From<BundleSurfaceBuildOp> for WorkflowNodeKind {
     }
 }
 
-impl From<BoundaryFieldBuildOp> for WorkflowNodeKind {
-    fn from(op: BoundaryFieldBuildOp) -> Self {
-        Self::BoundaryFieldBuild {
+impl From<StreamlineDirectionFieldOp> for WorkflowNodeKind {
+    fn from(op: StreamlineDirectionFieldOp) -> Self {
+        Self::StreamlineDirectionField {
             voxel_size_mm: op.voxel_size_mm,
             sphere_lod: op.sphere_lod,
             normalization: op.normalization,
+            binning_mode: op.binning_mode,
         }
     }
 }

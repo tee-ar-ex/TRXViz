@@ -1,11 +1,16 @@
 use std::collections::BTreeSet;
 
 use trxviz_core::data::loaded_files::VolumeColormap;
-use trxviz_core::data::orientation_field::{BoundaryGlyphColorMode, BoundaryGlyphNormalization};
+use trxviz_core::data::orientation_field::{
+    BoundaryGlyphColorMode, BoundaryGlyphNormalization, DirectionFieldBinningMode,
+};
 use trxviz_core::data::trx_data::RenderStyle;
 use trxviz_core::renderer::mesh_renderer::SurfaceColormap;
 
 use crate::app::workflow;
+
+mod dipy_tractography;
+mod yeh_tractography;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OdxSelectorNames {
@@ -15,14 +20,34 @@ pub(crate) struct OdxSelectorNames {
 
 pub(crate) struct NodeEditorContext<'a> {
     pub(crate) available_groups: &'a [String],
+    /// DPS / DPV field names present on this node's last evaluation
+    /// (output dataset). The inspector uses these to populate
+    /// comboboxes for `ColorByDps` / `ColorByDpv` rather than making
+    /// the user type field names by hand.
+    pub(crate) available_dps_fields: &'a [String],
+    pub(crate) available_dpv_fields: &'a [String],
     pub(crate) odx_selector_names: Option<&'a OdxSelectorNames>,
     pub(crate) sh_detail_limit: Option<u32>,
     pub(crate) save_ready: bool,
+    /// Names of this node's op params that a wired `TrackingPlan` is
+    /// overriding on the most recent evaluation. Editor panels should
+    /// disable the corresponding sliders so the user can see which values
+    /// the tracker will actually use.
+    pub(crate) overridden_fields: &'a [String],
+    /// For each overridden numeric field, the effective value from the plan.
+    /// Editor panels bind this to the greyed-out slider so the user sees
+    /// the plan's number instead of the op's own.
+    pub(crate) overridden_values: &'a std::collections::BTreeMap<String, f32>,
+    /// Is a wgpu device available in this session? Passed to
+    /// `WorkflowOp::validate` so GPU-only op variants (currently PTT)
+    /// can surface an inline error when there's no GPU.
+    pub(crate) gpu_available: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct NodeEditorResult {
     pub(crate) save_now: bool,
+    pub(crate) run_expensive_requested: bool,
 }
 
 pub(crate) fn edit_node_op(
@@ -32,6 +57,32 @@ pub(crate) fn edit_node_op(
     ctx: NodeEditorContext<'_>,
 ) -> NodeEditorResult {
     let mut result = NodeEditorResult::default();
+
+    // Pre-dispatch diagnostics (e.g. "PTT requires a GPU; none
+    // available"). Rendered at the top of the inspector so the user
+    // sees the problem before scrolling through the knobs. Errors are
+    // advisory for now — the GUI still allows "Run" to be clicked,
+    // and the worker returns a descriptive failure.
+    let diagnostics = workflow::validate_op(
+        op,
+        &workflow::ValidateCtx {
+            gpu_available: ctx.gpu_available,
+        },
+    );
+    for diag in &diagnostics {
+        let color = match diag.severity {
+            workflow::DiagnosticSeverity::Error => egui::Color32::from_rgb(230, 100, 100),
+            workflow::DiagnosticSeverity::Warning => egui::Color32::from_rgb(220, 180, 96),
+        };
+        let prefix = match diag.severity {
+            workflow::DiagnosticSeverity::Error => "⛔",
+            workflow::DiagnosticSeverity::Warning => "⚠",
+        };
+        ui.colored_label(color, format!("{prefix} {}", diag.message));
+    }
+    if !diagnostics.is_empty() {
+        ui.separator();
+    }
 
     match op {
         workflow::WorkflowNodeKind::LimitStreamlines {
@@ -90,14 +141,87 @@ pub(crate) fn edit_node_op(
         workflow::WorkflowNodeKind::ParcelEnd { endpoint_count } => {
             ui.add(egui::Slider::new(endpoint_count, 1..=2).text("Matching endpoints"));
         }
-        workflow::WorkflowNodeKind::ColorByDPV { field } => {
-            edit_field_name(ui, field);
+        workflow::WorkflowNodeKind::ColorByDPV { field, colormap } => {
+            edit_picker_field(
+                ui,
+                field,
+                ctx.available_dpv_fields,
+                node_uuid,
+                "color_by_dpv_field",
+            );
+            edit_colormap(ui, colormap, node_uuid, "color_by_dpv_colormap");
         }
-        workflow::WorkflowNodeKind::ColorByDPS { field } => {
-            edit_field_name(ui, field);
+        workflow::WorkflowNodeKind::ColorByDPS { field, colormap } => {
+            edit_picker_field(
+                ui,
+                field,
+                ctx.available_dps_fields,
+                node_uuid,
+                "color_by_dps_field",
+            );
+            edit_colormap(ui, colormap, node_uuid, "color_by_dps_colormap");
         }
         workflow::WorkflowNodeKind::UniformColor { color } => {
             ui.color_edit_button_rgba_unmultiplied(color);
+        }
+        workflow::WorkflowNodeKind::TipPrune {
+            voxel_size_mm,
+            iterations,
+            min_support,
+            max_unsupported_fraction,
+        } => {
+            ui.add(
+                egui::Slider::new(voxel_size_mm, 0.25..=4.0)
+                    .text("Voxel size (mm)")
+                    .logarithmic(true),
+            );
+            ui.add(egui::Slider::new(iterations, 1..=64).text("Iterations"));
+            ui.add(
+                egui::DragValue::new(min_support)
+                    .range(0..=10)
+                    .prefix("Min support "),
+            );
+            ui.add(
+                egui::Slider::new(max_unsupported_fraction, 0.0..=1.0)
+                    .text("Max unsupported fraction"),
+            );
+            ui.small("0.0 = strict DSI-Studio parity; 1.0 = passthrough");
+        }
+        workflow::WorkflowNodeKind::Purifibre {
+            trim_fraction,
+            puri_fraction,
+            spherical_smoothing_deg,
+        } => {
+            ui.add(
+                egui::Slider::new(trim_fraction, 0.0..=0.5)
+                    .text("Trim fraction")
+                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                    .custom_parser(|s| {
+                        s.trim_end_matches('%')
+                            .parse::<f64>()
+                            .ok()
+                            .map(|v| v / 100.0)
+                    }),
+            );
+            ui.add(
+                egui::Slider::new(puri_fraction, 0.0..=0.9)
+                    .text("Discard fraction")
+                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                    .custom_parser(|s| {
+                        s.trim_end_matches('%')
+                            .parse::<f64>()
+                            .ok()
+                            .map(|v| v / 100.0)
+                    }),
+            );
+            ui.add(
+                egui::Slider::new(spherical_smoothing_deg, 0.0..=45.0)
+                    .text("Spherical smoothing (°)"),
+            );
+            ui.small(
+                "Output 0 = input + FICO DPS; Output 1 = filtered survivors. \
+                 Needs a BoundaryField upstream on input 1.",
+            );
         }
         workflow::WorkflowNodeKind::RemoveDuplicates { params } => {
             egui::ComboBox::from_id_salt(format!("duplicate_mode_{}", node_uuid.0))
@@ -142,6 +266,7 @@ pub(crate) fn edit_node_op(
             tube_radius_mm,
             tube_sides,
             slab_half_width_mm,
+            opacity,
         } => {
             ui.checkbox(enabled, "Visible");
             egui::ComboBox::from_id_salt(format!("render_style_{}", node_uuid.0))
@@ -167,6 +292,7 @@ pub(crate) fn edit_node_op(
                     .speed(0.5)
                     .prefix("Slice slab "),
             );
+            ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
         }
         workflow::WorkflowNodeKind::VolumeDisplay {
             colormap,
@@ -390,10 +516,11 @@ pub(crate) fn edit_node_op(
             ui.label("Slice outline");
             ui.add(egui::Slider::new(outline_thickness, 0.25..=8.0).text("Thickness"));
         }
-        workflow::WorkflowNodeKind::BoundaryFieldBuild {
+        workflow::WorkflowNodeKind::StreamlineDirectionField {
             voxel_size_mm,
             sphere_lod,
             normalization,
+            binning_mode,
         } => {
             ui.add(
                 egui::DragValue::new(&mut voxel_size_mm.0)
@@ -407,13 +534,34 @@ pub(crate) fn edit_node_op(
                     .range(4..=64)
                     .prefix("Sphere LOD "),
             );
-            egui::ComboBox::from_id_salt(format!("boundary_field_normalization_{}", node_uuid.0))
+            egui::ComboBox::from_id_salt(format!("direction_field_binning_{}", node_uuid.0))
+                .selected_text(binning_mode.label())
+                .show_ui(ui, |ui| {
+                    for value in DirectionFieldBinningMode::ALL {
+                        ui.selectable_value(binning_mode, value, value.label());
+                    }
+                });
+            egui::ComboBox::from_id_salt(format!("direction_field_normalization_{}", node_uuid.0))
                 .selected_text(normalization.label())
                 .show_ui(ui, |ui| {
                     for value in BoundaryGlyphNormalization::ALL {
                         ui.selectable_value(normalization, value, value.label());
                     }
                 });
+            ui.small(
+                "Per-voxel histogram of streamline tangent directions \
+                 (sTODI). Consumed by Boundary Glyph and Purifibre.",
+            );
+            ui.small(match binning_mode {
+                DirectionFieldBinningMode::WithinVoxelTangent => {
+                    "Within-voxel tangent: symmetric, length-weighted. \
+                     Recommended for Purifibre."
+                }
+                DirectionFieldBinningMode::BoundaryCrossings => {
+                    "Boundary crossings: asymmetric, count-weighted. \
+                     Original boundary-glyph behavior."
+                }
+            });
         }
         workflow::WorkflowNodeKind::BoundaryGlyphDisplay {
             enabled,
@@ -583,6 +731,8 @@ pub(crate) fn edit_node_op(
             opacity,
             offset_from_slice,
             visible,
+            auto_gate_from_otsu,
+            opacity_gate,
         } => {
             ui.checkbox(visible, "Visible");
             ui.add(egui::Slider::new(line_width, 0.001..=0.05).text("Line width"));
@@ -593,6 +743,7 @@ pub(crate) fn edit_node_op(
                     .speed(0.25)
                     .prefix("Slice offset "),
             );
+            fixel_opacity_gate_editor(ui, auto_gate_from_otsu, opacity_gate);
         }
         workflow::WorkflowNodeKind::Fixel2DDisplay {
             line_width,
@@ -600,6 +751,8 @@ pub(crate) fn edit_node_op(
             slab_thickness_mm,
             length_scale,
             visible,
+            auto_gate_from_otsu,
+            opacity_gate,
         } => {
             ui.checkbox(visible, "Visible");
             ui.add(egui::Slider::new(line_width, 0.001..=0.05).text("Line width"));
@@ -608,6 +761,7 @@ pub(crate) fn edit_node_op(
             ui.add(
                 egui::Slider::new(&mut slab_thickness_mm.0, 0.1..=20.0).text("Slab thickness (mm)"),
             );
+            fixel_opacity_gate_editor(ui, auto_gate_from_otsu, opacity_gate);
         }
         workflow::WorkflowNodeKind::OdxFixelScalarSelect { dpf_name } => {
             ui.label("DPF");
@@ -687,6 +841,250 @@ pub(crate) fn edit_node_op(
                 });
             }
         }
+        workflow::WorkflowNodeKind::RoiFromParcel { labels } => {
+            ui.label("Parcel labels (comma-separated IDs):");
+            edit_parcel_id_set(ui, labels);
+        }
+        workflow::WorkflowNodeKind::RoiFromVolume { threshold } => {
+            ui.add(egui::Slider::new(threshold, 0.0..=1.0).text("Threshold"));
+        }
+        workflow::WorkflowNodeKind::RoiFromShape {
+            center_ras,
+            radius_or_half_extent_mm,
+            shape,
+        } => {
+            ui.label("Center (RAS+ mm)");
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::DragValue::new(&mut center_ras[0])
+                        .speed(0.5)
+                        .prefix("X "),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut center_ras[1])
+                        .speed(0.5)
+                        .prefix("Y "),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut center_ras[2])
+                        .speed(0.5)
+                        .prefix("Z "),
+                );
+            });
+            ui.add(
+                egui::DragValue::new(&mut radius_or_half_extent_mm.0)
+                    .speed(0.5)
+                    .prefix("Radius/half-extent "),
+            );
+            egui::ComboBox::from_id_salt(("roi_shape", node_uuid))
+                .selected_text(match shape {
+                    workflow::RoiShape::Sphere => "Sphere",
+                    workflow::RoiShape::Box => "Box",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(shape, workflow::RoiShape::Sphere, "Sphere");
+                    ui.selectable_value(shape, workflow::RoiShape::Box, "Box");
+                });
+        }
+        workflow::WorkflowNodeKind::DipyTractography {
+            step_size_mm,
+            max_angle_deg,
+            min_len_mm,
+            max_len_mm,
+            fixel_threshold,
+            relative_peak_threshold,
+            seeds_per_voxel,
+            max_points,
+            rng_seed,
+            direction_getter,
+        } => {
+            dipy_tractography::draw(
+                ui,
+                node_uuid,
+                step_size_mm,
+                max_angle_deg,
+                min_len_mm,
+                max_len_mm,
+                fixel_threshold,
+                relative_peak_threshold,
+                seeds_per_voxel,
+                max_points,
+                rng_seed,
+                direction_getter,
+                &ctx,
+                &mut result,
+            );
+        }
+        workflow::WorkflowNodeKind::YehTractography {
+            step_size_mm,
+            max_angle_deg,
+            min_len_mm,
+            max_len_mm,
+            fixel_threshold,
+            smooth_fraction,
+            max_points,
+            target_streamlines,
+            max_seed_attempts,
+            rng_seed,
+        } => {
+            yeh_tractography::draw(
+                ui,
+                step_size_mm,
+                max_angle_deg,
+                min_len_mm,
+                max_len_mm,
+                fixel_threshold,
+                smooth_fraction,
+                max_points,
+                target_streamlines,
+                max_seed_attempts,
+                rng_seed,
+                &ctx,
+                &mut result,
+            );
+        }
+        workflow::WorkflowNodeKind::VoxelMaskDisplay {
+            color,
+            opacity,
+            smooth_sigma,
+            min_component_volume_mm3,
+        } => {
+            ui.horizontal(|ui| {
+                ui.label("Color");
+                let mut rgb = [color[0], color[1], color[2]];
+                if ui.color_edit_button_rgb(&mut rgb).changed() {
+                    color[0] = rgb[0];
+                    color[1] = rgb[1];
+                    color[2] = rgb[2];
+                }
+            });
+            ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
+            ui.add(egui::Slider::new(smooth_sigma, 0.0..=3.0).text("Smooth σ (voxels)"));
+            ui.add(
+                egui::Slider::new(&mut min_component_volume_mm3.0, 0.0..=1000.0)
+                    .text("Min component vol (mm³)"),
+            );
+        }
+        workflow::WorkflowNodeKind::PrepareSimplePlan {
+            override_step,
+            step_size_mm,
+            override_angle,
+            max_angle_deg,
+            override_min_len,
+            min_len_mm,
+            override_max_len,
+            max_len_mm,
+            override_fixel_threshold,
+            fixel_threshold,
+            override_smooth,
+            smooth_fraction,
+            override_fixel_otsu,
+            fixel_otsu,
+        } => {
+            ui.small("Each override, when enabled, replaces the tracker's slider value.");
+            let row = |ui: &mut egui::Ui,
+                       enabled: &mut bool,
+                       value: &mut f32,
+                       range: std::ops::RangeInclusive<f32>,
+                       label: &str| {
+                ui.horizontal(|ui| {
+                    ui.checkbox(enabled, "");
+                    ui.add_enabled(*enabled, egui::Slider::new(value, range).text(label));
+                });
+            };
+            row(
+                ui,
+                override_step,
+                step_size_mm,
+                0.25..=2.0,
+                "Step size (mm)",
+            );
+            row(
+                ui,
+                override_angle,
+                max_angle_deg,
+                30.0..=90.0,
+                "Max angle (°)",
+            );
+            row(
+                ui,
+                override_min_len,
+                min_len_mm,
+                5.0..=100.0,
+                "Min length (mm)",
+            );
+            row(
+                ui,
+                override_max_len,
+                max_len_mm,
+                20.0..=500.0,
+                "Max length (mm)",
+            );
+            row(
+                ui,
+                override_fixel_threshold,
+                fixel_threshold,
+                0.0..=0.5,
+                "Fixel threshold",
+            );
+            row(
+                ui,
+                override_smooth,
+                smooth_fraction,
+                0.0..=0.95,
+                "Smoothing",
+            );
+            row(ui, override_fixel_otsu, fixel_otsu, 0.0..=1.0, "Fixel Otsu");
+        }
+        workflow::WorkflowNodeKind::PrepareHausdorffPlan {
+            tolerance_mm,
+            seed_tolerance_mm,
+            tracking_metric,
+            otsu_scope,
+            seed_fixel_otsu_factor,
+            not_end_fixel_otsu_factor,
+            max_reference_points,
+        } => {
+            use trxviz_core::data::odx_data::OtsuScope;
+            ui.add(egui::Slider::new(tolerance_mm, 0.5..=20.0).text("Tolerance (mm)"));
+            ui.small(
+                "DSI-Studio tolerance: limiting-mask dilation, post-filter distance, \
+                and ±2·tol on min/max length.",
+            );
+            ui.add(
+                egui::Slider::new(seed_tolerance_mm, 0.0..=*tolerance_mm)
+                    .text("Seed tolerance (mm)"),
+            );
+            ui.small("Small seed tolerance keeps seeds near the reference bundle.");
+            ui.horizontal(|ui| {
+                ui.label("Metric");
+                let current = tracking_metric.clone().unwrap_or_else(|| "auto".into());
+                egui::ComboBox::from_id_salt(("hausdorff_metric", node_uuid))
+                    .selected_text(&current)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(tracking_metric, None, "auto");
+                        if let Some(names) = ctx.odx_selector_names {
+                            for name in &names.dpf_names {
+                                ui.selectable_value(tracking_metric, Some(name.clone()), name);
+                            }
+                        }
+                    });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Otsu scope");
+                ui.selectable_value(otsu_scope, OtsuScope::AllFixels, "All fixels");
+                ui.selectable_value(otsu_scope, OtsuScope::PrimaryPeak, "Primary peak");
+            });
+            ui.add(egui::Slider::new(seed_fixel_otsu_factor, 0.0..=2.0).text("Seed factor × Otsu"));
+            ui.add(
+                egui::Slider::new(not_end_fixel_otsu_factor, 0.0..=2.0)
+                    .text("No-end factor × Otsu"),
+            );
+            ui.add(
+                egui::Slider::new(max_reference_points, 1_000..=50_000)
+                    .text("Max reference points"),
+            );
+        }
         _ => {
             ui.small("This node has no editable parameters yet.");
         }
@@ -695,6 +1093,24 @@ pub(crate) fn edit_node_op(
     result
 }
 
+/// Shared edit widget for `auto_gate_from_otsu` + `opacity_gate` on fixel
+/// display ops. When auto is on, the gate is hidden (the scene's
+/// `default_fixel_otsu()` drives it at eval time); when off, expose the
+/// four gate parameters explicitly.
+fn fixel_opacity_gate_editor(ui: &mut egui::Ui, auto: &mut bool, gate: &mut workflow::OpacityGate) {
+    ui.separator();
+    ui.checkbox(auto, "Auto-gate from tracking Otsu");
+    if !*auto {
+        ui.add(egui::Slider::new(&mut gate.range.0, 0.0..=1.0).text("Gate range min"));
+        ui.add(egui::Slider::new(&mut gate.range.1, 0.0..=1.0).text("Gate range max"));
+        ui.add(egui::Slider::new(&mut gate.below, 0.0..=1.0).text("Alpha below"));
+        ui.add(egui::Slider::new(&mut gate.above, 0.0..=1.0).text("Alpha above"));
+    } else {
+        ui.small("Sub-threshold fixels ghost to 10 % alpha.");
+    }
+}
+
+#[allow(dead_code)]
 fn edit_field_name<T>(ui: &mut egui::Ui, field: &mut T)
 where
     T: From<String> + AsRef<str>,
@@ -703,6 +1119,83 @@ where
     if ui.text_edit_singleline(&mut value).changed() {
         *field = T::from(value);
     }
+}
+
+/// DPS / DPV field picker. Renders a combobox of names available on
+/// the upstream's last evaluation; falls back to a free-text input
+/// when no names are known yet (upstream hasn't been built, or the
+/// dataset has no scalar fields). The free-text fallback also kicks
+/// in when the current field name isn't in the available list — the
+/// user keeps the old value visible and can either pick a known name
+/// from the dropdown or edit the text directly.
+fn edit_picker_field<T>(
+    ui: &mut egui::Ui,
+    field: &mut T,
+    available: &[String],
+    node_uuid: workflow::WorkflowNodeUuid,
+    salt: &str,
+) where
+    T: From<String> + AsRef<str>,
+{
+    let current = field.as_ref().to_string();
+
+    if available.is_empty() {
+        // No upstream fields known — text input with a hint so the
+        // user understands why there's no dropdown.
+        let mut value = current;
+        if ui.text_edit_singleline(&mut value).changed() {
+            *field = T::from(value);
+        }
+        ui.small("(no fields advertised by upstream — type one manually)");
+        return;
+    }
+
+    let combo_id = format!("{salt}_{}", node_uuid.0);
+    egui::ComboBox::from_id_salt(combo_id)
+        .selected_text(if current.is_empty() {
+            "(pick a field)"
+        } else {
+            current.as_str()
+        })
+        .show_ui(ui, |ui| {
+            for name in available {
+                if ui
+                    .selectable_label(name.as_str() == current.as_str(), name.as_str())
+                    .clicked()
+                {
+                    *field = T::from(name.clone());
+                }
+            }
+        });
+
+    // If the current field name isn't in the available list (upstream
+    // changed under us, or the user typed it before the field
+    // existed), surface that explicitly so the user isn't confused
+    // when the combobox shows e.g. "fico" while the rendering shows
+    // gray.
+    if !current.is_empty() && !available.iter().any(|n| n == &current) {
+        ui.small(format!(
+            "⚠ \"{current}\" is not in the upstream's field list"
+        ));
+    }
+}
+
+/// Combobox for picking a `SurfaceColormap` (the scalar colormap
+/// used by `ColorByDps` / `ColorByDpv`).
+fn edit_colormap(
+    ui: &mut egui::Ui,
+    colormap: &mut SurfaceColormap,
+    node_uuid: workflow::WorkflowNodeUuid,
+    salt: &str,
+) {
+    let combo_id = format!("{salt}_{}", node_uuid.0);
+    egui::ComboBox::from_id_salt(combo_id)
+        .selected_text(colormap.label())
+        .show_ui(ui, |ui| {
+            for value in SurfaceColormap::ALL {
+                ui.selectable_value(colormap, value, value.label());
+            }
+        });
 }
 
 fn edit_dps_field(ui: &mut egui::Ui, field: &mut workflow::DpsFieldName) {

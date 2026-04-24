@@ -10,19 +10,17 @@ use super::{
     resolve_document_asset_paths,
 };
 
-/// The four panes that make up the advanced-mode workspace layout.
+/// The three panes that make up the advanced-mode workspace layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum WorkspacePane {
-    Assets,
     Preview,
     Graph,
     Inspector,
 }
 
-/// Default 4-pane layout: Assets | (Preview / Graph) | Inspector.
+/// Default layout: (Preview / Graph) | Inspector.
 pub fn default_workspace_tree() -> Tree<WorkspacePane> {
     let mut tiles = Tiles::default();
-    let assets = tiles.insert_pane(WorkspacePane::Assets);
     let preview = tiles.insert_pane(WorkspacePane::Preview);
     let graph = tiles.insert_pane(WorkspacePane::Graph);
     let inspector = tiles.insert_pane(WorkspacePane::Inspector);
@@ -30,8 +28,7 @@ pub fn default_workspace_tree() -> Tree<WorkspacePane> {
     center.shares[preview] = 2.0;
     center.shares[graph] = 1.0;
     let center = tiles.insert_new(Tile::Container(Container::Linear(center)));
-    let mut root = Linear::new(LinearDir::Horizontal, vec![assets, center, inspector]);
-    root.shares[assets] = 0.85;
+    let mut root = Linear::new(LinearDir::Horizontal, vec![center, inspector]);
     root.shares[center] = 2.5;
     root.shares[inspector] = 0.95;
     let root = tiles.insert_new(Tile::Container(Container::Linear(root)));

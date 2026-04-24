@@ -41,16 +41,36 @@ impl WorkflowOp for StreamlineSourceOp {
                 self.source_id
             ))
         })?;
-        let dataset = Arc::new(StreamlineDataset {
-            name: source.name.clone(),
-            gpu_data: source.data.clone(),
-            backing: source.backing.clone().ok_or_else(|| {
-                crate::error::WorkflowError::Evaluation(format!(
-                    "Streamline source {} is missing export backing",
-                    source.name
-                ))
-            })?,
-        });
+
+        // Reuse the cached `Arc<StreamlineDataset>` when the source's
+        // `Arc<TrxGpuData>` is the same instance as last eval. The
+        // downstream fingerprint chain (`hash_flow`) keys off
+        // `Arc::as_ptr(&dataset)`, so allocating a fresh Arc each
+        // eval would invalidate every downstream cache (boundary
+        // field, purifibre, …) on every interactive frame.
+        let dataset = match ctx
+            .execution_cache
+            .streamline_source_datasets
+            .get(&ctx.node.uuid)
+        {
+            Some(cached) if Arc::ptr_eq(&cached.gpu_data, &source.data) => cached.clone(),
+            _ => {
+                let new_ds = Arc::new(StreamlineDataset {
+                    name: source.name.clone(),
+                    gpu_data: source.data.clone(),
+                    backing: source.backing.clone().ok_or_else(|| {
+                        crate::error::WorkflowError::Evaluation(format!(
+                            "Streamline source {} is missing export backing",
+                            source.name
+                        ))
+                    })?,
+                });
+                ctx.execution_cache
+                    .streamline_source_datasets
+                    .insert(ctx.node.uuid, new_ds.clone());
+                new_ds
+            }
+        };
         let selected = (0..source.data.nb_streamlines as u32)
             .map(StreamlineIndex)
             .collect();
@@ -62,6 +82,7 @@ impl WorkflowOp for StreamlineSourceOp {
                 scalar_auto_range: true,
                 scalar_range_min: 0.0,
                 scalar_range_max: 1.0,
+                scalar_colormap: crate::renderer::mesh_renderer::SurfaceColormap::default(),
             })
             .into(),
         ])

@@ -1,4 +1,5 @@
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use crate::data::loaded_files::FileId;
 use crate::data::trx_data::ColorMode;
@@ -40,6 +41,7 @@ pub fn workflow_streamline_fingerprint(draw: &StreamlineDrawPlan) -> u64 {
     draw.tube_radius_mm.0.to_bits().hash(&mut hasher);
     draw.tube_sides.hash(&mut hasher);
     draw.slab_half_width_mm.0.to_bits().hash(&mut hasher);
+    draw.opacity.to_bits().hash(&mut hasher);
     hash_flow(&draw.flow, &mut hasher);
     hasher.finish()
 }
@@ -183,16 +185,46 @@ pub fn workflow_boundary_plan_fingerprint(plan: &BoundaryFieldPlan) -> u64 {
     plan.voxel_size_mm.0.to_bits().hash(&mut hasher);
     plan.sphere_lod.hash(&mut hasher);
     plan.normalization.hash(&mut hasher);
+    plan.binning_mode.hash(&mut hasher);
     hash_flow(&plan.flow, &mut hasher);
     hasher.finish()
 }
 
 fn hash_flow(flow: &StreamlineFlow, state: &mut impl Hasher) {
     flow.dataset.name.hash(state);
+    // Hash the dataset's `Arc` pointer identity. This makes the
+    // fingerprint change whenever an upstream op produces a *new*
+    // dataset (e.g. Purifibre attaching a `"fico"` DPS field, or
+    // re-scoring with different params). Sharing an `Arc::clone` of
+    // an existing dataset preserves identity and the fingerprint —
+    // exactly what we want for ops like `ColorByDps` that just set
+    // a different `color_mode` on the same data.
+    //
+    // Without this, downstream renders would silently reuse a cached
+    // GPU upload of the previous dataset content (e.g. old FICO
+    // values) and the user would see stale colors.
+    //
+    // Pointer addresses are session-local; that's fine because
+    // fingerprints are in-memory cache keys, not on-disk identifiers.
+    (Arc::as_ptr(&flow.dataset) as usize).hash(state);
+    // DPS / DPV field-name lists are still useful in the hash so a
+    // downstream consumer's fingerprint changes when a NEW field
+    // appears in the same Arc (rare but possible if someone uses
+    // `Arc::make_mut`). Cheap; keep them.
+    for name in &flow.dataset.gpu_data.dps_names {
+        name.hash(state);
+    }
+    for name in &flow.dataset.gpu_data.dpv_names {
+        name.hash(state);
+    }
     flow.selected_streamlines.len().hash(state);
     for index in flow.selected_streamlines.iter().take(128).copied() {
         index.hash(state);
     }
+    // Colormap matters for the actual rendered colors when
+    // color_mode is a scalar mode. Hash it so changing the colormap
+    // invalidates downstream upload caches.
+    flow.scalar_colormap.hash(state);
     match &flow.color_mode {
         ColorMode::DirectionRgb => 0u8.hash(state),
         ColorMode::Dpv(name) => {

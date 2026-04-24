@@ -21,10 +21,15 @@ pub fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
         WorkflowJobKind::TubeGeometry => "tube geometry",
         WorkflowJobKind::BundleSurface => "bundle surface",
         WorkflowJobKind::BoundaryField => "boundary field",
+        WorkflowJobKind::DipyTractography => "dipy tractography",
+        WorkflowJobKind::YehTractography => "yeh tractography",
     }
 }
 
-pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJobOutput> {
+pub fn run_workflow_job(
+    payload: WorkflowJobPayload,
+    cancel: super::tracking::CancelFlag,
+) -> WorkflowResult<WorkflowJobOutput> {
     match payload {
         WorkflowJobPayload::ReactiveStreamline(plan) => Ok(WorkflowJobOutput::ReactiveStreamline(
             materialize_reactive_streamline_flow(&plan)?,
@@ -129,6 +134,22 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
                 boundary_field.as_deref(),
             ),
         }),
+        WorkflowJobPayload::DipyTractography {
+            plan,
+            device,
+            queue,
+        } => {
+            let flow = if let (Some(device), Some(queue)) = (device, queue) {
+                crate::gpu::dipy::run_gpu_dipy(&plan, &device, &queue, &cancel)?
+            } else {
+                super::cpu_dipy::run_cpu_dipy(&plan, &cancel)?
+            };
+            Ok(WorkflowJobOutput::DipyTractography { flow })
+        }
+        WorkflowJobPayload::YehTractography { plan } => {
+            let flow = super::cpu_yeh::run_cpu_yeh(&plan, &cancel)?;
+            Ok(WorkflowJobOutput::YehTractography { flow })
+        }
         WorkflowJobPayload::BoundaryField { plan } => {
             let subset = materialize_flow_gpu(plan.flow);
             let selected = (0..subset.nb_streamlines as u32)
@@ -142,6 +163,7 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
                 voxel_size_mm: plan.voxel_size_mm,
                 sphere_lod: plan.sphere_lod,
                 normalization: plan.normalization,
+                binning_mode: plan.binning_mode,
                 ..crate::data::orientation_field::BoundaryGlyphParams::default()
             };
             Ok(WorkflowJobOutput::BoundaryField {
@@ -175,6 +197,12 @@ pub fn prime_expensive_record(record: &mut ExpensiveNodeRunRecord, fingerprint: 
     }
 }
 
+pub fn mark_expensive_cancelled(record: &mut ExpensiveNodeRunRecord, fingerprint: u64) {
+    record.current_fingerprint = Some(fingerprint);
+    record.last_cancelled_fingerprint = Some(fingerprint);
+    record.status = WorkflowExecutionStatus::Failed("cancelled by user".to_string());
+}
+
 pub fn mark_expensive_success(
     record: &mut ExpensiveNodeRunRecord,
     fingerprint: u64,
@@ -182,6 +210,11 @@ pub fn mark_expensive_success(
 ) {
     record.current_fingerprint = Some(fingerprint);
     record.last_success_fingerprint = Some(fingerprint);
+    // A successful run at this fingerprint clears any prior
+    // cancellation at the same fingerprint (it's no longer relevant).
+    if record.last_cancelled_fingerprint == Some(fingerprint) {
+        record.last_cancelled_fingerprint = None;
+    }
     record.status = WorkflowExecutionStatus::Ready;
     record.last_result_summary = Some(result_summary);
 }
@@ -196,7 +229,7 @@ pub fn materialize_flow_gpu(flow: StreamlineFlow) -> TrxGpuData {
     } else {
         Some((flow.scalar_range_min, flow.scalar_range_max))
     };
-    subset.recolor(&flow.color_mode, scalar_range);
+    subset.recolor(&flow.color_mode, scalar_range, flow.scalar_colormap);
     subset
 }
 
@@ -233,6 +266,7 @@ pub fn bundle_surface_component_flows(plan: &BundleSurfacePlan) -> Vec<(String, 
                 scalar_auto_range: plan.flow.scalar_auto_range,
                 scalar_range_min: plan.flow.scalar_range_min,
                 scalar_range_max: plan.flow.scalar_range_max,
+                scalar_colormap: plan.flow.scalar_colormap,
             },
         ));
     }

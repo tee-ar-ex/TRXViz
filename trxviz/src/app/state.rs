@@ -799,6 +799,17 @@ pub struct WorkflowState {
     pub job_tx: mpsc::Sender<WorkflowJobMessage>,
     pub job_rx: mpsc::Receiver<WorkflowJobMessage>,
     pub jobs_in_flight: HashMap<WorkflowNodeUuid, (WorkflowJobKind, u64)>,
+    /// Cooperative cancellation flags for each in-flight expensive job,
+    /// keyed by the job's node UUID. Cloned into the worker thread at
+    /// dispatch time; a click on the per-node Cancel button flips the
+    /// flag, the worker observes it on its next poll and returns
+    /// `WorkflowError::Cancelled`. Entry is removed on Finished.
+    pub cancel_flags: HashMap<WorkflowNodeUuid, trxviz_core::workflow::CancelFlag>,
+    /// Last reported (done, total) progress for each in-flight job.
+    /// Updated when a `WorkflowJobMessage::Progress` arrives; removed
+    /// on Finished. The activity overlay reads this to render a
+    /// progress bar next to the Cancel button.
+    pub job_progress: HashMap<WorkflowNodeUuid, (u64, u64)>,
 }
 
 impl WorkflowState {
@@ -841,6 +852,8 @@ impl WorkflowState {
             job_tx,
             job_rx,
             jobs_in_flight: HashMap::new(),
+            cancel_flags: HashMap::new(),
+            job_progress: HashMap::new(),
         }
     }
 }
