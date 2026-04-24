@@ -15,6 +15,7 @@
 //!     DG on that path).
 
 pub mod accum;
+pub mod cancel;
 pub mod direction_getter;
 pub mod masks;
 pub mod rng;
@@ -22,3 +23,5 @@ pub mod tracker;
 
 pub mod dg_prob;
 pub mod dg_yeh;
+
+pub use cancel::CancelFlag;

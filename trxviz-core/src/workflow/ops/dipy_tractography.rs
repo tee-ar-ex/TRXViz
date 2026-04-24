@@ -3,12 +3,10 @@ use std::sync::Arc;
 
 use crate::data::trx_data::TrxGpuData;
 use crate::error::WorkflowResult;
-use crate::units::StreamlineIndex;
-
 use super::super::{
-    CachedTractographyResult, DipyDirectionGetter, DipyTractographyPlan, EvalCtx, PortKind,
-    StreamlineDataset, StreamlineFlow, VoxelMask, WorkflowNodeKind, WorkflowOp, WorkflowValue,
-    mark_expensive_success, prime_expensive_record, sync_node_state_from_run_record,
+    DipyDirectionGetter, DipyTractographyPlan, EvalCtx, PortKind, StreamlineDataset,
+    StreamlineFlow, VoxelMask, WorkflowNodeKind, WorkflowOp, WorkflowValue,
+    prime_expensive_record, sync_node_state_from_run_record,
 };
 use crate::data::loaded_files::StreamlineBacking;
 use crate::data::trx_data::ColorMode;
@@ -343,6 +341,7 @@ impl WorkflowOp for DipyTractographyOp {
                 .push(DipyTractographyPlan {
                     node_uuid: ctx.node.uuid,
                     label: ctx.node.label.clone(),
+                    fingerprint: super::super::op::ContentHash(fingerprint),
                     odx_source_id,
                     odx_scene: loaded_odx.scene.clone(),
                     seed_mask,

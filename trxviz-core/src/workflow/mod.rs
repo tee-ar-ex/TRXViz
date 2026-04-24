@@ -35,8 +35,8 @@ pub use fingerprint::{
 };
 pub use graph::{GraphPos, GraphRect, InPort, OutPort, Wire, WorkflowGraph, WorkflowNodeEntry};
 pub use jobs::{
-    bundle_surface_component_flows, bundle_surface_solid_color, mark_expensive_success,
-    materialize_flow_gpu, prime_expensive_record, run_workflow_job,
+    bundle_surface_component_flows, bundle_surface_solid_color, mark_expensive_cancelled,
+    mark_expensive_success, materialize_flow_gpu, prime_expensive_record, run_workflow_job,
     sync_node_state_from_run_record, workflow_job_kind_title,
 };
 pub use layout::{
@@ -56,6 +56,7 @@ pub use types::*;
 pub use op::{ContentHash, Diagnostic, DiagnosticSeverity, FingerprintCtx, ValidateCtx};
 pub use ops::fingerprint as fingerprint_op;
 pub use ops::validate as validate_op;
+pub use tracking::CancelFlag;
 
 pub(crate) use evaluate::{
     compose_surface_appearance, expect_boundary_field_input, expect_bundle_surface_input,

@@ -43,6 +43,7 @@ pub struct TipReport {
     pub iterations_run: u32,
     pub kept: usize,
     pub removed: usize,
+    #[allow(dead_code)]
     pub max_density: u32,
 }
 

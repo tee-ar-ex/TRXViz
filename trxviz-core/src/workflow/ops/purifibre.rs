@@ -103,6 +103,17 @@ impl WorkflowOp for PurifibreOp {
             .get(&bf_plan.build_node_uuid)
             .cloned();
 
+        // Register our interest in this BoundaryField so the GUI's
+        // post-render cache-pruning sweep (in `jobs.rs`) doesn't drop
+        // the field out from under us. Purifibre is a *consumer* of
+        // the field (not a renderer of it), so without this the retain
+        // filter — which only keeps fields referenced by bundle or
+        // glyph DRAWS — would evict our upstream and leave us in the
+        // `bf_cached=None` stale path every frame.
+        ctx.scene_plan
+            .boundary_fields_in_use
+            .insert(bf_plan.build_node_uuid);
+
         // ── fingerprints ────────────────────────────────────────────
         //
         // Two fingerprints split the work:

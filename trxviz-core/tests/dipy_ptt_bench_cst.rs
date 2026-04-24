@@ -261,6 +261,9 @@ fn dipy_ptt_benchmark_cst_l() {
     let plan = DipyTractographyPlan {
         node_uuid: WorkflowNodeUuid(0),
         label: "ptt-bench CST-L".into(),
+        // Plan constructed by hand rather than through the evaluator,
+        // so no op-computed fingerprint. Same story as `dipy_bench_cst.rs`.
+        fingerprint: trxviz_core::workflow::ContentHash::EMPTY,
         odx_source_id: odx_id,
         odx_scene: odx_asset.scene.clone(),
         seed_mask: Some(haus.seed_mask.clone()),
@@ -286,11 +289,14 @@ fn dipy_ptt_benchmark_cst_l() {
     let n_seeds_planned = plan.seed_mask.as_ref().map_or(0, |m| m.count());
 
     let t0 = std::time::Instant::now();
-    let output = run_workflow_job(WorkflowJobPayload::DipyTractography {
-        plan,
-        device: Some(device),
-        queue: Some(queue),
-    })
+    let output = run_workflow_job(
+        WorkflowJobPayload::DipyTractography {
+            plan,
+            device: Some(device),
+            queue: Some(queue),
+        },
+        trxviz_core::workflow::CancelFlag::new(),
+    )
     .expect("dipy PTT job ran");
     let elapsed = t0.elapsed();
 

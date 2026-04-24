@@ -21,13 +21,17 @@ use crate::error::{WorkflowError, WorkflowResult};
 use crate::units::StreamlineIndex;
 
 use super::tracking::accum::{AttemptOutcome, ThreadAccum};
+use super::tracking::cancel::CancelFlag;
 use super::tracking::dg_prob::{DipyProbDG, DipyProbGlobal, DipyProbScratch};
 use super::tracking::masks::{PerStepMasks, PostFilterSet};
 use super::tracking::rng::{lcg_f32, split_mix_init};
 use super::tracking::tracker::{TrackingLimits, try_one_attempt};
 use super::types::{DipyDirectionGetter, DipyTractographyPlan, StreamlineDataset, StreamlineFlow};
 
-pub(super) fn run_cpu_dipy(plan: &DipyTractographyPlan) -> WorkflowResult<StreamlineFlow> {
+pub(super) fn run_cpu_dipy(
+    plan: &DipyTractographyPlan,
+    cancel: &CancelFlag,
+) -> WorkflowResult<StreamlineFlow> {
     match plan.direction_getter {
         DipyDirectionGetter::Probabilistic => {}
         DipyDirectionGetter::Ptt { .. } => {
@@ -150,18 +154,37 @@ pub(super) fn run_cpu_dipy(plan: &DipyTractographyPlan) -> WorkflowResult<Stream
         step_mm,
     };
 
+    // See `cpu_yeh` for the progress-reporting pattern. Dipy's natural
+    // `total` is the attempt count rather than a target, since this
+    // tracker enumerates seeds exhaustively rather than racing to a
+    // target streamline count.
+    const PROGRESS_EVERY: usize = 1024;
+    let attempts_done = std::sync::atomic::AtomicUsize::new(0);
     let merged: ThreadAccum<DipyProbScratch> = (0..n_attempts)
         .into_par_iter()
         .with_min_len(64)
         .fold(
             || new_prob_accum(n_dirs),
             |mut acc, attempt_idx| {
+                // Cooperative cancellation — see `cpu_yeh::run_cpu_yeh`
+                // for rationale on polling every attempt.
+                if cancel.is_cancelled() {
+                    return acc;
+                }
                 let outcome = try_dipy_attempt(&ctx, attempt_idx, &mut acc);
                 acc.counts.bump(outcome);
+                let prev = attempts_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if (prev + 1) % PROGRESS_EVERY == 0 {
+                    cancel.report_progress((prev + 1) as u64, n_attempts as u64);
+                }
                 acc
             },
         )
         .reduce(|| new_prob_accum(n_dirs), ThreadAccum::merge);
+
+    if cancel.is_cancelled() {
+        return Err(WorkflowError::Cancelled);
+    }
 
     let all_positions = merged.positions;
     let all_offsets = merged.offsets;

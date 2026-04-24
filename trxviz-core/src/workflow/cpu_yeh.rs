@@ -25,13 +25,17 @@ use crate::error::{WorkflowError, WorkflowResult};
 use crate::units::StreamlineIndex;
 
 use super::tracking::accum::{AttemptOutcome, ThreadAccum};
+use super::tracking::cancel::CancelFlag;
 use super::tracking::dg_yeh::{YehFixelDG, YehFixelGlobal, YehFixelScratch};
 use super::tracking::masks::{PerStepMasks, PostFilterSet};
 use super::tracking::rng::{lcg_f32, lcg_u32, split_mix_init};
 use super::tracking::tracker::{TrackingLimits, try_one_attempt};
 use super::types::{StreamlineDataset, StreamlineFlow, YehTractographyPlan};
 
-pub(super) fn run_cpu_yeh(plan: &YehTractographyPlan) -> WorkflowResult<StreamlineFlow> {
+pub(super) fn run_cpu_yeh(
+    plan: &YehTractographyPlan,
+    cancel: &CancelFlag,
+) -> WorkflowResult<StreamlineFlow> {
     let scene = &plan.odx_scene;
     let dataset = scene.dataset();
 
@@ -135,6 +139,13 @@ pub(super) fn run_cpu_yeh(plan: &YehTractographyPlan) -> WorkflowResult<Streamli
     // the *order* of kept streamlines in the output may shift with
     // thread scheduling.
     let target_atomic = AtomicUsize::new(0);
+    // Global attempt counter for progress reporting. Each worker bumps
+    // it every `PROGRESS_EVERY` attempts; the resulting `done` value is
+    // approximate (racy across workers) but monotonic enough for a
+    // progress bar. `total` is the user-visible denominator — the
+    // `target_streamlines` count, since that's the natural "done"
+    // metric for a target-count-driven run.
+    const PROGRESS_EVERY: usize = 1024;
     let merged: ThreadAccum<YehFixelScratch> = (0..attempt_budget)
         .into_par_iter()
         .with_min_len(64)
@@ -142,14 +153,31 @@ pub(super) fn run_cpu_yeh(plan: &YehTractographyPlan) -> WorkflowResult<Streamli
             if target_atomic.load(Ordering::Relaxed) >= target {
                 return acc;
             }
+            // Cooperative cancellation. Poll every attempt — a single
+            // relaxed atomic load is a few ns, negligible vs. the
+            // per-attempt tracking work. On cancel, every worker short-
+            // circuits on its next poll and the fold drains quickly.
+            if cancel.is_cancelled() {
+                return acc;
+            }
             let outcome = try_yeh_attempt(&ctx, idx as u64, &mut acc);
             acc.counts.bump(outcome);
             if matches!(outcome, AttemptOutcome::Kept) {
-                target_atomic.fetch_add(1, Ordering::Relaxed);
+                let prev = target_atomic.fetch_add(1, Ordering::Relaxed);
+                // Only one worker reports per boundary — prev just
+                // crossed a PROGRESS_EVERY multiple. Cheap enough to
+                // do inline in the hot path.
+                if (prev + 1) % PROGRESS_EVERY == 0 {
+                    cancel.report_progress((prev + 1) as u64, target as u64);
+                }
             }
             acc
         })
         .reduce(ThreadAccum::<YehFixelScratch>::new, ThreadAccum::merge);
+
+    if cancel.is_cancelled() {
+        return Err(WorkflowError::Cancelled);
+    }
 
     let mut all_positions = merged.positions;
     let mut all_offsets = merged.offsets;

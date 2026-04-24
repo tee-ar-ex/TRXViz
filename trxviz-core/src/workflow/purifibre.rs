@@ -86,6 +86,7 @@ pub struct PurifibreReport {
     /// Subset of the input `selected` that survived the threshold.
     pub survivors: Vec<StreamlineIndex>,
     /// FICO value at the cutoff percentile. Informational.
+    #[allow(dead_code)]
     pub threshold: f32,
     /// Short user-facing summary (e.g. "42000 → 37800 (FICO ≥ 2.13)").
     pub summary: String,

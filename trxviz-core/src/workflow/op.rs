@@ -115,7 +115,8 @@ pub struct FingerprintCtx<'a> {
     /// fingerprints already fully characterize the inputs — but ops
     /// reading raw mask bytes or other non-hashable-by-upstream data
     /// may dip into it.
-    pub inputs: &'a [Option<EvaluatedValue>],
+    #[allow(dead_code)]
+    pub(crate) inputs: &'a [Option<EvaluatedValue>],
 }
 
 /// Environment information consumed by `WorkflowOp::validate`. Kept

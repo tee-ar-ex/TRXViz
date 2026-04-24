@@ -13,7 +13,8 @@
 
 use wgpu::util::DeviceExt;
 
-use crate::error::WorkflowResult;
+use crate::error::{WorkflowError, WorkflowResult};
+use crate::workflow::tracking::CancelFlag;
 use crate::workflow::{DipyDirectionGetter, DipyTractographyPlan, StreamlineFlow};
 
 use super::readback::{GPU_READBACK_TIMEOUT, map_slices_blocking};
@@ -26,6 +27,7 @@ pub(super) fn run(
     plan: &DipyTractographyPlan,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
+    cancel: &CancelFlag,
 ) -> WorkflowResult<StreamlineFlow> {
     // Extract the PTT-specific knobs up front. The outer router has
     // already verified the variant.
@@ -208,6 +210,11 @@ pub(super) fn run(
 
     let mut batch_offset = 0u32;
     while batch_offset < total_seeds {
+        // Cooperative cancellation. See `prob::run` for rationale.
+        if cancel.is_cancelled() {
+            return Err(WorkflowError::Cancelled);
+        }
+        cancel.report_progress(batch_offset as u64, total_seeds as u64);
         let batch_size = (total_seeds - batch_offset).min(BATCH_SIZE);
 
         // ── PTT params uniform (24 u32 slots = 96 bytes) ──────────────

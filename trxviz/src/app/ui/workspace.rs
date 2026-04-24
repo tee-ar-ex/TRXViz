@@ -67,16 +67,15 @@ impl super::super::TrxVizApp {
         });
     }
 
-    fn show_assets_pane(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Assets");
-        ui.separator();
-
+    fn show_assets_content(&mut self, ui: &mut egui::Ui) {
         if self.workflow.document.assets.is_empty() {
             ui.small("Open files to populate the graph.");
             return;
         }
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        egui::ScrollArea::vertical()
+            .max_height(180.0)
+            .show(ui, |ui| {
             for asset in &self.workflow.document.assets {
                 match asset {
                     workflow::WorkflowAssetDocument::Streamlines { id, path, imported } => {
@@ -211,25 +210,37 @@ impl super::super::TrxVizApp {
         ui.heading("Inspector");
         ui.separator();
 
-        let render_changed = self.show_render_settings_section(ui);
-        if render_changed {
-            self.workflow.document.render_3d = Some(self.capture_document_render_3d());
-            self.mark_workflow_semantic_edit(ui.ctx().input(|input| input.time));
-        }
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.collapsing("Assets", |ui| {
+                self.show_assets_content(ui);
+            });
 
-        ui.separator();
+            ui.separator();
 
-        match self.workflow.selection {
-            Some(WorkflowSelection::Asset(asset_id)) => self.show_asset_inspector(ui, asset_id),
-            Some(WorkflowSelection::Node(node_uuid)) => self.show_node_inspector(ui, node_uuid),
-            None => {
-                ui.small("Select an asset or node.");
-                if let Some(error) = &self.workflow.runtime.graph_error {
-                    ui.separator();
-                    ui.colored_label(egui::Color32::RED, error);
+            let render_changed = self.show_render_settings_section(ui);
+            if render_changed {
+                self.workflow.document.render_3d = Some(self.capture_document_render_3d());
+                self.mark_workflow_semantic_edit(ui.ctx().input(|input| input.time));
+            }
+
+            ui.separator();
+
+            match self.workflow.selection {
+                Some(WorkflowSelection::Asset(asset_id)) => {
+                    self.show_asset_inspector(ui, asset_id)
+                }
+                Some(WorkflowSelection::Node(node_uuid)) => {
+                    self.show_node_inspector(ui, node_uuid)
+                }
+                None => {
+                    ui.small("Select an asset or node.");
+                    if let Some(error) = &self.workflow.runtime.graph_error {
+                        ui.separator();
+                        ui.colored_label(egui::Color32::RED, error);
+                    }
                 }
             }
-        }
+        });
     }
 
     fn show_render_settings_section(&mut self, ui: &mut egui::Ui) -> bool {
@@ -626,7 +637,6 @@ struct WorkspaceBehavior<'a> {
 impl Behavior<WorkspacePane> for WorkspaceBehavior<'_> {
     fn tab_title_for_pane(&mut self, pane: &WorkspacePane) -> egui::WidgetText {
         match pane {
-            WorkspacePane::Assets => "Assets".into(),
             WorkspacePane::Preview => "Preview".into(),
             WorkspacePane::Graph => "Workflow".into(),
             WorkspacePane::Inspector => "Inspector".into(),
@@ -640,7 +650,6 @@ impl Behavior<WorkspacePane> for WorkspaceBehavior<'_> {
         pane: &mut WorkspacePane,
     ) -> UiResponse {
         match pane {
-            WorkspacePane::Assets => self.app.show_assets_pane(ui),
             WorkspacePane::Preview => self.app.show_preview_pane(ui, self.frame),
             WorkspacePane::Graph => self.app.show_graph_pane(ui),
             WorkspacePane::Inspector => self.app.show_inspector_pane(ui),

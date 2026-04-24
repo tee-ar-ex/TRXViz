@@ -223,6 +223,7 @@ fn test_streamline_flow() -> StreamlineFlow {
         scalar_auto_range: true,
         scalar_range_min: 0.0,
         scalar_range_max: 1.0,
+        scalar_colormap: SurfaceColormap::BlueWhiteRed,
     }
 }
 

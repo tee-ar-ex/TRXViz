@@ -268,8 +268,11 @@ fn yeh_benchmark_cst_l() {
     }
 
     let t0 = std::time::Instant::now();
-    let output =
-        run_workflow_job(WorkflowJobPayload::YehTractography { plan }).expect("yeh job ran");
+    let output = run_workflow_job(
+        WorkflowJobPayload::YehTractography { plan },
+        trxviz_core::workflow::CancelFlag::new(),
+    )
+    .expect("yeh job ran");
     let elapsed = t0.elapsed();
 
     let flow = match output {

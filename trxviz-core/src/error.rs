@@ -10,6 +10,15 @@ pub enum WorkflowError {
     #[error("{0}")]
     Evaluation(String),
 
+    /// The user cancelled the job mid-run. Surfaced as a neutral toast
+    /// ("Cancelled by user") rather than a red error by the GUI's
+    /// `Finished` handler. Trackers check their `CancelFlag` periodically
+    /// (every ~1024 CPU seeds, every GPU batch); when flipped, they
+    /// return this variant so any partial streamlines already produced
+    /// are discarded cleanly.
+    #[error("cancelled by user")]
+    Cancelled,
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 

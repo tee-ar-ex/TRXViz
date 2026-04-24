@@ -610,6 +610,13 @@ impl WorkflowExecutionStatus {
 pub struct ExpensiveNodeRunRecord {
     pub current_fingerprint: Option<u64>,
     pub last_success_fingerprint: Option<u64>,
+    /// Fingerprint at which the user most recently cancelled this node.
+    /// The GUI's `should_queue_expensive_job` treats a match here the
+    /// same as a `last_success_fingerprint` match: don't auto-re-run.
+    /// Cleared when the user clicks a Run button (so a second click
+    /// retries at the same fingerprint) or when the fingerprint
+    /// changes (because it won't match anymore).
+    pub last_cancelled_fingerprint: Option<u64>,
     pub status: WorkflowExecutionStatus,
     pub last_result_summary: Option<String>,
 }
@@ -619,6 +626,7 @@ impl Default for ExpensiveNodeRunRecord {
         Self {
             current_fingerprint: None,
             last_success_fingerprint: None,
+            last_cancelled_fingerprint: None,
             status: WorkflowExecutionStatus::NeverRun,
             last_result_summary: None,
         }
@@ -769,6 +777,17 @@ pub struct SceneFramePlan {
     pub parcellation_draws: Vec<ParcellationDrawPlan>,
     pub boundary_field_plans: Vec<BoundaryFieldPlan>,
     pub boundary_glyph_draws: Vec<BoundaryGlyphDrawPlan>,
+    /// Node UUIDs of `StreamlineDirectionField` (or other BoundaryField-
+    /// producing) nodes whose cached field is being *consumed* by a
+    /// downstream op for its own computation (not just for rendering).
+    /// The GUI's post-render cache-pruning sweep keeps
+    /// `boundary_field_cache` entries for any UUID in this set in
+    /// addition to those referenced by `bundle_draws` /
+    /// `boundary_glyph_draws`. Populated by inline ops like Purifibre
+    /// that hold a `BoundaryField` input but don't emit a draw plan —
+    /// without this, the retain() sweep would silently drop their
+    /// upstream field and leave them forever stale.
+    pub boundary_fields_in_use: std::collections::HashSet<WorkflowNodeUuid>,
     pub fixel_3d_draws: Vec<FixelDrawPlan>,
     pub fixel_2d_draws: Vec<FixelDrawPlan>,
     pub odf_glyph_draws: Vec<OdfGlyphDrawPlan>,
@@ -847,6 +866,7 @@ impl Default for SceneFramePlan {
             volume_scalar_draws: Vec::new(),
             bundle_surface_plans: Vec::new(),
             bundle_draws: Vec::new(),
+            boundary_fields_in_use: std::collections::HashSet::new(),
             parcellation_draws: Vec::new(),
             boundary_field_plans: Vec::new(),
             boundary_glyph_draws: Vec::new(),
@@ -1343,6 +1363,14 @@ impl DipyDirectionGetter {
 pub struct DipyTractographyPlan {
     pub node_uuid: WorkflowNodeUuid,
     pub label: String,
+    /// Authoritative fingerprint for this plan — the hash the GUI keys
+    /// the in-flight job and result cache on. Computed by the op
+    /// during `evaluate()` from its config + upstream identity and
+    /// persists unchanged through dispatch / completion / caching.
+    /// Replaces the previous "GUI reads fingerprint from
+    /// `node_runs.current_fingerprint` with an `unwrap_or(0)` fallback"
+    /// pattern that produced PR 1's silent-discard race.
+    pub fingerprint: crate::workflow::op::ContentHash,
     pub odx_source_id: FileId,
     pub odx_scene: Arc<crate::data::odx_data::OdxScene>,
     /// When `None`, seed from every voxel in the ODX mask (whole-brain,
@@ -1380,6 +1408,11 @@ pub struct DipyTractographyPlan {
 pub struct YehTractographyPlan {
     pub node_uuid: WorkflowNodeUuid,
     pub label: String,
+    /// Authoritative fingerprint for this plan — see the note on
+    /// `DipyTractographyPlan::fingerprint`. The GUI reads this field
+    /// directly when queueing a job; no more `unwrap_or(0)` fallback
+    /// through the cache.
+    pub fingerprint: crate::workflow::op::ContentHash,
     pub odx_source_id: FileId,
     pub odx_scene: Arc<crate::data::odx_data::OdxScene>,
     /// When `None`, seed from every voxel with at least one fixel peak.
@@ -1491,6 +1524,17 @@ pub enum WorkflowJobMessage {
     Started {
         node_uuid: WorkflowNodeUuid,
         fingerprint: u64,
+    },
+    /// Incremental progress from a long-running job. Trackers emit
+    /// these every ~1024 attempts (CPU) or every batch (GPU) so the
+    /// GUI can render a real progress bar rather than just a spinner.
+    /// `done` and `total` are in whatever unit makes sense for the op
+    /// (attempts for CPU tractography, seeds for GPU).
+    Progress {
+        node_uuid: WorkflowNodeUuid,
+        fingerprint: u64,
+        done: u64,
+        total: u64,
     },
     Finished {
         node_uuid: WorkflowNodeUuid,

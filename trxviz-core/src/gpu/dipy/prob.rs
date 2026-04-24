@@ -7,7 +7,8 @@
 
 use wgpu::util::DeviceExt;
 
-use crate::error::WorkflowResult;
+use crate::error::{WorkflowError, WorkflowResult};
+use crate::workflow::tracking::CancelFlag;
 use crate::workflow::{DipyTractographyPlan, StreamlineFlow};
 
 use super::readback::{GPU_READBACK_TIMEOUT, map_slices_blocking};
@@ -20,6 +21,7 @@ pub(super) fn run(
     plan: &DipyTractographyPlan,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
+    cancel: &CancelFlag,
 ) -> WorkflowResult<StreamlineFlow> {
     let inputs = match prepare_dipy_inputs(plan, device)? {
         Some(i) => i,
@@ -125,6 +127,15 @@ pub(super) fn run(
 
     let mut batch_offset = 0u32;
     while batch_offset < total_seeds {
+        // Cooperative cancellation. Each batch is ~100-500 ms of GPU
+        // work + readback; polling once per batch keeps cancellation
+        // latency bounded by one batch. The already-submitted batch
+        // finishes (we can't abort mid-shader) but no further work is
+        // dispatched.
+        if cancel.is_cancelled() {
+            return Err(WorkflowError::Cancelled);
+        }
+        cancel.report_progress(batch_offset as u64, total_seeds as u64);
         let batch_size = (total_seeds - batch_offset).min(BATCH_SIZE);
 
         // ── params uniform (64 bytes, 16-byte aligned) ─────────────────

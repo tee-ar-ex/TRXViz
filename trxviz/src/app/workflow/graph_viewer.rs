@@ -404,7 +404,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
 
     fn show_graph_menu(&mut self, pos: Pos2, ui: &mut egui::Ui, snarl: &mut Snarl<WorkflowNode>) {
         let measured_node_sizes = &*self.measured_node_sizes;
-        ui.menu_button("Streamline Filters", |ui| {
+        ui.menu_button("Streamlines", |ui| {
             add_node_button(
                 ui,
                 snarl,
@@ -518,7 +518,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
             );
         });
 
-        ui.menu_button("Styling", |ui| {
+        ui.menu_button("Color & Style", |ui| {
             add_node_button(
                 ui,
                 snarl,
@@ -562,9 +562,16 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 SurfaceProjectionMeanDpsOp::default().into(),
                 measured_node_sizes,
             );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                ColorByFixelScalarsOp::default().into(),
+                measured_node_sizes,
+            );
         });
 
-        ui.menu_button("Rendering", |ui| {
+        ui.menu_button("Display", |ui| {
             add_node_button(
                 ui,
                 snarl,
@@ -618,31 +625,7 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
-                SaveStreamlinesOp::default().into(),
-                measured_node_sizes,
-            );
-        });
-
-        ui.menu_button("ODX", |ui| {
-            add_node_button(
-                ui,
-                snarl,
-                pos,
-                OdxFixelScalarSelectOp::default().into(),
-                measured_node_sizes,
-            );
-            add_node_button(
-                ui,
-                snarl,
-                pos,
-                ColorByFixelScalarsOp::default().into(),
-                measured_node_sizes,
-            );
-            add_node_button(
-                ui,
-                snarl,
-                pos,
-                OdxVolumeSelectOp::default().into(),
+                VoxelMaskDisplayOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
@@ -664,6 +647,23 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 snarl,
                 pos,
                 OdfGlyphRendererOp::default().into(),
+                measured_node_sizes,
+            );
+        });
+
+        ui.menu_button("Fixel & ODF", |ui| {
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                OdxFixelScalarSelectOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                OdxVolumeSelectOp::default().into(),
                 measured_node_sizes,
             );
         });
@@ -760,11 +760,14 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 AddTermOp::default().into(),
                 measured_node_sizes,
             );
+        });
+
+        ui.menu_button("Export", |ui| {
             add_node_button(
                 ui,
                 snarl,
                 pos,
-                VoxelMaskDisplayOp::default().into(),
+                SaveStreamlinesOp::default().into(),
                 measured_node_sizes,
             );
         });
@@ -1159,6 +1162,7 @@ mod tests {
                 tube_radius_mm: trxviz_core::units::Millimeters(0.4),
                 tube_sides: 8,
                 slab_half_width_mm: trxviz_core::units::Millimeters(5.0),
+                opacity: 1.0,
             },
         };
 

@@ -301,6 +301,7 @@ impl WorkflowOp for YehTractographyOp {
                 .push(YehTractographyPlan {
                     node_uuid: ctx.node.uuid,
                     label: ctx.node.label.clone(),
+                    fingerprint: super::super::op::ContentHash(fingerprint),
                     odx_source_id,
                     odx_scene: loaded_odx.scene.clone(),
                     seed_mask,

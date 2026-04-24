@@ -153,6 +153,7 @@ fn limit_streamlines_reduces_count() {
             tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -192,6 +193,7 @@ fn limit_streamlines_zero_produces_empty_selection() {
             tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -238,6 +240,7 @@ fn random_subset_is_deterministic_for_same_seed() {
                 tube_radius_mm: Millimeters(0.5),
                 tube_sides: 8,
                 slab_half_width_mm: Millimeters(5.0),
+                opacity: 1.0,
             },
             GraphPos::new(400.0, 0.0),
         );
@@ -289,6 +292,7 @@ fn group_select_all_passes_through_unchanged() {
             tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -329,6 +333,7 @@ fn group_select_none_produces_empty_flow() {
             tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -374,6 +379,7 @@ fn group_select_by_label_filters_correctly() {
             tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -415,6 +421,7 @@ fn color_by_direction_sets_direction_mode() {
             tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -450,6 +457,7 @@ fn color_by_group_sets_group_mode() {
             tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -486,6 +494,7 @@ fn uniform_color_sets_uniform_mode() {
             tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         },
         GraphPos::new(400.0, 0.0),
     );
@@ -519,6 +528,7 @@ fn streamline_display_adds_entry_to_scene_plan() {
             tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         },
         GraphPos::new(200.0, 0.0),
     );
@@ -546,6 +556,7 @@ fn hidden_streamline_display_still_adds_entry_but_visible_false() {
             tube_radius_mm: Millimeters(0.5),
             tube_sides: 8,
             slab_half_width_mm: Millimeters(5.0),
+            opacity: 1.0,
         },
         GraphPos::new(200.0, 0.0),
     );
@@ -654,6 +665,7 @@ fn bench_recolor_100k_streamlines() {
                 tube_radius_mm: Millimeters(0.5),
                 tube_sides: 8,
                 slab_half_width_mm: Millimeters(5.0),
+                opacity: 1.0,
             },
             GraphPos::new(400.0, 0.0),
         );

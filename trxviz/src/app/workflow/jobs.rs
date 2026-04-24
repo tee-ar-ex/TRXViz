@@ -511,12 +511,37 @@ impl crate::app::TrxVizApp {
                         changed = true;
                     }
                 }
+                WorkflowJobMessage::Progress {
+                    node_uuid,
+                    fingerprint,
+                    done,
+                    total,
+                } => {
+                    // Ignore progress for an obsolete fingerprint — if
+                    // the user edited params mid-run, the in-flight
+                    // worker is now running an obsolete job that will
+                    // be silently dropped on Finished. No point
+                    // animating a bar for it.
+                    let is_current = self
+                        .workflow
+                        .execution_cache
+                        .node_runs
+                        .get(&node_uuid)
+                        .and_then(|r| r.current_fingerprint)
+                        == Some(fingerprint);
+                    if is_current {
+                        self.workflow.job_progress.insert(node_uuid, (done, total));
+                        changed = true;
+                    }
+                }
                 WorkflowJobMessage::Finished {
                     node_uuid,
                     fingerprint,
                     result,
                 } => {
                     self.workflow.jobs_in_flight.remove(&node_uuid);
+                    self.workflow.cancel_flags.remove(&node_uuid);
+                    self.workflow.job_progress.remove(&node_uuid);
 
                     // Node removed from the document while the job ran —
                     // no record to attribute the result to.
@@ -713,17 +738,42 @@ impl crate::app::TrxVizApp {
                         }
                         Err(error) => {
                             let err_text = error.to_string();
+                            let is_cancel =
+                                matches!(error, trxviz_core::workflow::WorkflowError::Cancelled);
                             if fingerprint_current {
                                 if let Some(record) =
                                     self.workflow.execution_cache.node_runs.get_mut(&node_uuid)
                                 {
-                                    mark_expensive_failure(record, fingerprint, &err_text);
+                                    // Cancel gets a dedicated mark so the
+                                    // scheduler doesn't immediately
+                                    // re-dispatch a fresh run at the same
+                                    // fingerprint. Non-cancel errors go
+                                    // through Failed (which keeps the door
+                                    // open for retry — transient errors may
+                                    // resolve on their own).
+                                    if is_cancel {
+                                        trxviz_core::workflow::mark_expensive_cancelled(
+                                            record,
+                                            fingerprint,
+                                        );
+                                    } else {
+                                        mark_expensive_failure(record, fingerprint, &err_text);
+                                    }
                                 }
-                                self.error_msg = Some(format!("'{node_label}' failed: {err_text}"));
+                                // Cancellation is a user action, not a
+                                // failure — neutral status toast, not
+                                // a red error.
+                                if is_cancel {
+                                    self.status_msg = Some(format!("'{node_label}' cancelled."));
+                                } else {
+                                    self.error_msg =
+                                        Some(format!("'{node_label}' failed: {err_text}"));
+                                }
                             } else {
+                                let verb = if is_cancel { "cancelled" } else { "failed" };
                                 self.status_msg = Some(format!(
-                                    "'{node_label}' failed for obsolete parameters; \
-                                     current run may still succeed: {err_text}"
+                                    "'{node_label}' {verb} for obsolete parameters; \
+                                     current run may still succeed"
                                 ));
                             }
                             changed = true;
@@ -756,19 +806,51 @@ impl crate::app::TrxVizApp {
         self.workflow
             .jobs_in_flight
             .insert(node_uuid, (kind, fingerprint));
+        // Fresh CancelFlag per job. The worker gets a clone; the GUI
+        // keeps the original in `cancel_flags` so a Cancel click on
+        // this node can flip it. Entry is removed when the job
+        // finishes (whether via success, failure, or cancellation).
+        //
+        // The progress callback forwards `WorkflowJobMessage::Progress`
+        // through the same channel that carries Started / Finished.
+        // `tx_for_progress` is a separate clone so the spawn closure's
+        // own `tx` isn't moved twice; `mpsc::Sender::clone` is cheap.
         let tx = self.workflow.job_tx.clone();
+        let tx_for_progress = tx.clone();
+        let cancel =
+            trxviz_core::workflow::CancelFlag::with_progress_callback(move |done, total| {
+                let _ = tx_for_progress.send(WorkflowJobMessage::Progress {
+                    node_uuid,
+                    fingerprint,
+                    done,
+                    total,
+                });
+            });
+        self.workflow.cancel_flags.insert(node_uuid, cancel.clone());
         std::thread::spawn(move || {
             let _ = tx.send(WorkflowJobMessage::Started {
                 node_uuid,
                 fingerprint,
             });
-            let result = run_workflow_job(payload);
+            let result = run_workflow_job(payload, cancel);
             let _ = tx.send(WorkflowJobMessage::Finished {
                 node_uuid,
                 fingerprint,
                 result,
             });
         });
+    }
+
+    /// Flip the cancel flag for any in-flight job on this node. The
+    /// worker observes the flip on its next poll (every ~1024 seeds
+    /// for CPU, every batch for GPU) and returns
+    /// `WorkflowError::Cancelled`. The GUI's Finished handler then
+    /// emits a neutral "Cancelled" toast instead of a red error.
+    /// No-op when no job is in flight for `node_uuid`.
+    pub(in crate::app) fn request_cancel_workflow_job(&self, node_uuid: WorkflowNodeUuid) {
+        if let Some(flag) = self.workflow.cancel_flags.get(&node_uuid) {
+            flag.request_cancel();
+        }
     }
 
     pub(in crate::app) fn queue_workflow_jobs(&mut self) -> bool {
@@ -797,6 +879,16 @@ impl crate::app::TrxVizApp {
 
         if !self.workflow.run_expensive_requested && !self.workflow.run_session_active {
             return false;
+        }
+
+        // An explicit Run click clears any prior cancellations so the
+        // user can retry at the same fingerprint just by clicking Run
+        // again. Without this, a cancelled node would stay cancelled
+        // until the user edited a param.
+        if self.workflow.run_expensive_requested {
+            for record in self.workflow.execution_cache.node_runs.values_mut() {
+                record.last_cancelled_fingerprint = None;
+            }
         }
 
         let mut queued_any = false;
@@ -900,13 +992,13 @@ impl crate::app::TrxVizApp {
             .clone()
         {
             let node_uuid = plan.node_uuid;
-            let fingerprint = self
-                .workflow
-                .execution_cache
-                .node_runs
-                .get(&node_uuid)
-                .and_then(|r| r.current_fingerprint)
-                .unwrap_or(0);
+            // The plan is authoritative: its `fingerprint` field was
+            // computed by the op during evaluate() from the op's config
+            // + upstream identity, and travels with the plan through
+            // dispatch / completion. Replaces the previous
+            // `node_runs.current_fingerprint.unwrap_or(0)` fallback that
+            // produced PR 1's silent-discard race on first-run.
+            let fingerprint = plan.fingerprint.0;
             if should_queue_expensive_job(
                 self.workflow.execution_cache.node_runs.get(&node_uuid),
                 fingerprint,
@@ -935,13 +1027,9 @@ impl crate::app::TrxVizApp {
             .clone()
         {
             let node_uuid = plan.node_uuid;
-            let fingerprint = self
-                .workflow
-                .execution_cache
-                .node_runs
-                .get(&node_uuid)
-                .and_then(|r| r.current_fingerprint)
-                .unwrap_or(0);
+            // Plan-authoritative fingerprint — see the Dipy queue loop
+            // above for rationale.
+            let fingerprint = plan.fingerprint.0;
             if should_queue_expensive_job(
                 self.workflow.execution_cache.node_runs.get(&node_uuid),
                 fingerprint,
@@ -1040,15 +1128,24 @@ impl crate::app::TrxVizApp {
 
     pub(in crate::app) fn refresh_workflow_runtime_if_needed(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
+        // Snapshot the job-completion latch up front: we need it in
+        // both the Interactive and Settled gates, and the old code
+        // cleared it inside the Interactive branch before the Settled
+        // check had a chance to see it. Inline ops (TIP, Purifibre)
+        // that depend on an expensive upstream (e.g. a BoundaryField
+        // that just built in the background) need a Settled pass to
+        // actually rebuild — TIP in particular gates its work on
+        // `ctx.eval_mode == WorkflowEvalMode::Settled`, so an
+        // Interactive-only refresh leaves it "Stale" indefinitely.
+        let job_completion = self.workflow.pending_job_completion;
         let needs_interactive = self.workflow.document_revision
             != self.workflow.last_interactive_revision
             || self.workflow.render_only_changed
-            || self.workflow.pending_job_completion;
+            || job_completion;
         if needs_interactive {
             self.refresh_workflow_runtime(WorkflowEvalMode::Interactive);
             self.workflow.last_interactive_revision = self.workflow.document_revision;
             self.workflow.render_only_changed = false;
-            self.workflow.pending_job_completion = false;
             if self.workflow.pending_stage_camera_fit {
                 self.reset_inflated_stage_camera();
                 self.workflow.pending_stage_camera_fit = false;
@@ -1056,6 +1153,7 @@ impl crate::app::TrxVizApp {
         }
 
         let should_run_settled = self.workflow.run_expensive_requested
+            || job_completion
             || (self.workflow.document_revision != self.workflow.last_settled_revision
                 && !self.workflow.editor_interaction_active
                 && (now - self.workflow.last_semantic_edit_at) >= 0.150);
@@ -1065,6 +1163,12 @@ impl crate::app::TrxVizApp {
             self.workflow.last_settled_revision = self.workflow.document_revision;
             self.workflow.editor_interaction_active = false;
         }
+
+        // Single clear at the end so both branches above see the same
+        // snapshot. Double-evaluating in one frame (Interactive +
+        // Settled) when a job completes is the same pattern an
+        // explicit Run click already produces, so no new risk.
+        self.workflow.pending_job_completion = false;
     }
 
     pub(in crate::app) fn sync_workflow_resources(&mut self, frame: &mut eframe::Frame) {
@@ -1239,6 +1343,21 @@ impl crate::app::TrxVizApp {
                     .boundary_glyph_draws
                     .iter()
                     .map(|draw| draw.build_node_uuid),
+            )
+            // `boundary_fields_in_use` is populated by non-rendering
+            // consumers (Purifibre today; future ops that hold a
+            // BoundaryField input). Without this union the retain()
+            // below evicts consumers' upstream fields and leaves the
+            // consumer forever stale — the exact bug surfaced by
+            // Purifibre + StreamlineDirectionField wired without a
+            // BundleSurface or BoundaryGlyph renderer.
+            .chain(
+                self.workflow
+                    .runtime
+                    .scene_plan
+                    .boundary_fields_in_use
+                    .iter()
+                    .copied(),
             )
             .collect();
 
@@ -2001,7 +2120,17 @@ fn should_queue_expensive_job(
     let Some(record) = record else {
         return true;
     };
-    record.last_success_fingerprint != Some(fingerprint)
+    // Already succeeded at this fingerprint — don't re-run.
+    if record.last_success_fingerprint == Some(fingerprint) {
+        return false;
+    }
+    // User cancelled at this fingerprint — don't auto-restart. Cleared
+    // on any explicit Run click (see `queue_workflow_jobs` entry) or
+    // when the fingerprint changes.
+    if record.last_cancelled_fingerprint == Some(fingerprint) {
+        return false;
+    }
+    true
 }
 
 fn mark_expensive_failure(record: &mut ExpensiveNodeRunRecord, fingerprint: u64, error: &str) {

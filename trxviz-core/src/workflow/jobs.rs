@@ -26,7 +26,10 @@ pub fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
     }
 }
 
-pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJobOutput> {
+pub fn run_workflow_job(
+    payload: WorkflowJobPayload,
+    cancel: super::tracking::CancelFlag,
+) -> WorkflowResult<WorkflowJobOutput> {
     match payload {
         WorkflowJobPayload::ReactiveStreamline(plan) => Ok(WorkflowJobOutput::ReactiveStreamline(
             materialize_reactive_streamline_flow(&plan)?,
@@ -137,14 +140,14 @@ pub fn run_workflow_job(payload: WorkflowJobPayload) -> WorkflowResult<WorkflowJ
             queue,
         } => {
             let flow = if let (Some(device), Some(queue)) = (device, queue) {
-                crate::gpu::dipy::run_gpu_dipy(&plan, &device, &queue)?
+                crate::gpu::dipy::run_gpu_dipy(&plan, &device, &queue, &cancel)?
             } else {
-                super::cpu_dipy::run_cpu_dipy(&plan)?
+                super::cpu_dipy::run_cpu_dipy(&plan, &cancel)?
             };
             Ok(WorkflowJobOutput::DipyTractography { flow })
         }
         WorkflowJobPayload::YehTractography { plan } => {
-            let flow = super::cpu_yeh::run_cpu_yeh(&plan)?;
+            let flow = super::cpu_yeh::run_cpu_yeh(&plan, &cancel)?;
             Ok(WorkflowJobOutput::YehTractography { flow })
         }
         WorkflowJobPayload::BoundaryField { plan } => {
@@ -194,6 +197,12 @@ pub fn prime_expensive_record(record: &mut ExpensiveNodeRunRecord, fingerprint: 
     }
 }
 
+pub fn mark_expensive_cancelled(record: &mut ExpensiveNodeRunRecord, fingerprint: u64) {
+    record.current_fingerprint = Some(fingerprint);
+    record.last_cancelled_fingerprint = Some(fingerprint);
+    record.status = WorkflowExecutionStatus::Failed("cancelled by user".to_string());
+}
+
 pub fn mark_expensive_success(
     record: &mut ExpensiveNodeRunRecord,
     fingerprint: u64,
@@ -201,6 +210,11 @@ pub fn mark_expensive_success(
 ) {
     record.current_fingerprint = Some(fingerprint);
     record.last_success_fingerprint = Some(fingerprint);
+    // A successful run at this fingerprint clears any prior
+    // cancellation at the same fingerprint (it's no longer relevant).
+    if record.last_cancelled_fingerprint == Some(fingerprint) {
+        record.last_cancelled_fingerprint = None;
+    }
     record.status = WorkflowExecutionStatus::Ready;
     record.last_result_summary = Some(result_summary);
 }

@@ -18,6 +18,7 @@
 //! workflow job in `trxviz-core::workflow::jobs` only sees this router.
 
 use crate::error::WorkflowResult;
+use crate::workflow::tracking::CancelFlag;
 use crate::workflow::{DipyDirectionGetter, DipyTractographyPlan, StreamlineFlow};
 
 pub(super) mod prob;
@@ -30,9 +31,10 @@ pub fn run_gpu_dipy(
     plan: &DipyTractographyPlan,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
+    cancel: &CancelFlag,
 ) -> WorkflowResult<StreamlineFlow> {
     match plan.direction_getter {
-        DipyDirectionGetter::Probabilistic => prob::run(plan, device, queue),
-        DipyDirectionGetter::Ptt { .. } => ptt::run(plan, device, queue),
+        DipyDirectionGetter::Probabilistic => prob::run(plan, device, queue, cancel),
+        DipyDirectionGetter::Ptt { .. } => ptt::run(plan, device, queue, cancel),
     }
 }

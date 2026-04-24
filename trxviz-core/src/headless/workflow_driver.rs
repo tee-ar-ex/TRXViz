@@ -4,9 +4,9 @@ use crate::data::trx_data::RenderStyle;
 use crate::scene::{HeadlessScene, HeadlessWorkflowState};
 use crate::workflow::{
     BundleSurfacePlan, CachedBoundaryField, CachedBundleSurfaceMeshes, CachedDerivedStreamline,
-    CachedSurfaceQuery, CachedSurfaceStreamlineMap, CachedTubeGeometry, WorkflowJobOutput,
-    WorkflowJobPayload, WorkflowNodeUuid, ensure_node_uuids, evaluate_scene_plan,
-    mark_expensive_success, run_workflow_job, save_streamline_plan,
+    CachedSurfaceQuery, CachedSurfaceStreamlineMap, CachedTubeGeometry, CancelFlag,
+    WorkflowJobOutput, WorkflowJobPayload, WorkflowNodeUuid, ensure_node_uuids,
+    evaluate_scene_plan, mark_expensive_success, run_workflow_job, save_streamline_plan,
     workflow_boundary_plan_fingerprint, workflow_bundle_display_fingerprint,
     workflow_bundle_plan_fingerprint, workflow_reactive_streamline_fingerprint,
     workflow_streamline_fingerprint, workflow_surface_projection_fingerprint,
@@ -44,8 +44,11 @@ pub(super) fn execute_workflow_to_completion(
                 &mut workflow.execution_cache,
                 plan.node_uuid,
                 fingerprint,
-                run_workflow_job(WorkflowJobPayload::ReactiveStreamline(plan))
-                    .map_err(|err| anyhow!(err))?,
+                run_workflow_job(
+                    WorkflowJobPayload::ReactiveStreamline(plan),
+                    CancelFlag::new(),
+                )
+                .map_err(|err| anyhow!(err))?,
             );
             ran_job = true;
         }
@@ -65,7 +68,7 @@ pub(super) fn execute_workflow_to_completion(
                 &mut workflow.execution_cache,
                 plan.node_uuid,
                 fingerprint,
-                run_workflow_job(WorkflowJobPayload::SurfaceQuery(plan))
+                run_workflow_job(WorkflowJobPayload::SurfaceQuery(plan), CancelFlag::new())
                     .map_err(|err| anyhow!(err))?,
             );
             ran_job = true;
@@ -90,7 +93,7 @@ pub(super) fn execute_workflow_to_completion(
                 &mut workflow.execution_cache,
                 plan.node_uuid,
                 fingerprint,
-                run_workflow_job(WorkflowJobPayload::SurfaceMap(plan))
+                run_workflow_job(WorkflowJobPayload::SurfaceMap(plan), CancelFlag::new())
                     .map_err(|err| anyhow!(err))?,
             );
             ran_job = true;
@@ -113,7 +116,7 @@ pub(super) fn execute_workflow_to_completion(
                 &mut workflow.execution_cache,
                 draw.node_uuid,
                 fingerprint,
-                run_workflow_job(WorkflowJobPayload::TubeGeometry(draw))
+                run_workflow_job(WorkflowJobPayload::TubeGeometry(draw), CancelFlag::new())
                     .map_err(|err| anyhow!(err))?,
             );
             ran_job = true;
@@ -133,8 +136,11 @@ pub(super) fn execute_workflow_to_completion(
                 &mut workflow.execution_cache,
                 plan.build_node_uuid,
                 fingerprint,
-                run_workflow_job(WorkflowJobPayload::BoundaryField { plan })
-                    .map_err(|err| anyhow!(err))?,
+                run_workflow_job(
+                    WorkflowJobPayload::BoundaryField { plan },
+                    CancelFlag::new(),
+                )
+                .map_err(|err| anyhow!(err))?,
             );
             ran_job = true;
         }
@@ -205,11 +211,14 @@ pub(super) fn execute_workflow_to_completion(
                 &mut workflow.execution_cache,
                 draw.node_uuid,
                 fingerprint,
-                run_workflow_job(WorkflowJobPayload::BundleSurface {
-                    plan,
-                    color_mode: draw.color_mode,
-                    boundary_field,
-                })
+                run_workflow_job(
+                    WorkflowJobPayload::BundleSurface {
+                        plan,
+                        color_mode: draw.color_mode,
+                        boundary_field,
+                    },
+                    CancelFlag::new(),
+                )
                 .map_err(|err| anyhow!(err))?,
             );
             ran_job = true;
@@ -256,7 +265,8 @@ pub(super) fn ensure_export_tube_geometry(
             &mut workflow.execution_cache,
             draw.node_uuid,
             fingerprint,
-            run_workflow_job(WorkflowJobPayload::TubeGeometry(draw)).map_err(|err| anyhow!(err))?,
+            run_workflow_job(WorkflowJobPayload::TubeGeometry(draw), CancelFlag::new())
+                .map_err(|err| anyhow!(err))?,
         );
     }
     Ok(())

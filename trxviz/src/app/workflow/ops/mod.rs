@@ -9,6 +9,9 @@ use trxviz_core::renderer::mesh_renderer::SurfaceColormap;
 
 use crate::app::workflow;
 
+mod dipy_tractography;
+mod yeh_tractography;
+
 #[derive(Clone, Debug)]
 pub(crate) struct OdxSelectorNames {
     pub(crate) dpv_names: Vec<String>,
@@ -895,100 +898,22 @@ pub(crate) fn edit_node_op(
             rng_seed,
             direction_getter,
         } => {
-            // Direction-getter variant picker. We compare the discriminant
-            // via a bool rather than selectable_value on the full enum
-            // because the PTT variant carries its own inline parameters
-            // which we don't want to recreate on every combo-box redraw.
-            let is_ptt = matches!(direction_getter, workflow::DipyDirectionGetter::Ptt { .. });
-            let mut new_is_ptt = is_ptt;
-            egui::ComboBox::from_id_salt(format!("dipy_dg_{}", node_uuid.0))
-                .selected_text(if is_ptt {
-                    "PTT (GPU only)"
-                } else {
-                    "Probabilistic"
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut new_is_ptt, false, "Probabilistic");
-                    ui.selectable_value(&mut new_is_ptt, true, "PTT (GPU only)");
-                });
-            if new_is_ptt != is_ptt {
-                *direction_getter = if new_is_ptt {
-                    workflow::DipyDirectionGetter::ptt_default()
-                } else {
-                    workflow::DipyDirectionGetter::Probabilistic
-                };
-            }
-
-            ui.add(egui::Slider::new(step_size_mm, 0.1..=2.0).text("Step size (mm)"));
-            ui.add(egui::Slider::new(max_angle_deg, 10.0..=90.0).text("Max angle (°)"));
-            ui.add(egui::Slider::new(min_len_mm, 5.0..=100.0).text("Min length (mm)"));
-            ui.add(egui::Slider::new(max_len_mm, 20.0..=500.0).text("Max length (mm)"));
-            ui.add(egui::Slider::new(fixel_threshold, 0.0..=0.5).text("Fixel threshold"));
-            if let Some(&v) = ctx.overridden_values.get("fixel_otsu") {
-                ui.small(format!("plan fixel_otsu = {:.4}", v));
-            }
-            ui.add(
-                egui::Slider::new(relative_peak_threshold, 0.0..=1.0)
-                    .text("Relative peak threshold"),
+            dipy_tractography::draw(
+                ui,
+                node_uuid,
+                step_size_mm,
+                max_angle_deg,
+                min_len_mm,
+                max_len_mm,
+                fixel_threshold,
+                relative_peak_threshold,
+                seeds_per_voxel,
+                max_points,
+                rng_seed,
+                direction_getter,
+                &ctx,
+                &mut result,
             );
-            ui.add(egui::Slider::new(seeds_per_voxel, 1..=10).text("Seeds per voxel"));
-            ui.add(egui::Slider::new(max_points, 50..=2000).text("Max points"));
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::DragValue::new(rng_seed)
-                        .speed(1.0)
-                        .prefix("RNG seed "),
-                );
-                if ui.button("Randomize").clicked() {
-                    *rng_seed = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_nanos() as u64)
-                        .unwrap_or(42);
-                    result.run_expensive_requested = true;
-                }
-            });
-
-            // PTT-specific knobs. Exhaustive match on the enum so adding
-            // a new variant is a compile error (forcing-function for the
-            // pattern that previously ate the `direction_getter: _`
-            // discard and silently demoted PTT back to Probabilistic).
-            match direction_getter {
-                workflow::DipyDirectionGetter::Probabilistic => {}
-                workflow::DipyDirectionGetter::Ptt {
-                    probe_length_mm,
-                    probe_quality,
-                    probe_radius_mm,
-                    probe_count,
-                    max_curvature_per_mm,
-                    data_support_exponent,
-                    min_data_support,
-                    rejection_sampling_max_try,
-                } => {
-                    ui.separator();
-                    ui.label("PTT probe parameters");
-                    ui.add(egui::Slider::new(probe_length_mm, 0.1..=2.0).text("Probe length (mm)"));
-                    ui.add(egui::Slider::new(probe_quality, 1..=16).text("Probe quality"));
-                    ui.add(egui::Slider::new(probe_radius_mm, 0.0..=2.0).text("Probe radius (mm)"));
-                    ui.add(egui::Slider::new(probe_count, 1..=8).text("Probe count"));
-                    ui.add(
-                        egui::Slider::new(max_curvature_per_mm, 0.0..=2.0)
-                            .text("Max curvature (1/mm)"),
-                    );
-                    ui.add(
-                        egui::Slider::new(data_support_exponent, 0.25..=4.0)
-                            .text("Data support exponent"),
-                    );
-                    ui.add(egui::Slider::new(min_data_support, 0.0..=1.0).text("Min data support"));
-                    ui.add(
-                        egui::Slider::new(rejection_sampling_max_try, 10..=500)
-                            .text("Rejection sampling max try"),
-                    );
-                }
-            }
-
-            if ui.button("Run Tractography").clicked() {
-                result.run_expensive_requested = true;
-            }
         }
         workflow::WorkflowNodeKind::YehTractography {
             step_size_mm,
@@ -1002,100 +927,21 @@ pub(crate) fn edit_node_op(
             max_seed_attempts,
             rng_seed,
         } => {
-            if !ctx.overridden_fields.is_empty() {
-                ui.colored_label(
-                    egui::Color32::from_rgb(220, 180, 96),
-                    "⚠ Greyed sliders are overridden by the wired TrackingPlan; \
-                     their displayed value comes from the plan.",
-                );
-            }
-            // For each slider: if the plan overrides this field, show the
-            // plan's value in a greyed-out slider; otherwise show the op's
-            // own editable slider.
-            let override_slider = |ui: &mut egui::Ui,
-                                   field: &str,
-                                   value_if_live: &mut f32,
-                                   range: std::ops::RangeInclusive<f32>,
-                                   text: &str| {
-                if let Some(&plan_value) = ctx.overridden_values.get(field) {
-                    let mut displayed = plan_value;
-                    // Extend the slider range if the plan's value falls
-                    // outside the op's slider bounds, so the thumb is
-                    // visible rather than clamped to an endpoint.
-                    let lo = range.start().min(plan_value);
-                    let hi = range.end().max(plan_value);
-                    ui.add_enabled(false, egui::Slider::new(&mut displayed, lo..=hi).text(text));
-                } else {
-                    ui.add(egui::Slider::new(value_if_live, range).text(text));
-                }
-            };
-            override_slider(
+            yeh_tractography::draw(
                 ui,
-                "step_size_mm",
                 step_size_mm,
-                0.0..=2.0,
-                "Step size mm (0 = random)",
-            );
-            override_slider(
-                ui,
-                "max_angle_deg",
                 max_angle_deg,
-                0.0..=90.0,
-                "Max angle ° (0 = random)",
-            );
-            override_slider(ui, "min_len_mm", min_len_mm, 5.0..=100.0, "Min length (mm)");
-            override_slider(
-                ui,
-                "max_len_mm",
+                min_len_mm,
                 max_len_mm,
-                20.0..=500.0,
-                "Max length (mm)",
-            );
-            override_slider(
-                ui,
-                "fixel_threshold",
                 fixel_threshold,
-                0.0..=0.5,
-                "Fixel threshold (0 = random)",
-            );
-            if let Some(&v) = ctx.overridden_values.get("fixel_otsu") {
-                ui.small(format!(
-                    "plan fixel_otsu = {:.4} (random threshold centered on 0.6·this)",
-                    v
-                ));
-            }
-            override_slider(
-                ui,
-                "smooth_fraction",
                 smooth_fraction,
-                0.0..=1.0,
-                "Smoothing (1 = random)",
+                max_points,
+                target_streamlines,
+                max_seed_attempts,
+                rng_seed,
+                &ctx,
+                &mut result,
             );
-            ui.add(egui::Slider::new(max_points, 50..=2000).text("Max points per streamline"));
-            ui.add(
-                egui::Slider::new(target_streamlines, 1_000..=1_000_000).text("Target streamlines"),
-            );
-            ui.add(
-                egui::Slider::new(max_seed_attempts, 100_000..=10_000_000)
-                    .text("Max seed attempts"),
-            );
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::DragValue::new(rng_seed)
-                        .speed(1.0)
-                        .prefix("RNG seed "),
-                );
-                if ui.button("Randomize").clicked() {
-                    *rng_seed = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_nanos() as u64)
-                        .unwrap_or(42);
-                    result.run_expensive_requested = true;
-                }
-            });
-            if ui.button("Run Yeh Tracking").clicked() {
-                result.run_expensive_requested = true;
-            }
         }
         workflow::WorkflowNodeKind::VoxelMaskDisplay {
             color,
@@ -1264,6 +1110,7 @@ fn fixel_opacity_gate_editor(ui: &mut egui::Ui, auto: &mut bool, gate: &mut work
     }
 }
 
+#[allow(dead_code)]
 fn edit_field_name<T>(ui: &mut egui::Ui, field: &mut T)
 where
     T: From<String> + AsRef<str>,
