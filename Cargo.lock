@@ -1160,7 +1160,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2613,6 +2613,7 @@ dependencies = [
 [[package]]
 name = "odx-rs"
 version = "0.1.0"
+source = "git+https://github.com/PennLINC/odx-rs#f8ef30849118ef8d6a5df8fdf32241699d22a715"
 dependencies = [
  "bytemuck",
  "clap",
@@ -3190,7 +3191,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3507,7 +3508,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3648,7 +3649,7 @@ dependencies = [
 [[package]]
 name = "trx-rs"
 version = "0.1.0"
-source = "git+https://github.com/tee-ar-ex/trx-rs#4698f510c5bf116da07ec883580783f4de02bb07"
+source = "git+https://github.com/tee-ar-ex/trx-rs#993fa17b97482b81d738e4a365259689f46087bb"
 dependencies = [
  "bytemuck",
  "clap",
@@ -4254,7 +4255,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4495,7 +4496,7 @@ checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
  "serde",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

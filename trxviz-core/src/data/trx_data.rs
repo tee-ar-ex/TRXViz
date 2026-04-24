@@ -1126,7 +1126,11 @@ mod tests {
         );
 
         let mut gpu = TrxGpuData::from_tractogram(&tractogram).unwrap();
-        gpu.recolor(&ColorMode::Group, None, crate::renderer::mesh_renderer::SurfaceColormap::default());
+        gpu.recolor(
+            &ColorMode::Group,
+            None,
+            crate::renderer::mesh_renderer::SurfaceColormap::default(),
+        );
         assert_eq!(
             gpu.colors[0],
             [10.0 / 255.0, 20.0 / 255.0, 30.0 / 255.0, 1.0]
@@ -1146,7 +1150,11 @@ mod tests {
         tractogram.insert_group("AF_L", vec![0]);
 
         let mut gpu = TrxGpuData::from_tractogram(&tractogram).unwrap();
-        gpu.recolor(&ColorMode::Group, None, crate::renderer::mesh_renderer::SurfaceColormap::default());
+        gpu.recolor(
+            &ColorMode::Group,
+            None,
+            crate::renderer::mesh_renderer::SurfaceColormap::default(),
+        );
         assert_eq!(gpu.colors[0], [0.09, 0.745, 0.812, 1.0]);
     }
 }

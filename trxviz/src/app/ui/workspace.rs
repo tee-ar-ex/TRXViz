@@ -76,80 +76,83 @@ impl super::super::TrxVizApp {
         egui::ScrollArea::vertical()
             .max_height(180.0)
             .show(ui, |ui| {
-            for asset in &self.workflow.document.assets {
-                match asset {
-                    workflow::WorkflowAssetDocument::Streamlines { id, path, imported } => {
-                        let selected =
-                            self.workflow.selection == Some(WorkflowSelection::Asset(*id));
-                        let label = if *imported {
-                            format!("Streamlines (imported)\n{}", path.display())
-                        } else {
-                            format!("Streamlines\n{}", path.display())
-                        };
-                        if ui.selectable_label(selected, label).clicked() {
-                            self.workflow.selection = Some(WorkflowSelection::Asset(*id));
-                            self.workflow.document.selection = self.workflow.selection;
+                for asset in &self.workflow.document.assets {
+                    match asset {
+                        workflow::WorkflowAssetDocument::Streamlines { id, path, imported } => {
+                            let selected =
+                                self.workflow.selection == Some(WorkflowSelection::Asset(*id));
+                            let label = if *imported {
+                                format!("Streamlines (imported)\n{}", path.display())
+                            } else {
+                                format!("Streamlines\n{}", path.display())
+                            };
+                            if ui.selectable_label(selected, label).clicked() {
+                                self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                                self.workflow.document.selection = self.workflow.selection;
+                            }
+                        }
+                        workflow::WorkflowAssetDocument::Volume { id, path } => {
+                            let selected =
+                                self.workflow.selection == Some(WorkflowSelection::Asset(*id));
+                            if ui
+                                .selectable_label(selected, format!("Volume\n{}", path.display()))
+                                .clicked()
+                            {
+                                self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                                self.workflow.document.selection = self.workflow.selection;
+                            }
+                        }
+                        workflow::WorkflowAssetDocument::Cifti { id, path, .. } => {
+                            let selected =
+                                self.workflow.selection == Some(WorkflowSelection::Asset(*id));
+                            if ui
+                                .selectable_label(selected, format!("CIFTI\n{}", path.display()))
+                                .clicked()
+                            {
+                                self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                                self.workflow.document.selection = self.workflow.selection;
+                            }
+                        }
+                        workflow::WorkflowAssetDocument::Surface { id, path } => {
+                            let selected =
+                                self.workflow.selection == Some(WorkflowSelection::Asset(*id));
+                            if ui
+                                .selectable_label(selected, format!("Surface\n{}", path.display()))
+                                .clicked()
+                            {
+                                self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                                self.workflow.document.selection = self.workflow.selection;
+                            }
+                        }
+                        workflow::WorkflowAssetDocument::Parcellation { id, path, .. } => {
+                            let selected =
+                                self.workflow.selection == Some(WorkflowSelection::Asset(*id));
+                            if ui
+                                .selectable_label(
+                                    selected,
+                                    format!("Parcellation\n{}", path.display()),
+                                )
+                                .clicked()
+                            {
+                                self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                                self.workflow.document.selection = self.workflow.selection;
+                            }
+                        }
+                        workflow::WorkflowAssetDocument::Odx { id, path, .. } => {
+                            let selected =
+                                self.workflow.selection == Some(WorkflowSelection::Asset(*id));
+                            if ui
+                                .selectable_label(selected, format!("ODX\n{}", path.display()))
+                                .clicked()
+                            {
+                                self.workflow.selection = Some(WorkflowSelection::Asset(*id));
+                                self.workflow.document.selection = self.workflow.selection;
+                            }
                         }
                     }
-                    workflow::WorkflowAssetDocument::Volume { id, path } => {
-                        let selected =
-                            self.workflow.selection == Some(WorkflowSelection::Asset(*id));
-                        if ui
-                            .selectable_label(selected, format!("Volume\n{}", path.display()))
-                            .clicked()
-                        {
-                            self.workflow.selection = Some(WorkflowSelection::Asset(*id));
-                            self.workflow.document.selection = self.workflow.selection;
-                        }
-                    }
-                    workflow::WorkflowAssetDocument::Cifti { id, path, .. } => {
-                        let selected =
-                            self.workflow.selection == Some(WorkflowSelection::Asset(*id));
-                        if ui
-                            .selectable_label(selected, format!("CIFTI\n{}", path.display()))
-                            .clicked()
-                        {
-                            self.workflow.selection = Some(WorkflowSelection::Asset(*id));
-                            self.workflow.document.selection = self.workflow.selection;
-                        }
-                    }
-                    workflow::WorkflowAssetDocument::Surface { id, path } => {
-                        let selected =
-                            self.workflow.selection == Some(WorkflowSelection::Asset(*id));
-                        if ui
-                            .selectable_label(selected, format!("Surface\n{}", path.display()))
-                            .clicked()
-                        {
-                            self.workflow.selection = Some(WorkflowSelection::Asset(*id));
-                            self.workflow.document.selection = self.workflow.selection;
-                        }
-                    }
-                    workflow::WorkflowAssetDocument::Parcellation { id, path, .. } => {
-                        let selected =
-                            self.workflow.selection == Some(WorkflowSelection::Asset(*id));
-                        if ui
-                            .selectable_label(selected, format!("Parcellation\n{}", path.display()))
-                            .clicked()
-                        {
-                            self.workflow.selection = Some(WorkflowSelection::Asset(*id));
-                            self.workflow.document.selection = self.workflow.selection;
-                        }
-                    }
-                    workflow::WorkflowAssetDocument::Odx { id, path, .. } => {
-                        let selected =
-                            self.workflow.selection == Some(WorkflowSelection::Asset(*id));
-                        if ui
-                            .selectable_label(selected, format!("ODX\n{}", path.display()))
-                            .clicked()
-                        {
-                            self.workflow.selection = Some(WorkflowSelection::Asset(*id));
-                            self.workflow.document.selection = self.workflow.selection;
-                        }
-                    }
+                    ui.add_space(6.0);
                 }
-                ui.add_space(6.0);
-            }
-        });
+            });
     }
 
     fn show_graph_pane(&mut self, ui: &mut egui::Ui) {
@@ -226,12 +229,8 @@ impl super::super::TrxVizApp {
             ui.separator();
 
             match self.workflow.selection {
-                Some(WorkflowSelection::Asset(asset_id)) => {
-                    self.show_asset_inspector(ui, asset_id)
-                }
-                Some(WorkflowSelection::Node(node_uuid)) => {
-                    self.show_node_inspector(ui, node_uuid)
-                }
+                Some(WorkflowSelection::Asset(asset_id)) => self.show_asset_inspector(ui, asset_id),
+                Some(WorkflowSelection::Node(node_uuid)) => self.show_node_inspector(ui, node_uuid),
                 None => {
                     ui.small("Select an asset or node.");
                     if let Some(error) = &self.workflow.runtime.graph_error {

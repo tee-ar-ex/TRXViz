@@ -1,15 +1,15 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::data::trx_data::TrxGpuData;
-use crate::error::WorkflowResult;
 use super::super::{
     DipyDirectionGetter, DipyTractographyPlan, EvalCtx, PortKind, StreamlineDataset,
-    StreamlineFlow, VoxelMask, WorkflowNodeKind, WorkflowOp, WorkflowValue,
-    prime_expensive_record, sync_node_state_from_run_record,
+    StreamlineFlow, VoxelMask, WorkflowNodeKind, WorkflowOp, WorkflowValue, prime_expensive_record,
+    sync_node_state_from_run_record,
 };
 use crate::data::loaded_files::StreamlineBacking;
 use crate::data::trx_data::ColorMode;
+use crate::data::trx_data::TrxGpuData;
+use crate::error::WorkflowResult;
 
 fn default_step_size() -> f32 {
     0.5
