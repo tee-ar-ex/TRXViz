@@ -32,6 +32,12 @@ theme:
     - content.tabs.link
     - search.suggest
     - search.highlight
+hooks:
+  - docs/_hooks/build_reference.py
+plugins:
+  - search
+  - bibtex:
+      bib_file: trxviz-core/data/citations.bib
 markdown_extensions:
   - admonition
   - attr_list
@@ -58,3 +64,5 @@ nav:
   - Troubleshooting: troubleshooting.md
   - Developer Notes: developer.md
   - API Reference: api.md
+  - Op Reference: reference/ops/index.md
+  - Examples: examples/index.md

@@ -1,0 +1,797 @@
+{
+  "document": {
+    "assets": [
+      {
+        "Odx": {
+          "id": 0,
+          "path": "/Users/mcieslak/projects/odx/test_data/sub-20124_ses-1_space-ACPC_desc-preproc_dwi.gqi.fz"
+        }
+      },
+      {
+        "Streamlines": {
+          "id": 1,
+          "imported": true,
+          "path": "/Users/mcieslak/projects/odx/test_data/sub-20124_ses-1_space-ACPC_model-gqi_bundle-ProjectionBrainstemCorticospinalTractL_streamlines.tck.gz"
+        }
+      }
+    ],
+    "camera_3d": {
+      "azimuth_deg": 34.37746810913086,
+      "distance": 242.55809020996094,
+      "elevation_deg": 22.918312072753906,
+      "target": [
+        -28.87055015563965,
+        -20.032028198242188,
+        3.476297378540039
+      ]
+    },
+    "graph": {
+      "nodes": {
+        "1": {
+          "node": {
+            "label": "ODX Source",
+            "op": {
+              "OdxSource": {
+                "source_id": 0
+              }
+            },
+            "uuid": 1
+          },
+          "pos": {
+            "x": 40.0,
+            "y": 80.0
+          }
+        },
+        "10": {
+          "node": {
+            "label": "Color By Fixel Scalars",
+            "op": {
+              "ColorByFixelScalars": {
+                "colormap": "Inferno",
+                "length_scale_by_scalar": false,
+                "range": null
+              }
+            },
+            "uuid": 10
+          },
+          "pos": {
+            "x": 774.46875,
+            "y": 191.0
+          }
+        },
+        "11": {
+          "node": {
+            "label": "Streamline Source",
+            "op": {
+              "StreamlineSource": {
+                "source_id": 1
+              }
+            },
+            "uuid": 11
+          },
+          "pos": {
+            "x": 40.0,
+            "y": 236.0
+          }
+        },
+        "12": {
+          "node": {
+            "label": "Group Select",
+            "op": {
+              "GroupSelect": {
+                "groups": "All"
+              }
+            },
+            "uuid": 12
+          },
+          "pos": {
+            "x": 345.375,
+            "y": 506.0
+          }
+        },
+        "13": {
+          "node": {
+            "label": "Limit Streamlines",
+            "op": {
+              "LimitStreamlines": {
+                "limit": 500,
+                "randomize": false,
+                "seed": 1
+              }
+            },
+            "uuid": 13
+          },
+          "pos": {
+            "x": 774.46875,
+            "y": 392.0
+          }
+        },
+        "16": {
+          "node": {
+            "label": "Prepare Hausdorff Plan",
+            "op": {
+              "PrepareHausdorffPlan": {
+                "max_reference_points": 20000,
+                "not_end_fixel_otsu_factor": 0.8999999761581421,
+                "otsu_scope": "all_fixels",
+                "seed_fixel_otsu_factor": 0.5,
+                "seed_tolerance_mm": 2.0,
+                "tolerance_mm": 12.0,
+                "tracking_metric": null
+              }
+            },
+            "uuid": 16
+          },
+          "pos": {
+            "x": 1192.6875,
+            "y": 260.0
+          }
+        },
+        "17": {
+          "node": {
+            "label": "Yeh Tracking (Fixel)",
+            "op": {
+              "YehTractography": {
+                "fixel_threshold": 0.05000000074505806,
+                "max_angle_deg": 60.0,
+                "max_len_mm": 300.0,
+                "max_points": 501,
+                "max_seed_attempts": 10000000,
+                "min_len_mm": 10.0,
+                "rng_seed": 42,
+                "smooth_fraction": 0.25,
+                "step_size_mm": 1.0,
+                "target_streamlines": 30000
+              }
+            },
+            "uuid": 17
+          },
+          "pos": {
+            "x": 1671.53125,
+            "y": 80.0
+          }
+        },
+        "18": {
+          "node": {
+            "label": "Voxel Mask Display",
+            "op": {
+              "VoxelMaskDisplay": {
+                "color": [
+                  0.8500000238418579,
+                  0.550000011920929,
+                  0.25,
+                  1.0
+                ],
+                "min_component_volume_mm3": 0.0,
+                "opacity": 1.0,
+                "smooth_sigma": 1.0
+              }
+            },
+            "uuid": 18
+          },
+          "pos": {
+            "x": 1671.53125,
+            "y": 209.0
+          }
+        },
+        "19": {
+          "node": {
+            "label": "Voxel Mask Display",
+            "op": {
+              "VoxelMaskDisplay": {
+                "color": [
+                  0.8500000238418579,
+                  0.550000011920929,
+                  0.25,
+                  1.0
+                ],
+                "min_component_volume_mm3": 0.0,
+                "opacity": 1.0,
+                "smooth_sigma": 1.0
+              }
+            },
+            "uuid": 19
+          },
+          "pos": {
+            "x": 1671.53125,
+            "y": 299.0
+          }
+        },
+        "2": {
+          "node": {
+            "label": "Fixel 3D Display",
+            "op": {
+              "Fixel3DDisplay": {
+                "auto_gate_from_otsu": true,
+                "length_scale": 1.0,
+                "line_width": 0.006000000052154064,
+                "offset_from_slice": 0.0,
+                "opacity": 1.0,
+                "opacity_gate": {
+                  "above": 1.0,
+                  "below": 0.0,
+                  "range": [
+                    0.0,
+                    1.0
+                  ]
+                },
+                "visible": false
+              }
+            },
+            "uuid": 2
+          },
+          "pos": {
+            "x": 1192.6875,
+            "y": 80.0
+          }
+        },
+        "20": {
+          "node": {
+            "label": "Voxel Mask Display",
+            "op": {
+              "VoxelMaskDisplay": {
+                "color": [
+                  0.8500000238418579,
+                  0.550000011920929,
+                  0.25,
+                  1.0
+                ],
+                "min_component_volume_mm3": 0.0,
+                "opacity": 1.0,
+                "smooth_sigma": 1.0
+              }
+            },
+            "uuid": 20
+          },
+          "pos": {
+            "x": 1671.53125,
+            "y": 389.0
+          }
+        },
+        "22": {
+          "node": {
+            "label": "TIP Prune",
+            "op": {
+              "TipPrune": {
+                "iterations": 16,
+                "max_unsupported_fraction": 0.0,
+                "min_support": 1,
+                "voxel_size_mm": 1.0
+              }
+            },
+            "uuid": 22
+          },
+          "pos": {
+            "x": 2120.625,
+            "y": 80.0
+          }
+        },
+        "24": {
+          "node": {
+            "label": "Streamline Display",
+            "op": {
+              "StreamlineDisplay": {
+                "enabled": true,
+                "opacity": 1.0,
+                "render_style": "Flat",
+                "slab_half_width_mm": 5.0,
+                "tube_radius_mm": 0.4000000059604645,
+                "tube_sides": 8
+              }
+            },
+            "uuid": 24
+          },
+          "pos": {
+            "x": 2516.09375,
+            "y": 80.0
+          }
+        },
+        "3": {
+          "node": {
+            "label": "Fixel 2D Display",
+            "op": {
+              "Fixel2DDisplay": {
+                "auto_gate_from_otsu": true,
+                "length_scale": 1.0,
+                "line_width": 0.006000000052154064,
+                "opacity": 1.0,
+                "opacity_gate": {
+                  "above": 1.0,
+                  "below": 0.0,
+                  "range": [
+                    0.0,
+                    1.0
+                  ]
+                },
+                "slab_thickness_mm": 1.0,
+                "visible": true
+              }
+            },
+            "uuid": 3
+          },
+          "pos": {
+            "x": 1192.6875,
+            "y": 170.0
+          }
+        },
+        "4": {
+          "node": {
+            "label": "ODF Glyph Renderer",
+            "op": {
+              "OdfGlyphRenderer": {
+                "detail": 3,
+                "gloss": 0.0,
+                "norm_within_voxel": false,
+                "offset_from_slice": 0.0,
+                "opacity": 1.0,
+                "opacity_gate": {
+                  "above": 1.0,
+                  "below": 0.0,
+                  "range": [
+                    0.0,
+                    1.0
+                  ]
+                },
+                "scale": 3.25,
+                "size_gate": {
+                  "max_scale": 1.5,
+                  "min_scale": 0.5,
+                  "range": [
+                    0.0,
+                    1.0
+                  ]
+                },
+                "slice_axis": "Axial",
+                "subtract_iso": true,
+                "vertex_colormap": "Directional",
+                "visible": true
+              }
+            },
+            "uuid": 4
+          },
+          "pos": {
+            "x": 345.375,
+            "y": 173.0
+          }
+        },
+        "5": {
+          "node": {
+            "label": "ODX Volume Select",
+            "op": {
+              "OdxVolumeSelect": {
+                "dpv_name": "dti_fa"
+              }
+            },
+            "uuid": 5
+          },
+          "pos": {
+            "x": 345.375,
+            "y": 392.0
+          }
+        },
+        "6": {
+          "node": {
+            "label": "Volume Display",
+            "op": {
+              "VolumeDisplay": {
+                "colormap": "Grayscale",
+                "opacity": 1.0,
+                "window_center": 0.5,
+                "window_width": 1.0
+              }
+            },
+            "uuid": 6
+          },
+          "pos": {
+            "x": 774.46875,
+            "y": 302.0
+          }
+        },
+        "7": {
+          "node": {
+            "label": "ODX Fixel Scalar Select",
+            "op": {
+              "OdxFixelScalarSelect": {
+                "dpf_name": "amplitude"
+              }
+            },
+            "uuid": 7
+          },
+          "pos": {
+            "x": 345.375,
+            "y": 80.0
+          }
+        },
+        "8": {
+          "node": {
+            "label": "Color By Fixel Scalars",
+            "op": {
+              "ColorByFixelScalars": {
+                "colormap": "Inferno",
+                "length_scale_by_scalar": false,
+                "range": null
+              }
+            },
+            "uuid": 8
+          },
+          "pos": {
+            "x": 774.46875,
+            "y": 80.0
+          }
+        },
+        "9": {
+          "node": {
+            "label": "ODX Fixel Scalar Select",
+            "op": {
+              "OdxFixelScalarSelect": {
+                "dpf_name": "amplitude"
+              }
+            },
+            "uuid": 9
+          },
+          "pos": {
+            "x": 345.375,
+            "y": 299.0
+          }
+        }
+      },
+      "wires": [
+        {
+          "from": {
+            "node": 17,
+            "output": 0
+          },
+          "to": {
+            "input": 0,
+            "node": 22
+          }
+        },
+        {
+          "from": {
+            "node": 16,
+            "output": 3
+          },
+          "to": {
+            "input": 0,
+            "node": 20
+          }
+        },
+        {
+          "from": {
+            "node": 7,
+            "output": 0
+          },
+          "to": {
+            "input": 1,
+            "node": 8
+          }
+        },
+        {
+          "from": {
+            "node": 1,
+            "output": 2
+          },
+          "to": {
+            "input": 0,
+            "node": 7
+          }
+        },
+        {
+          "from": {
+            "node": 16,
+            "output": 1
+          },
+          "to": {
+            "input": 0,
+            "node": 18
+          }
+        },
+        {
+          "from": {
+            "node": 5,
+            "output": 0
+          },
+          "to": {
+            "input": 0,
+            "node": 6
+          }
+        },
+        {
+          "from": {
+            "node": 16,
+            "output": 2
+          },
+          "to": {
+            "input": 0,
+            "node": 19
+          }
+        },
+        {
+          "from": {
+            "node": 13,
+            "output": 0
+          },
+          "to": {
+            "input": 1,
+            "node": 16
+          }
+        },
+        {
+          "from": {
+            "node": 1,
+            "output": 2
+          },
+          "to": {
+            "input": 0,
+            "node": 9
+          }
+        },
+        {
+          "from": {
+            "node": 22,
+            "output": 0
+          },
+          "to": {
+            "input": 0,
+            "node": 24
+          }
+        },
+        {
+          "from": {
+            "node": 8,
+            "output": 0
+          },
+          "to": {
+            "input": 0,
+            "node": 2
+          }
+        },
+        {
+          "from": {
+            "node": 10,
+            "output": 0
+          },
+          "to": {
+            "input": 0,
+            "node": 3
+          }
+        },
+        {
+          "from": {
+            "node": 1,
+            "output": 1
+          },
+          "to": {
+            "input": 0,
+            "node": 4
+          }
+        },
+        {
+          "from": {
+            "node": 16,
+            "output": 0
+          },
+          "to": {
+            "input": 2,
+            "node": 17
+          }
+        },
+        {
+          "from": {
+            "node": 11,
+            "output": 0
+          },
+          "to": {
+            "input": 0,
+            "node": 12
+          }
+        },
+        {
+          "from": {
+            "node": 9,
+            "output": 0
+          },
+          "to": {
+            "input": 1,
+            "node": 10
+          }
+        },
+        {
+          "from": {
+            "node": 1,
+            "output": 2
+          },
+          "to": {
+            "input": 0,
+            "node": 5
+          }
+        },
+        {
+          "from": {
+            "node": 1,
+            "output": 1
+          },
+          "to": {
+            "input": 0,
+            "node": 16
+          }
+        },
+        {
+          "from": {
+            "node": 12,
+            "output": 0
+          },
+          "to": {
+            "input": 0,
+            "node": 13
+          }
+        },
+        {
+          "from": {
+            "node": 1,
+            "output": 0
+          },
+          "to": {
+            "input": 0,
+            "node": 8
+          }
+        },
+        {
+          "from": {
+            "node": 1,
+            "output": 0
+          },
+          "to": {
+            "input": 0,
+            "node": 10
+          }
+        },
+        {
+          "from": {
+            "node": 1,
+            "output": 0
+          },
+          "to": {
+            "input": 0,
+            "node": 17
+          }
+        }
+      ]
+    },
+    "next_node_uuid": 25,
+    "render_3d": {
+      "background": {
+        "VerticalGradient": {
+          "bottom": [
+            0.019999999552965164,
+            0.029999999329447746,
+            0.05000000074505806
+          ],
+          "top": [
+            0.10000000149011612,
+            0.11999999731779099,
+            0.1599999964237213
+          ]
+        }
+      },
+      "contrast": 1.0,
+      "exposure": 1.0,
+      "fog_color": [
+        0.019999999552965164,
+        0.029999999329447746,
+        0.05000000074505806
+      ],
+      "fog_enabled": false,
+      "fog_end_fraction": 1.0,
+      "fog_start_fraction": 0.550000011920929,
+      "lighting_preset": "Soft",
+      "vignette_strength": 0.11999999731779099
+    },
+    "selection": {
+      "Node": 23
+    },
+    "slice_view_3d": {
+      "positions_ras": [
+        3.476297378540039,
+        -20.032028198242188,
+        -28.87055015563965
+      ],
+      "visible": [
+        true,
+        true,
+        true
+      ]
+    },
+    "slice_view_ui": {
+      "active_axis": 0,
+      "lightbox_axis": "Axial",
+      "lightbox_cols": 4,
+      "lightbox_rows": 3,
+      "mode": "Ortho",
+      "ortho_show_row": true,
+      "single_view": "Axial",
+      "slice_cameras": [
+        {
+          "center": [
+            -28.87055015563965,
+            -20.032028198242188
+          ],
+          "half_extent": 64.69894409179688,
+          "rotation": 0.0
+        },
+        {
+          "center": [
+            -28.87055015563965,
+            3.476297378540039
+          ],
+          "half_extent": 64.69894409179688,
+          "rotation": 0.0
+        },
+        {
+          "center": [
+            -20.032028198242188,
+            3.476297378540039
+          ],
+          "half_extent": 64.69894409179688,
+          "rotation": 0.0
+        }
+      ]
+    }
+  },
+  "version": 1,
+  "workspace": {
+    "height": null,
+    "id": 17518449973845214658,
+    "root": 5,
+    "tiles": {
+      "invisible": [],
+      "next_tile_id": 6,
+      "tiles": {
+        "1": {
+          "Pane": "Preview"
+        },
+        "2": {
+          "Pane": "Graph"
+        },
+        "3": {
+          "Pane": "Inspector"
+        },
+        "4": {
+          "Container": {
+            "Linear": {
+              "children": [
+                1,
+                2
+              ],
+              "dir": "Vertical",
+              "shares": {
+                "shares": {
+                  "1": 1.3620235919952393,
+                  "2": 1.6379764080047607
+                }
+              }
+            }
+          }
+        },
+        "5": {
+          "Container": {
+            "Linear": {
+              "children": [
+                4,
+                3
+              ],
+              "dir": "Horizontal",
+              "shares": {
+                "shares": {
+                  "3": 0.949999988079071,
+                  "4": 2.5
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "width": null
+  }
+}

@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use crate::error::WorkflowResult;
+use crate::workflow::methods::OpCategory;
 use crate::workflow::types::{TrackingPlan, VoxelMask, WorkflowValue};
 
 use super::super::{EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp};
@@ -116,6 +117,10 @@ impl WorkflowOp for PrepareSimplePlanOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::TrackingPlan]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Tractography
     }
 
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {

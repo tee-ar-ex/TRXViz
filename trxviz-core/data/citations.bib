@@ -1,0 +1,145 @@
+% TRXViz citation database.
+%
+% This file is the single source of truth for every reference used by
+% both the TRXViz documentation (via mkdocs-bibtex) and the runtime
+% methods-boilerplate generator (see `workflow::methods`).
+%
+% Conventions:
+%   - Entry keys are lowercase, no year suffix unless needed for
+%     disambiguation (`dipy`, `purifibre`, `yeh2013gqi`).
+%   - Keep one blank line between entries for readability.
+%   - Runtime code references these keys via `WorkflowOp::citation_keys`;
+%     docs reference them with Pandoc syntax (e.g. a Pandoc citation to
+%     the 'dipy' key).
+%   - Any op that re-implements or ports a published method MUST add a
+%     citation here rather than embedding prose in code.
+%   - Keep this list conservative: cite only methods whose behavior is
+%     materially represented in TRXViz, so users can credit authors
+%     accurately. Do not add "nice to have" or tangentially-related
+%     work — they clutter generated methods sections.
+%
+% IMPORTANT: The presence of a citation here does NOT mean the cited
+% authors have reviewed, contributed to, or endorsed TRXViz. See
+% `NON_ENDORSEMENT_NOTICE` in `workflow::methods` for the full text.
+
+% ── TRXViz itself ─────────────────────────────────────────────────────
+
+@software{trxviz,
+  title        = {TRXViz: interactive visualization and analysis for streamline and ODF data in the TRX/ODX formats},
+  author       = {Cieslak, Matthew},
+  url          = {https://github.com/PennLINC/TRXViz},
+  note         = {TODO: finalize author list, Zenodo DOI, and version-specific citation.}
+}
+
+% ── Streamline / tractography file formats ────────────────────────────
+
+@article{trx,
+  title        = {TRX: a community-led, standardized tractography file format},
+  author       = {Rheault, Fran{\c{c}}ois and others},
+  year         = 2022,
+  note         = {TODO: replace with canonical TRX citation once finalized.}
+}
+
+% ── DIPY ──────────────────────────────────────────────────────────────
+
+@article{dipy,
+  title        = {Dipy, a library for the analysis of diffusion MRI data},
+  author       = {Garyfallidis, Eleftherios and Brett, Matthew and Amirbekian, Bagrat and Rokem, Ariel and Van Der Walt, Stefan and Descoteaux, Maxime and Nimmo-Smith, Ian},
+  year         = 2014,
+  journal      = {Frontiers in neuroinformatics},
+  volume       = 8,
+  pages        = 8,
+  doi          = {10.3389/fninf.2014.00008}
+}
+
+% ── nibrary / Purifibre / PTT (Aydogan et al.) ────────────────────────
+%
+% TODO (user): confirm canonical citations for nibrary, Purifibre, and
+% Parallel Transport Tractography. Current best guesses below — please
+% replace with the exact references you want users to cite.
+
+@software{nibrary,
+  title        = {nibrary: neuroimaging library for tractography and related methods},
+  author       = {Aydogan, Dogu Baran and others},
+  note         = {TODO: fill in canonical citation (Aydogan group, nibrary).}
+}
+
+@article{purifibre,
+  title        = {Purifibre: FOD-coherence based streamline filtering},
+  author       = {Aydogan, Dogu Baran and Shi, Yonggang},
+  year         = {TODO},
+  journal      = {TODO},
+  note         = {TODO: confirm canonical Purifibre citation (method paper).}
+}
+
+@article{ptt,
+  title        = {Parallel Transport Tractography},
+  author       = {Aydogan, Dogu Baran and Shi, Yonggang},
+  year         = 2021,
+  journal      = {IEEE Transactions on Medical Imaging},
+  volume       = 40,
+  number       = 2,
+  pages        = {635--647},
+  doi          = {10.1109/TMI.2020.3025487}
+}
+
+% ── DSI Studio / Yeh et al. ───────────────────────────────────────────
+
+@article{yeh2025dsistudio,
+  title        = {DSI Studio},
+  author       = {Yeh, Fang-Cheng},
+  year         = 2025,
+  journal      = {Nature Methods},
+  doi          = {10.1038/s41592-025-02762-8},
+  note         = {TODO: update full author list and pagination.}
+}
+
+@article{yeh2013gqi,
+  title        = {Deterministic diffusion fiber tracking improved by quantitative anisotropy},
+  author       = {Yeh, Fang-Cheng and Verstynen, Timothy D. and Wang, Yibao and Fern{\'a}ndez-Miranda, Juan C. and Tseng, Wen-Yih Isaac},
+  year         = 2013,
+  journal      = {PloS ONE},
+  volume       = 8,
+  number       = 11,
+  pages        = {e80713},
+  doi          = {10.1371/journal.pone.0080713}
+}
+
+% Covers both (a) augmented tracking strategies used by DSI Studio's
+% deterministic tractography (cited alongside yeh2013gqi in its boilerplate)
+% and (b) the shape-analysis framework that inspired TRXViz's Hausdorff
+% tracking-plan preparation. One paper, two ports.
+@article{yeh2020shape,
+  title        = {Shape analysis of the human association pathways},
+  author       = {Yeh, Fang-Cheng},
+  year         = 2020,
+  journal      = {NeuroImage},
+  volume       = 223,
+  pages        = {117329},
+  doi          = {10.1016/j.neuroimage.2020.117329}
+}
+
+% ── GPUStreamlines (Rheault/Cieslak et al.) ───────────────────────────
+%
+% TRXViz's Dipy/GPUStreamlines tractography op is a wgpu-based port of
+% GPUStreamlines. Both the CPU and GPU evaluation paths are derived from
+% this work, so the op cites it unconditionally. The PTT direction getter
+% additionally cites the ISMRM 2025 abstract that describes the GPU-based
+% PTT implementation specifically.
+
+@article{gpustreamlines,
+  title        = {GPUStreamlines: GPU-accelerated streamline tractography},
+  author       = {TODO: finalize author list},
+  year         = 2025,
+  journal      = {PLOS Computational Biology},
+  doi          = {10.1371/journal.pcbi.1013323},
+  note         = {TODO: confirm canonical title and author list once the record is indexed.}
+}
+
+@inproceedings{gpustreamlines_ptt_ismrm,
+  title        = {GPU-accelerated Parallel Transport Tractography},
+  author       = {TODO: finalize author list},
+  year         = 2025,
+  booktitle    = {Proceedings of the International Society for Magnetic Resonance in Medicine},
+  note         = {Abstract \#4785. Available at https://archive.ismrm.org/2025/4785.html. TODO: confirm canonical title and author list.}
+}

@@ -18,6 +18,7 @@ pub struct MenuAction {
     pub export_3d_view: bool,
     pub export_2d_view: bool,
     pub copy_camera_3d_json: bool,
+    pub generate_methods: bool,
     pub switch_mode: Option<UiMode>,
 }
 
@@ -40,6 +41,7 @@ pub fn show_menu_bar(ctx: &egui::Context, ui_mode: UiMode) -> MenuAction {
         export_3d_view: false,
         export_2d_view: false,
         copy_camera_3d_json: false,
+        generate_methods: false,
         switch_mode: None,
     };
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
@@ -69,6 +71,10 @@ pub fn show_menu_bar(ctx: &egui::Context, ui_mode: UiMode) -> MenuAction {
                     }
                     if ui.button("Save Workflow Project As...").clicked() {
                         action.save_workflow_project_as = true;
+                        ui.close();
+                    }
+                    if ui.button("Generate methods…").clicked() {
+                        action.generate_methods = true;
                         ui.close();
                     }
                     ui.separator();

@@ -2,6 +2,7 @@ use super::super::{
     EvalCtx, ParcelIdSet, ParcellationDrawPlan, PortKind, WorkflowNodeKind, WorkflowOp,
     expect_parcellation_input, resolve_selected_labels,
 };
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone)]
 pub struct ParcellationDisplayOp {
@@ -33,6 +34,10 @@ impl WorkflowOp for ParcellationDisplayOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Display
     }
 
     fn evaluate(

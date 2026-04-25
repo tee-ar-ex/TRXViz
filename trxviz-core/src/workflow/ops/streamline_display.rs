@@ -1,5 +1,6 @@
 use crate::data::trx_data::RenderStyle;
 use crate::units::Millimeters;
+use crate::workflow::methods::OpCategory;
 
 use super::super::{
     EvalCtx, PortKind, StreamlineDisplayRuntime, StreamlineDrawPlan, WorkflowExecutionStatus,
@@ -46,6 +47,10 @@ impl WorkflowOp for StreamlineDisplayOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Display
     }
 
     fn evaluate(

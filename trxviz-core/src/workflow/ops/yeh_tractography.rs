@@ -1,8 +1,10 @@
+use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::data::trx_data::TrxGpuData;
 use crate::error::WorkflowResult;
+use crate::workflow::methods::OpCategory;
 use crate::workflow::types::{
     StreamlineDataset, StreamlineFlow, TrackingPlan, VoxelMask, WorkflowValue, YehTractographyPlan,
 };
@@ -159,6 +161,39 @@ impl WorkflowOp for YehTractographyOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Tractography
+    }
+
+    fn citation_keys(&self) -> &'static [&'static str] {
+        // Matches DSI Studio's own tractography boilerplate, which cites
+        // Yeh 2013 (deterministic GQI tracking) alongside Yeh 2020 for
+        // the augmented tracking strategies used to improve
+        // reproducibility. The 2025 software paper credits DSI Studio
+        // itself.
+        &["yeh2025dsistudio", "yeh2013gqi", "yeh2020shape"]
+    }
+
+    fn boilerplate(&self) -> Option<Cow<'_, str>> {
+        Some(Cow::Owned(format!(
+            "Fixel-based deterministic tractography was performed following the \
+             DSI Studio approach [@yeh2025dsistudio;@yeh2013gqi] with augmented \
+             tracking strategies [@yeh2020shape] to improve reproducibility, \
+             using a {step:.2}-mm step size, a maximum turning angle of {angle:.0}°, \
+             length bounds of {min_len:.0}–{max_len:.0} mm, a fixel threshold of \
+             {fx:.2}, and a smoothing fraction of {smooth:.2}; seeding targeted \
+             {target} streamlines (up to {attempts} seed attempts).",
+            step = self.step_size_mm,
+            angle = self.max_angle_deg,
+            min_len = self.min_len_mm,
+            max_len = self.max_len_mm,
+            fx = self.fixel_threshold,
+            smooth = self.smooth_fraction,
+            target = self.target_streamlines,
+            attempts = self.max_seed_attempts,
+        )))
     }
 
     fn evaluate(

@@ -8,6 +8,7 @@ use crate::units::{Millimeters, ParcelId};
 use crate::workflow::eval_inputs::{
     expect_odf_field_input, expect_parcellation_input, expect_volume_input,
 };
+use crate::workflow::methods::OpCategory;
 use crate::workflow::types::{ParcelIdSet, VoxelMask};
 
 use super::super::{EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue};
@@ -42,6 +43,10 @@ impl WorkflowOp for RoiFromParcelOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::VoxelMask]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Roi
     }
 
     fn evaluate(
@@ -114,6 +119,10 @@ impl WorkflowOp for RoiFromVolumeOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::VoxelMask]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Roi
     }
 
     fn evaluate(
@@ -206,6 +215,10 @@ impl WorkflowOp for RoiFromShapeOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::VoxelMask]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Roi
     }
 
     fn evaluate(

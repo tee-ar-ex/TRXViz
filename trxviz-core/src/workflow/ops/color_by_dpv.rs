@@ -1,5 +1,6 @@
 use crate::data::trx_data::ColorMode;
 use crate::renderer::mesh_renderer::SurfaceColormap;
+use crate::workflow::methods::OpCategory;
 
 use super::super::{
     DpvFieldName, EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue,
@@ -36,6 +37,10 @@ impl WorkflowOp for ColorByDpvOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Coloring
     }
 
     fn evaluate(

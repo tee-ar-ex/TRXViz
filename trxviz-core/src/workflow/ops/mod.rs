@@ -1142,6 +1142,37 @@ pub fn fingerprint(kind: &WorkflowNodeKind, ctx: &super::FingerprintCtx) -> supe
     with_workflow_op!(kind, |op| op.fingerprint(ctx))
 }
 
+// The four accessors below route the new methods-boilerplate /
+// documentation trait methods through the op registry. They have no
+// in-tree callers yet — the consumers (methods-report assembly and
+// the `trxviz-docgen` crate) land in follow-up chunks. Keep the
+// `allow(dead_code)` in place until then.
+
+#[allow(dead_code)]
+pub fn citation_keys(kind: &WorkflowNodeKind) -> &'static [&'static str] {
+    with_workflow_op!(kind, |op| op.citation_keys())
+}
+
+/// Render this op's methods-boilerplate sentence with its parameter
+/// values interpolated. Returns `None` if the op contributes no
+/// methods prose (sources, display nodes, pure routing). Materializes
+/// the sentence to an owned `String` because the trait's `Cow` borrows
+/// from the temporary op value constructed inside the dispatch macro.
+#[allow(dead_code)]
+pub fn boilerplate(kind: &WorkflowNodeKind) -> Option<String> {
+    with_workflow_op!(kind, |op| op.boilerplate().map(|c| c.into_owned()))
+}
+
+#[allow(dead_code)]
+pub fn describe(kind: &WorkflowNodeKind) -> std::borrow::Cow<'static, str> {
+    with_workflow_op!(kind, |op| op.describe())
+}
+
+#[allow(dead_code)]
+pub fn category(kind: &WorkflowNodeKind) -> super::methods::OpCategory {
+    with_workflow_op!(kind, |op| op.category())
+}
+
 pub(super) fn title(kind: &WorkflowNodeKind) -> &'static str {
     with_workflow_op!(kind, |op| op.title())
 }

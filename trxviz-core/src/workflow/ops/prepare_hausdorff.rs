@@ -1,9 +1,11 @@
+use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::error::WorkflowResult;
 use crate::gpu::plan_prep::hausdorff::{HausdorffPlanParams, build_hausdorff_plan};
 use crate::workflow::WorkflowEvalMode;
+use crate::workflow::methods::OpCategory;
 use crate::workflow::types::{CachedHausdorffPlan, WorkflowValue};
 use odx_rs::qc::OtsuScope;
 
@@ -94,6 +96,33 @@ impl WorkflowOp for PrepareHausdorffPlanOp {
             PortKind::VoxelMask, // limiting
             PortKind::VoxelMask, // no_end
         ]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Tractography
+    }
+
+    fn citation_keys(&self) -> &'static [&'static str] {
+        // The Hausdorff-based plan prep mirrors the DSI Studio
+        // autotrack/shape-analysis approach: reference-bundle-derived
+        // seed/limiting/no-end masks plus Otsu-thresholded fixel metrics.
+        &["yeh2020shape"]
+    }
+
+    fn boilerplate(&self) -> Option<Cow<'_, str>> {
+        Some(Cow::Owned(format!(
+            "A tractography plan was prepared from a reference bundle following \
+             the DSI Studio shape-analysis approach [@yeh2020shape], using a \
+             {tol:.1}-mm Hausdorff tolerance to define the limiting region, a \
+             {seed_tol:.1}-mm seed dilation, and primary-peak Otsu factors of \
+             {seed_factor:.2} (seed mask) and {no_end_factor:.2} (no-end mask); \
+             up to {max_ref} reference points were retained.",
+            tol = self.tolerance_mm,
+            seed_tol = self.seed_tolerance_mm,
+            seed_factor = self.seed_fixel_otsu_factor,
+            no_end_factor = self.not_end_fixel_otsu_factor,
+            max_ref = self.max_reference_points,
+        )))
     }
 
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {

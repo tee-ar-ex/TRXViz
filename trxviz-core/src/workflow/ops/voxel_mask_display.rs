@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::data::bundle_mesh::build_voxel_mask_mesh;
 use crate::error::WorkflowResult;
 use crate::units::Millimeters;
+use crate::workflow::methods::OpCategory;
 use crate::workflow::types::{
     CachedVoxelMaskMesh, VoxelMask, VoxelMaskMeshDrawPlan, WorkflowValue,
 };
@@ -82,6 +83,10 @@ impl WorkflowOp for VoxelMaskDisplayOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Display
     }
 
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {

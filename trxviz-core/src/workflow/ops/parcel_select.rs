@@ -2,6 +2,7 @@ use super::super::{
     EvalCtx, ParcelIdSet, ParcelSelection, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue,
     expect_parcellation_input, resolve_selected_labels,
 };
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone)]
 pub struct ParcelSelectOp {
@@ -31,6 +32,10 @@ impl WorkflowOp for ParcelSelectOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::ParcelSelection]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Roi
     }
 
     fn evaluate(

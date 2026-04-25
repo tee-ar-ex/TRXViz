@@ -1,5 +1,6 @@
 use crate::data::loaded_files::FileId;
 use crate::data::odx_data::{FixelField, FixelScalars, OdfField, OdxCatalog};
+use crate::workflow::methods::OpCategory;
 
 use super::super::{EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue};
 
@@ -28,6 +29,10 @@ impl WorkflowOp for OdxSourceOp {
             PortKind::OdxCatalog,
             PortKind::FixelScalars,
         ]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Source
     }
 
     fn evaluate(

@@ -14,6 +14,7 @@
 //! the FICO DPS baked in); they differ only in `selected_streamlines`.
 //! See `crate::workflow::purifibre` for the scoring algorithm.
 
+use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -23,6 +24,7 @@ use super::super::{
     prime_expensive_record, sync_node_state_from_run_record,
 };
 use crate::data::trx_data::TrxGpuData;
+use crate::workflow::methods::OpCategory;
 use crate::workflow::purifibre::{PurifibreParams, apply_puri_threshold, purifibre_score};
 use crate::workflow::types::{CachedPurifibre, StreamlineDataset, StreamlineFlow};
 
@@ -79,6 +81,26 @@ impl WorkflowOp for PurifibreOp {
         // Output 0: scored passthrough (all input streamlines + FICO DPS).
         // Output 1: filtered survivors only.
         &[PortKind::Streamline, PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::StreamlineFilter
+    }
+
+    fn citation_keys(&self) -> &'static [&'static str] {
+        &["purifibre", "nibrary"]
+    }
+
+    fn boilerplate(&self) -> Option<Cow<'_, str>> {
+        Some(Cow::Owned(format!(
+            "Streamlines were cleaned with Purifibre [@purifibre;@nibrary] \
+             (FOD-coherence-based filtering) using a {:.0}% trim fraction, \
+             a {:.0}% discard fraction, and a {:.1}° spherical Gaussian \
+             smoother.",
+            self.trim_fraction * 100.0,
+            self.puri_fraction * 100.0,
+            self.spherical_smoothing_deg,
+        )))
     }
 
     fn evaluate(

@@ -1,4 +1,5 @@
 use crate::units::Millimeters;
+use crate::workflow::methods::OpCategory;
 
 use super::super::{
     EvalCtx, FixelDrawPlan, OpacityGate, PortKind, WorkflowNodeKind, WorkflowOp,
@@ -101,6 +102,10 @@ impl WorkflowOp for Fixel3DDisplayOp {
         &[]
     }
 
+    fn category(&self) -> OpCategory {
+        OpCategory::Display
+    }
+
     fn evaluate(
         &self,
         ctx: &mut EvalCtx<'_, '_>,
@@ -142,6 +147,10 @@ impl WorkflowOp for Fixel2DDisplayOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Display
     }
 
     fn evaluate(

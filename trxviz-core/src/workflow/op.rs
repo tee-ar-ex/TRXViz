@@ -1,8 +1,10 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::data::loaded_files::{FileId, LoadedCifti, LoadedNifti, LoadedOdx, LoadedTrx};
 use crate::scene::LoadedGiftiSurface;
 
+use super::methods::OpCategory;
 use super::{
     EvaluatedValue, LoadedParcellation, NodeEvalState, SaveStreamlinePlan, SceneFramePlan,
     StreamlineDisplayRuntime, WorkflowEvalMode, WorkflowExecutionCache, WorkflowNode,
@@ -48,6 +50,47 @@ pub trait WorkflowOp: std::fmt::Debug {
     /// handle that themselves.
     fn fingerprint(&self, ctx: &FingerprintCtx<'_>) -> ContentHash {
         default_fingerprint(self.tag(), self, ctx)
+    }
+
+    // ── Methods-boilerplate / documentation metadata ─────────────────
+    //
+    // All three default to "this op has no citable method and needs no
+    // special documentation." Ops that re-implement or port a
+    // published method override these.
+
+    /// BibTeX keys (into `trxviz-core/data/citations.bib`) that should
+    /// be credited when this op is used in a workflow. Order matters
+    /// for presentation — list the most directly-relevant reference
+    /// first. Only ops representing citable methods need override;
+    /// pure wiring / display ops return the default empty slice.
+    fn citation_keys(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// One-sentence methods description with this op's parameter
+    /// values interpolated, written in past tense and suitable for a
+    /// paper's Methods section. Cite with Pandoc `[@key]` syntax, and
+    /// ensure every cited key is also listed in `citation_keys()` so
+    /// the generator can filter the BibTeX output.
+    ///
+    /// Returns `None` when the op contributes no methods sentence —
+    /// e.g. sources, display ops, and pure routing nodes.
+    fn boilerplate(&self) -> Option<Cow<'_, str>> {
+        None
+    }
+
+    /// Short, parameter-free description used by the per-op reference
+    /// documentation generator. Default falls back to `title()` so
+    /// every op gets a usable label without needing to override.
+    fn describe(&self) -> Cow<'static, str> {
+        Cow::Borrowed(self.title())
+    }
+
+    /// Coarse category used to group ops in the docs and in the GUI
+    /// palette. Default is [`OpCategory::Other`]; see [`OpCategory`]
+    /// for the available buckets.
+    fn category(&self) -> OpCategory {
+        OpCategory::Other
     }
 }
 

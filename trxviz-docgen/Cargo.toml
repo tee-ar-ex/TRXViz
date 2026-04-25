@@ -1,0 +1,14 @@
+[package]
+name = "trxviz-docgen"
+version = "0.1.0"
+edition = "2024"
+description = "Generates the auto-rendered portions of the TRXViz documentation site (per-op reference pages, category index, example workflow diagrams)."
+license = "BSD-2-Clause"
+publish = false
+
+[dependencies]
+anyhow = "1"
+trxviz-core = { path = "../trxviz-core" }
+
+[lints]
+workspace = true
