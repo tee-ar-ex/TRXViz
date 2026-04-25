@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use super::super::{
     EvalCtx, PortKind, SaveStreamlinePlan, WorkflowNodeKind, WorkflowOp, expect_streamline_input,
 };
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone)]
 pub struct SaveStreamlinesOp {
@@ -32,6 +33,10 @@ impl WorkflowOp for SaveStreamlinesOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Io
     }
 
     fn evaluate(

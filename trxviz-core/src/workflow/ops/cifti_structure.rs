@@ -1,4 +1,5 @@
 use crate::data::cifti::CiftiStructure;
+use crate::workflow::methods::OpCategory;
 
 use super::super::{
     EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_cifti_input,
@@ -32,6 +33,10 @@ impl WorkflowOp for CiftiStructureOp {
             CiftiStructure::Subcortical => &[PortKind::VolumeScalars],
             _ => &[PortKind::SurfaceScalars],
         }
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::StreamlineFilter
     }
 
     fn evaluate(

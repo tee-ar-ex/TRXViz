@@ -1,4 +1,5 @@
 use crate::data::trx_data::ColorMode;
+use crate::workflow::methods::OpCategory;
 
 use super::super::{
     EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_streamline_input,
@@ -28,6 +29,10 @@ impl WorkflowOp for ColorByDirectionOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Coloring
     }
 
     fn evaluate(

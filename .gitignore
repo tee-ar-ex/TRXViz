@@ -4,6 +4,10 @@
 trxviz/site
 **/*.rs.bk
 
+# Auto-generated docs (regenerate with `cargo run -p trxviz-docgen -- docs`)
+/docs/reference/ops/
+/docs/examples/
+
 # Python (mkdocs)
 .venv/
 

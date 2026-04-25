@@ -299,6 +299,38 @@ impl MergeStreamlinesDialogState {
     }
 }
 
+/// State backing the Methods dialog — a read-only window that renders
+/// the markdown + BibTeX produced by
+/// [`trxviz_core::workflow::methods::generate_methods_report`] for the
+/// currently-loaded workflow. The report is regenerated each time the
+/// dialog is opened so it reflects the latest graph; once open, it
+/// stays in sync with the snapshot taken at open time (reopen after
+/// edits to refresh).
+#[derive(Default)]
+pub struct MethodsDialogState {
+    pub open: bool,
+    /// Markdown body of the last-generated report. Empty before the
+    /// dialog is first opened.
+    pub body_markdown: String,
+    /// Filtered BibTeX for the last-generated report.
+    pub bibtex: String,
+    /// Transient user-facing status line (e.g. "Exported to …",
+    /// "Copied markdown"). Cleared each time the dialog is reopened.
+    pub status: Option<String>,
+}
+
+impl MethodsDialogState {
+    pub fn open_with(
+        &mut self,
+        report: trxviz_core::workflow::methods::MethodsReport,
+    ) {
+        self.open = true;
+        self.body_markdown = report.body_markdown;
+        self.bibtex = report.bibtex;
+        self.status = None;
+    }
+}
+
 struct CameraViewportState {
     camera_3d: OrbitCamera,
     inflated_stage_camera: OrbitCamera,

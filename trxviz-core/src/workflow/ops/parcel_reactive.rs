@@ -5,6 +5,7 @@ use super::super::{
     evaluate_derived_streamline_plan, expect_parcel_selection_input, expect_streamline_input,
 };
 use crate::data::parcellation_data::ParcellationVolume;
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone)]
 pub struct ParcelRoiOp;
@@ -91,6 +92,10 @@ impl WorkflowOp for ParcelRoiOp {
         &[PortKind::Streamline]
     }
 
+    fn category(&self) -> OpCategory {
+        OpCategory::Roi
+    }
+
     fn evaluate(
         &self,
         ctx: &mut EvalCtx<'_, '_>,
@@ -125,6 +130,10 @@ impl WorkflowOp for ParcelRoaOp {
         &[PortKind::Streamline]
     }
 
+    fn category(&self) -> OpCategory {
+        OpCategory::Roi
+    }
+
     fn evaluate(
         &self,
         ctx: &mut EvalCtx<'_, '_>,
@@ -157,6 +166,10 @@ impl WorkflowOp for ParcelEndOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Roi
     }
 
     fn evaluate(
@@ -200,6 +213,10 @@ impl WorkflowOp for ParcelCropOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Roi
     }
 
     fn evaluate(

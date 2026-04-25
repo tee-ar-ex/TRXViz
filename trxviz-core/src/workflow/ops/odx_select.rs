@@ -2,6 +2,7 @@ use super::super::{
     EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_odx_catalog_input,
     volume_scalars_from_nifti_volume,
 };
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone)]
 pub struct OdxVolumeSelectOp {
@@ -44,6 +45,10 @@ impl WorkflowOp for OdxVolumeSelectOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Volume, PortKind::VolumeScalars]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Source
     }
 
     fn evaluate(
@@ -94,6 +99,10 @@ impl WorkflowOp for OdxFixelScalarSelectOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::FixelScalars]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Source
     }
 
     fn evaluate(

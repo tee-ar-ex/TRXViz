@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -6,6 +7,7 @@ use super::super::{
     StreamlineFlow, VoxelMask, WorkflowNodeKind, WorkflowOp, WorkflowValue, prime_expensive_record,
     sync_node_state_from_run_record,
 };
+use crate::workflow::methods::OpCategory;
 use crate::data::loaded_files::StreamlineBacking;
 use crate::data::trx_data::ColorMode;
 use crate::data::trx_data::TrxGpuData;
@@ -176,6 +178,53 @@ impl WorkflowOp for DipyTractographyOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Tractography
+    }
+
+    fn citation_keys(&self) -> &'static [&'static str] {
+        // This op is TRXViz's wgpu port of GPUStreamlines; both the CPU
+        // and GPU evaluation paths derive from that work, so cite it
+        // regardless of where the job ends up running. DIPY is the
+        // algorithmic reference for the direction-getter machinery. PTT
+        // adds two extra citations: the original PTT paper and the
+        // ISMRM 2025 abstract describing the GPU PTT implementation.
+        match self.direction_getter {
+            DipyDirectionGetter::Probabilistic => &["gpustreamlines", "dipy"],
+            DipyDirectionGetter::Ptt { .. } => {
+                &["ptt", "gpustreamlines_ptt_ismrm", "gpustreamlines", "dipy"]
+            }
+        }
+    }
+
+    fn boilerplate(&self) -> Option<Cow<'_, str>> {
+        let method_prose = match self.direction_getter {
+            DipyDirectionGetter::Probabilistic => {
+                "probabilistic direction sampling from the orientation distribution \
+                 function [@dipy], as implemented by the GPUStreamlines framework \
+                 [@gpustreamlines]"
+            }
+            DipyDirectionGetter::Ptt { .. } => {
+                "Parallel Transport Tractography [@ptt], implemented following the \
+                 DIPY reference [@dipy] and the GPU-accelerated GPUStreamlines PTT \
+                 formulation [@gpustreamlines_ptt_ismrm;@gpustreamlines]"
+            }
+        };
+        Some(Cow::Owned(format!(
+            "ODF-based streamline tractography was performed using {method} with a \
+             {step:.2}-mm step size, a maximum turning angle of {angle:.0}°, length \
+             bounds of {min_len:.0}–{max_len:.0} mm, and a fixel threshold of \
+             {fx:.2}; seeding used {seeds} seeds per voxel.",
+            method = method_prose,
+            step = self.step_size_mm,
+            angle = self.max_angle_deg,
+            min_len = self.min_len_mm,
+            max_len = self.max_len_mm,
+            fx = self.fixel_threshold,
+            seeds = self.seeds_per_voxel,
+        )))
     }
 
     fn validate(&self, env: &super::super::ValidateCtx) -> Vec<super::super::Diagnostic> {

@@ -1,4 +1,5 @@
 use crate::data::loaded_files::FileId;
+use crate::workflow::methods::OpCategory;
 
 use super::super::{EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue};
 
@@ -22,6 +23,10 @@ impl WorkflowOp for VolumeSourceOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Volume]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Source
     }
 
     fn evaluate(

@@ -4,6 +4,7 @@ use std::hash::{Hash, Hasher};
 use super::super::{
     EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_streamline_input,
 };
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone, Copy)]
 pub struct LimitStreamlinesOp {
@@ -37,6 +38,10 @@ impl WorkflowOp for LimitStreamlinesOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::StreamlineFilter
     }
 
     fn evaluate(

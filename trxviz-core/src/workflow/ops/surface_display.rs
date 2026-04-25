@@ -7,6 +7,7 @@ use super::super::{
 };
 use crate::data::cifti::SurfaceScalars;
 use crate::renderer::mesh_renderer::SurfaceColormap;
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone)]
 pub struct SurfaceOverlayStackOp {
@@ -73,6 +74,10 @@ impl WorkflowOp for SurfaceOverlayStackOp {
         &[PortKind::SurfaceAppearance]
     }
 
+    fn category(&self) -> OpCategory {
+        OpCategory::Display
+    }
+
     fn evaluate(
         &self,
         ctx: &mut EvalCtx<'_, '_>,
@@ -120,6 +125,10 @@ impl WorkflowOp for SurfaceDisplayOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Display
     }
 
     fn evaluate(

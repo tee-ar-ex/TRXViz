@@ -11,6 +11,7 @@ use super::super::{
     prime_expensive_record, sync_node_state_from_run_record, workflow_boundary_plan_fingerprint,
     workflow_bundle_display_fingerprint, workflow_bundle_plan_fingerprint,
 };
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BundleSurfaceBuildOp {
@@ -124,6 +125,10 @@ impl WorkflowOp for BundleSurfaceBuildOp {
         &[PortKind::BundleSurface]
     }
 
+    fn category(&self) -> OpCategory {
+        OpCategory::Surface
+    }
+
     fn evaluate(
         &self,
         ctx: &mut EvalCtx<'_, '_>,
@@ -177,6 +182,10 @@ impl WorkflowOp for StreamlineDirectionFieldOp {
         &[PortKind::BoundaryField]
     }
 
+    fn category(&self) -> OpCategory {
+        OpCategory::Surface
+    }
+
     fn evaluate(
         &self,
         ctx: &mut EvalCtx<'_, '_>,
@@ -223,6 +232,10 @@ impl WorkflowOp for BundleSurfaceDisplayOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Display
     }
 
     fn evaluate(
@@ -319,6 +332,10 @@ impl WorkflowOp for BoundaryGlyphDisplayOp {
         &[]
     }
 
+    fn category(&self) -> OpCategory {
+        OpCategory::Display
+    }
+
     fn evaluate(
         &self,
         ctx: &mut EvalCtx<'_, '_>,
@@ -366,6 +383,10 @@ impl WorkflowOp for ParcelSurfaceBuildOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Surface
     }
 
     fn evaluate(

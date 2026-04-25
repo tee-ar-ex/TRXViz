@@ -9,8 +9,9 @@ mod workflow;
 use std::path::PathBuf;
 
 use state::{
-    ImportDialogState, MergeStreamlinesDialogState, PendingFileLoad, ReferenceAffineDialogState,
-    SceneState, UiMode, ViewportState, WorkerMessage, WorkerReceiver, WorkerSender, WorkflowState,
+    ImportDialogState, MergeStreamlinesDialogState, MethodsDialogState, PendingFileLoad,
+    ReferenceAffineDialogState, SceneState, UiMode, ViewportState, WorkerMessage, WorkerReceiver,
+    WorkerSender, WorkflowState,
 };
 use trxviz_core::renderer::slice_renderer::{AllSliceResources, SliceAxis};
 use trxviz_core::workflow::WorkflowNodeUuid;
@@ -31,6 +32,7 @@ pub struct TrxVizApp {
     pub(crate) import_dialog: ImportDialogState,
     pub(crate) reference_affine_dialog: ReferenceAffineDialogState,
     pub(crate) merge_streamlines_dialog: MergeStreamlinesDialogState,
+    pub(crate) methods_dialog: MethodsDialogState,
     /// Slice-local ODX glyph amplitude normalization used by the shader LUT path.
     pub(crate) odx_amp_norm: f32,
     pub(crate) max_storage_buffer_binding_size: Option<usize>,
@@ -365,6 +367,7 @@ impl TrxVizApp {
             import_dialog: ImportDialogState::default(),
             reference_affine_dialog: ReferenceAffineDialogState::default(),
             merge_streamlines_dialog: MergeStreamlinesDialogState::default(),
+            methods_dialog: MethodsDialogState::default(),
             odx_amp_norm: 1.0,
             max_storage_buffer_binding_size: None,
             gpu_device: None,
@@ -490,6 +493,12 @@ impl eframe::App for TrxVizApp {
         if menu_action.save_workflow_project_as {
             self.save_workflow_project(true);
         }
+        if menu_action.generate_methods {
+            let report = trxviz_core::workflow::methods::generate_methods_report(
+                &self.workflow.document,
+            );
+            self.methods_dialog.open_with(report);
+        }
         if menu_action.export_to_blender {
             self.export_to_blender(trxviz_core::headless::HeadlessView::View3D);
         }
@@ -609,6 +618,27 @@ impl eframe::App for TrxVizApp {
                     let merge_state = self.merge_streamlines_dialog.clone();
                     self.begin_merge_streamlines(&merge_state);
                     self.merge_streamlines_dialog.close();
+                }
+            }
+        }
+
+        if self.methods_dialog.open {
+            let methods_action =
+                ui::methods_dialog::show_methods_dialog(ctx, &mut self.methods_dialog);
+            if methods_action.export_requested {
+                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                    match ui::methods_dialog::export_to_directory(&self.methods_dialog, &dir) {
+                        Ok(status) => {
+                            self.methods_dialog.status = Some(status.clone());
+                            self.status_msg = Some(status);
+                            self.error_msg = None;
+                        }
+                        Err(err) => {
+                            let msg = format!("Failed to export methods files: {err}");
+                            self.methods_dialog.status = Some(msg.clone());
+                            self.error_msg = Some(msg);
+                        }
+                    }
                 }
             }
         }

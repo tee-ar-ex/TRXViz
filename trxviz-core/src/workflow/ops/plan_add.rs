@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use crate::error::WorkflowResult;
+use crate::workflow::methods::OpCategory;
 use crate::workflow::types::{TrackingPlan, VoxelMask, WorkflowValue};
 
 use super::super::{EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp};
@@ -72,6 +73,9 @@ impl WorkflowOp for AddRoiOp {
     fn output_ports(&self) -> &'static [PortKind] {
         ports_one()
     }
+    fn category(&self) -> OpCategory {
+        OpCategory::Tractography
+    }
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         let (plan, mask) = unpack_inputs(ctx, self.title())?;
         let mut new_plan: TrackingPlan = (*plan).clone();
@@ -104,6 +108,9 @@ impl WorkflowOp for AddRoaOp {
     }
     fn output_ports(&self) -> &'static [PortKind] {
         ports_one()
+    }
+    fn category(&self) -> OpCategory {
+        OpCategory::Tractography
     }
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         let (plan, mask) = unpack_inputs(ctx, self.title())?;
@@ -141,6 +148,9 @@ impl WorkflowOp for AddEndRegionOp {
     fn output_ports(&self) -> &'static [PortKind] {
         ports_one()
     }
+    fn category(&self) -> OpCategory {
+        OpCategory::Tractography
+    }
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         let (plan, mask) = unpack_inputs(ctx, self.title())?;
         let mut new_plan: TrackingPlan = (*plan).clone();
@@ -173,6 +183,9 @@ impl WorkflowOp for AddLimitingOp {
     }
     fn output_ports(&self) -> &'static [PortKind] {
         ports_one()
+    }
+    fn category(&self) -> OpCategory {
+        OpCategory::Tractography
     }
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         let (plan, mask) = unpack_inputs(ctx, self.title())?;
@@ -211,6 +224,9 @@ impl WorkflowOp for AddTermOp {
     fn output_ports(&self) -> &'static [PortKind] {
         ports_one()
     }
+    fn category(&self) -> OpCategory {
+        OpCategory::Tractography
+    }
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         let (plan, mask) = unpack_inputs(ctx, self.title())?;
         let mut new_plan: TrackingPlan = (*plan).clone();
@@ -246,6 +262,9 @@ impl WorkflowOp for AddNoEndOp {
     }
     fn output_ports(&self) -> &'static [PortKind] {
         ports_one()
+    }
+    fn category(&self) -> OpCategory {
+        OpCategory::Tractography
     }
     fn evaluate(&self, ctx: &mut EvalCtx<'_, '_>) -> WorkflowResult<Vec<EvaluatedValue>> {
         let (plan, mask) = unpack_inputs(ctx, self.title())?;

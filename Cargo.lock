@@ -3728,6 +3728,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "trxviz-docgen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "trxviz-core",
+]
+
+[[package]]
 name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

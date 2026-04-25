@@ -8,6 +8,7 @@ use super::super::{
     EvalCtx, PortKind, StreamlineDataset, StreamlineFlow, WorkflowNodeKind, WorkflowOp,
     WorkflowValue,
 };
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone, Copy)]
 pub struct StreamlineSourceOp {
@@ -29,6 +30,10 @@ impl WorkflowOp for StreamlineSourceOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Source
     }
 
     fn evaluate(

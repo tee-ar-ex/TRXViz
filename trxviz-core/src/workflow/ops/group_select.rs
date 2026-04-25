@@ -5,6 +5,7 @@ use super::super::{
     EvalCtx, GroupFilter, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue,
     expect_streamline_input,
 };
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone)]
 pub struct GroupSelectOp {
@@ -34,6 +35,10 @@ impl WorkflowOp for GroupSelectOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::StreamlineFilter
     }
 
     fn evaluate(

@@ -1,4 +1,5 @@
 use crate::renderer::mesh_renderer::SurfaceColormap;
+use crate::workflow::methods::OpCategory;
 
 use super::super::{
     EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, default_fixel_colormap,
@@ -37,6 +38,10 @@ impl WorkflowOp for ColorByFixelScalarsOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Fixels]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Coloring
     }
 
     fn evaluate(

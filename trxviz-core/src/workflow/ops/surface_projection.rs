@@ -5,6 +5,7 @@ use super::super::{
     workflow_surface_projection_fingerprint,
 };
 use crate::units::Millimeters;
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone)]
 pub struct SurfaceProjectionDensityOp {
@@ -111,6 +112,10 @@ impl WorkflowOp for SurfaceProjectionDensityOp {
         &[PortKind::SurfaceScalars]
     }
 
+    fn category(&self) -> OpCategory {
+        OpCategory::Surface
+    }
+
     fn evaluate(
         &self,
         ctx: &mut EvalCtx<'_, '_>,
@@ -134,6 +139,10 @@ impl WorkflowOp for SurfaceProjectionMeanDpsOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::SurfaceScalars]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Surface
     }
 
     fn evaluate(

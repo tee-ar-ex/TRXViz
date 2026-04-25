@@ -4,6 +4,7 @@ use super::super::{
     EvalCtx, PortKind, ReactiveStreamlineOp, ReactiveStreamlinePlan, WorkflowNodeKind, WorkflowOp,
     evaluate_derived_streamline_plan, expect_streamline_input,
 };
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone)]
 pub struct RemoveDuplicatesOp {
@@ -33,6 +34,10 @@ impl WorkflowOp for RemoveDuplicatesOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::StreamlineFilter
     }
 
     fn evaluate(

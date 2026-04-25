@@ -4,6 +4,7 @@ use super::super::{
     expect_odf_field_input, optional_volume_scalars_input,
 };
 use super::super::{GlyphColormap, OpacityGate, SizeGate, WorkflowSliceViewKind};
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone, Copy)]
 pub struct OdfGlyphRendererOp {
@@ -59,6 +60,10 @@ impl WorkflowOp for OdfGlyphRendererOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Display
     }
 
     fn evaluate(

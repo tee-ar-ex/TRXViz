@@ -3,6 +3,7 @@ use super::super::{
     expect_volume_input, expect_volume_scalars_input,
 };
 use crate::data::loaded_files::VolumeColormap;
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone, Copy)]
 pub struct VolumeDisplayOp {
@@ -55,6 +56,10 @@ impl WorkflowOp for VolumeDisplayOp {
         &[]
     }
 
+    fn category(&self) -> OpCategory {
+        OpCategory::Display
+    }
+
     fn evaluate(
         &self,
         ctx: &mut EvalCtx<'_, '_>,
@@ -91,6 +96,10 @@ impl WorkflowOp for VolumeScalarsDisplayOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::Display
     }
 
     fn evaluate(

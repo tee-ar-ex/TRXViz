@@ -12,6 +12,7 @@ use super::super::{
     sync_node_state_from_run_record,
 };
 use crate::workflow::WorkflowEvalMode;
+use crate::workflow::methods::OpCategory;
 use crate::workflow::tip::{TipParams, prune_by_topology};
 use crate::workflow::types::CachedTipPrune;
 
@@ -63,6 +64,10 @@ impl WorkflowOp for TipPruneOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::StreamlineFilter
     }
 
     fn evaluate(

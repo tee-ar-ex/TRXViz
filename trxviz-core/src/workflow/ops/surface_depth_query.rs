@@ -3,6 +3,7 @@ use super::super::{
     WorkflowValue, expect_streamline_input, expect_surface_input, prime_expensive_record,
     sync_node_state_from_run_record, workflow_surface_query_fingerprint,
 };
+use crate::workflow::methods::OpCategory;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SurfaceDepthQueryOp {
@@ -32,6 +33,10 @@ impl WorkflowOp for SurfaceDepthQueryOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         &[PortKind::Streamline]
+    }
+
+    fn category(&self) -> OpCategory {
+        OpCategory::StreamlineFilter
     }
 
     fn evaluate(
