@@ -440,5 +440,7 @@ pub const PYAFQ_BUNDLES: &[PyafqBundleSpec] = &[
 ];
 
 pub fn lookup(display_name: &str) -> Option<&'static PyafqBundleSpec> {
-    PYAFQ_BUNDLES.iter().find(|b| b.display_name == display_name)
+    PYAFQ_BUNDLES
+        .iter()
+        .find(|b| b.display_name == display_name)
 }

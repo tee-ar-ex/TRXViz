@@ -22,9 +22,7 @@ use super::super::{
     EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp, prime_expensive_record,
     sync_node_state_from_run_record,
 };
-use super::pyafq_bundles::{
-    DEFAULT_DIST_TO_ENDPOINT_MM, DEFAULT_DIST_TO_WAYPOINT_MM, lookup,
-};
+use super::pyafq_bundles::{DEFAULT_DIST_TO_ENDPOINT_MM, DEFAULT_DIST_TO_WAYPOINT_MM, lookup};
 
 fn default_to_space() -> String {
     "subject".to_string()

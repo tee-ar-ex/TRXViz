@@ -1190,16 +1190,13 @@ pub(crate) fn edit_node_op(
 
             // Distance tolerances.
             ui.add(
-                egui::Slider::new(dist_to_waypoint_mm, 0.0..=10.0)
-                    .text("Waypoint tolerance (mm)"),
+                egui::Slider::new(dist_to_waypoint_mm, 0.0..=10.0).text("Waypoint tolerance (mm)"),
             );
             ui.add(
-                egui::Slider::new(dist_to_exclusion_mm, 0.0..=5.0)
-                    .text("Exclusion tolerance (mm)"),
+                egui::Slider::new(dist_to_exclusion_mm, 0.0..=5.0).text("Exclusion tolerance (mm)"),
             );
             ui.add(
-                egui::Slider::new(dist_to_endpoint_mm, 0.0..=10.0)
-                    .text("Endpoint tolerance (mm)"),
+                egui::Slider::new(dist_to_endpoint_mm, 0.0..=10.0).text("Endpoint tolerance (mm)"),
             );
 
             // Probability threshold.
@@ -1226,7 +1223,11 @@ pub(crate) fn edit_node_op(
                 let mut on = override_max_len_mm.is_some();
                 let default_max = bundle_spec.and_then(|s| s.max_len_mm);
                 if ui.checkbox(&mut on, "Override max len").changed() {
-                    *override_max_len_mm = if on { default_max.or(Some(250.0)) } else { None };
+                    *override_max_len_mm = if on {
+                        default_max.or(Some(250.0))
+                    } else {
+                        None
+                    };
                 }
                 if let Some(v) = override_max_len_mm.as_mut() {
                     ui.add(egui::DragValue::new(v).range(0.0..=500.0).suffix(" mm"));

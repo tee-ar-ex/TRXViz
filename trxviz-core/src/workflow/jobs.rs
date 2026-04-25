@@ -192,7 +192,11 @@ pub fn run_workflow_job(
                 outputs.n_include,
                 outputs.n_exclude,
                 outputs.has_start as usize + outputs.has_end as usize,
-                if outputs.has_prob_map { "loaded" } else { "absent" },
+                if outputs.has_prob_map {
+                    "loaded"
+                } else {
+                    "absent"
+                },
             );
             Ok(WorkflowJobOutput::PreparePyafqPlan {
                 plan: Arc::new(outputs.plan),

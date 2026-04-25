@@ -409,7 +409,11 @@ pub fn build_pyafq_plan(
             }
             // NiftiVolume normalizes to [0,1]; any voxel > 0 marks the
             // bundle's probabilistic support region.
-            let prob_data: Vec<u8> = vol.data.iter().map(|&v| if v > 0.0 { 1u8 } else { 0u8 }).collect();
+            let prob_data: Vec<u8> = vol
+                .data
+                .iter()
+                .map(|&v| if v > 0.0 { 1u8 } else { 0u8 })
+                .collect();
             let prob_mask = Arc::new(VoxelMask {
                 dims,
                 voxel_to_ras,

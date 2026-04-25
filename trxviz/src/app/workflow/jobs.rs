@@ -729,20 +729,17 @@ impl crate::app::TrxVizApp {
                                     no_end_mask,
                                     summary,
                                 } => {
-                                    self.workflow
-                                        .execution_cache
-                                        .hausdorff_plan_cache
-                                        .insert(
-                                            node_uuid,
-                                            trxviz_core::workflow::CachedHausdorffPlan {
-                                                fingerprint,
-                                                plan,
-                                                seed_mask,
-                                                limiting_mask,
-                                                no_end_mask,
-                                                summary: summary.clone(),
-                                            },
-                                        );
+                                    self.workflow.execution_cache.hausdorff_plan_cache.insert(
+                                        node_uuid,
+                                        trxviz_core::workflow::CachedHausdorffPlan {
+                                            fingerprint,
+                                            plan,
+                                            seed_mask,
+                                            limiting_mask,
+                                            no_end_mask,
+                                            summary: summary.clone(),
+                                        },
+                                    );
                                     summary
                                 }
                                 WorkflowJobOutput::PreparePyafqPlan {
@@ -753,21 +750,18 @@ impl crate::app::TrxVizApp {
                                     end_mask,
                                     summary,
                                 } => {
-                                    self.workflow
-                                        .execution_cache
-                                        .pyafq_plan_cache
-                                        .insert(
-                                            node_uuid,
-                                            trxviz_core::workflow::CachedPyafqPlan {
-                                                fingerprint,
-                                                plan,
-                                                include_mask,
-                                                exclude_mask,
-                                                start_mask,
-                                                end_mask,
-                                                summary: summary.clone(),
-                                            },
-                                        );
+                                    self.workflow.execution_cache.pyafq_plan_cache.insert(
+                                        node_uuid,
+                                        trxviz_core::workflow::CachedPyafqPlan {
+                                            fingerprint,
+                                            plan,
+                                            include_mask,
+                                            exclude_mask,
+                                            start_mask,
+                                            end_mask,
+                                            summary: summary.clone(),
+                                        },
+                                    );
                                     summary
                                 }
                             };
@@ -1096,13 +1090,7 @@ impl crate::app::TrxVizApp {
             }
         }
 
-        for job in self
-            .workflow
-            .runtime
-            .scene_plan
-            .hausdorff_plan_jobs
-            .clone()
-        {
+        for job in self.workflow.runtime.scene_plan.hausdorff_plan_jobs.clone() {
             let node_uuid = job.node_uuid;
             let fingerprint = job.fingerprint;
             if should_queue_expensive_job(
