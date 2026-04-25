@@ -493,10 +493,7 @@ mod tests {
         );
         doc.graph = graph;
 
-        let dir = std::env::temp_dir().join(format!(
-            "trxviz-methods-cli-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("trxviz-methods-cli-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let project_path = dir.join("wf.trxviz");
         let out_md = dir.join("methods.md");

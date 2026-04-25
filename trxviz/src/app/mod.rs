@@ -494,9 +494,8 @@ impl eframe::App for TrxVizApp {
             self.save_workflow_project(true);
         }
         if menu_action.generate_methods {
-            let report = trxviz_core::workflow::methods::generate_methods_report(
-                &self.workflow.document,
-            );
+            let report =
+                trxviz_core::workflow::methods::generate_methods_report(&self.workflow.document);
             self.methods_dialog.open_with(report);
         }
         if menu_action.export_to_blender {

@@ -23,8 +23,8 @@ use super::super::{
     expect_boundary_field_input, expect_streamline_input, mark_expensive_success,
     prime_expensive_record, sync_node_state_from_run_record,
 };
-use crate::workflow::methods::OpCategory;
 use crate::data::trx_data::TrxGpuData;
+use crate::workflow::methods::OpCategory;
 use crate::workflow::purifibre::{PurifibreParams, apply_puri_threshold, purifibre_score};
 use crate::workflow::types::{CachedPurifibre, StreamlineDataset, StreamlineFlow};
 

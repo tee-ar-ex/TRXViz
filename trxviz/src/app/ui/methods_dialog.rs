@@ -119,10 +119,7 @@ pub fn show_methods_dialog(
 /// given directory using the currently-buffered strings. Returns a
 /// human-readable status line on success; callers surface it via the
 /// usual app status banner.
-pub fn export_to_directory(
-    state: &MethodsDialogState,
-    dir: &Path,
-) -> std::io::Result<String> {
+pub fn export_to_directory(state: &MethodsDialogState, dir: &Path) -> std::io::Result<String> {
     let md_path = dir.join("methods.md");
     let bib_path = dir.join("references.bib");
     std::fs::write(&md_path, &state.body_markdown)?;

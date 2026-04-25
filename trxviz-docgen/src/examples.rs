@@ -106,14 +106,22 @@ fn save_streamlines_example() -> Example {
     doc.graph.insert_node(
         WorkflowNode {
             uuid: sink,
-            op: WorkflowNodeKind::SaveStreamlines { output_path: String::new() },
+            op: WorkflowNodeKind::SaveStreamlines {
+                output_path: String::new(),
+            },
             label: "save".into(),
         },
         GraphPos::new(0.0, 0.0),
     );
     doc.graph.connect(
-        OutPort { node: src, output: 0 },
-        InPort { node: sink, input: 0 },
+        OutPort {
+            node: src,
+            output: 0,
+        },
+        InPort {
+            node: sink,
+            input: 0,
+        },
     );
     doc.next_node_uuid = 3;
 
@@ -161,18 +169,32 @@ fn purifibre_pipeline_example() -> Example {
     doc.graph.insert_node(
         WorkflowNode {
             uuid: sink,
-            op: WorkflowNodeKind::SaveStreamlines { output_path: String::new() },
+            op: WorkflowNodeKind::SaveStreamlines {
+                output_path: String::new(),
+            },
             label: "save".into(),
         },
         GraphPos::new(0.0, 0.0),
     );
     doc.graph.connect(
-        OutPort { node: src, output: 0 },
-        InPort { node: puri, input: 0 },
+        OutPort {
+            node: src,
+            output: 0,
+        },
+        InPort {
+            node: puri,
+            input: 0,
+        },
     );
     doc.graph.connect(
-        OutPort { node: puri, output: 0 },
-        InPort { node: sink, input: 0 },
+        OutPort {
+            node: puri,
+            output: 0,
+        },
+        InPort {
+            node: sink,
+            input: 0,
+        },
     );
     doc.next_node_uuid = 4;
 

@@ -320,10 +320,7 @@ pub struct MethodsDialogState {
 }
 
 impl MethodsDialogState {
-    pub fn open_with(
-        &mut self,
-        report: trxviz_core::workflow::methods::MethodsReport,
-    ) {
+    pub fn open_with(&mut self, report: trxviz_core::workflow::methods::MethodsReport) {
         self.open = true;
         self.body_markdown = report.body_markdown;
         self.bibtex = report.bibtex;

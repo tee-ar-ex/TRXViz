@@ -7,11 +7,11 @@ use super::super::{
     StreamlineFlow, VoxelMask, WorkflowNodeKind, WorkflowOp, WorkflowValue, prime_expensive_record,
     sync_node_state_from_run_record,
 };
-use crate::workflow::methods::OpCategory;
 use crate::data::loaded_files::StreamlineBacking;
 use crate::data::trx_data::ColorMode;
 use crate::data::trx_data::TrxGpuData;
 use crate::error::WorkflowResult;
+use crate::workflow::methods::OpCategory;
 
 fn default_step_size() -> f32 {
     0.5

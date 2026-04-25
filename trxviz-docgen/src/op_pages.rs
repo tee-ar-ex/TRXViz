@@ -88,8 +88,7 @@ pub fn render_index(infos: &[OpDocInfo]) -> String {
     ];
 
     for category in order {
-        let mut in_cat: Vec<&OpDocInfo> =
-            infos.iter().filter(|i| i.category == category).collect();
+        let mut in_cat: Vec<&OpDocInfo> = infos.iter().filter(|i| i.category == category).collect();
         if in_cat.is_empty() {
             continue;
         }

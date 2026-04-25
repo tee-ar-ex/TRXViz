@@ -779,7 +779,9 @@ pub fn generate_methods_report(doc: &super::types::WorkflowDocument) -> MethodsR
     }
 
     let mut body = String::new();
-    body.push_str("<!-- TRXViz methods section. Generated automatically — do not edit by hand. -->\n\n");
+    body.push_str(
+        "<!-- TRXViz methods section. Generated automatically — do not edit by hand. -->\n\n",
+    );
     // Non-endorsement notice. Blockquote so Pandoc renders it as a
     // callout rather than blending it into the methods prose.
     body.push_str("> **Not the authoritative implementation.** ");
@@ -793,8 +795,7 @@ pub fn generate_methods_report(doc: &super::types::WorkflowDocument) -> MethodsR
     }
     body.push('\n');
 
-    let used: std::collections::HashSet<&str> =
-        keys_in_order.iter().map(|s| s.as_str()).collect();
+    let used: std::collections::HashSet<&str> = keys_in_order.iter().map(|s| s.as_str()).collect();
     let bibtex = filter_bibtex(CITATIONS_BIB, &used);
 
     MethodsReport {
@@ -944,10 +945,10 @@ mod tests {
     //! parameter-interpolated sentence, and a usable category. As more
     //! ops opt in to the boilerplate system, add cases here rather
     //! than proliferating per-op test modules.
-    use super::*;
     use super::super::WorkflowNodeKind;
     use super::super::ops;
     use super::super::types::DipyDirectionGetter;
+    use super::*;
 
     #[test]
     fn non_endorsement_notice_names_trxviz_and_is_explicit() {
@@ -970,10 +971,19 @@ mod tests {
         assert_eq!(ops::citation_keys(&kind), &["purifibre", "nibrary"]);
         let text = ops::boilerplate(&kind).expect("purifibre contributes methods prose");
         assert!(text.contains("Purifibre"), "missing method name: {text}");
-        assert!(text.contains("[@purifibre;@nibrary]"), "missing citation: {text}");
+        assert!(
+            text.contains("[@purifibre;@nibrary]"),
+            "missing citation: {text}"
+        );
         assert!(text.contains("10% trim"), "trim% not interpolated: {text}");
-        assert!(text.contains("15% discard"), "puri% not interpolated: {text}");
-        assert!(text.contains("15.0°"), "smoothing deg not interpolated: {text}");
+        assert!(
+            text.contains("15% discard"),
+            "puri% not interpolated: {text}"
+        );
+        assert!(
+            text.contains("15.0°"),
+            "smoothing deg not interpolated: {text}"
+        );
     }
 
     #[test]
@@ -995,12 +1005,18 @@ mod tests {
             &["gpustreamlines", "dipy"]
         );
         let prob_text = ops::boilerplate(&probabilistic).expect("has prose");
-        assert!(prob_text.contains("probabilistic"), "method not named: {prob_text}");
+        assert!(
+            prob_text.contains("probabilistic"),
+            "method not named: {prob_text}"
+        );
         assert!(
             prob_text.contains("[@gpustreamlines]"),
             "missing GPUStreamlines citation: {prob_text}"
         );
-        assert!(!prob_text.contains("[@ptt]"), "spurious PTT citation: {prob_text}");
+        assert!(
+            !prob_text.contains("[@ptt]"),
+            "spurious PTT citation: {prob_text}"
+        );
 
         let ptt = WorkflowNodeKind::DipyTractography {
             step_size_mm: 0.5,
@@ -1028,12 +1044,18 @@ mod tests {
             &["ptt", "gpustreamlines_ptt_ismrm", "gpustreamlines", "dipy"]
         );
         let ptt_text = ops::boilerplate(&ptt).expect("has prose");
-        assert!(ptt_text.contains("[@ptt]"), "missing PTT citation: {ptt_text}");
+        assert!(
+            ptt_text.contains("[@ptt]"),
+            "missing PTT citation: {ptt_text}"
+        );
         assert!(
             ptt_text.contains("gpustreamlines_ptt_ismrm"),
             "missing GPU PTT citation: {ptt_text}"
         );
-        assert!(ptt_text.contains("Parallel Transport"), "method not named: {ptt_text}");
+        assert!(
+            ptt_text.contains("Parallel Transport"),
+            "method not named: {ptt_text}"
+        );
     }
 
     #[test]
@@ -1065,7 +1087,10 @@ mod tests {
             text.contains("[@yeh2020shape]"),
             "missing augmented-tracking citation: {text}"
         );
-        assert!(text.contains("30000"), "target_streamlines not interpolated: {text}");
+        assert!(
+            text.contains("30000"),
+            "target_streamlines not interpolated: {text}"
+        );
     }
 
     #[test]
@@ -1203,7 +1228,9 @@ mod tests {
         // Non-endorsement notice is rendered as a blockquote and must
         // appear before the methods heading.
         assert!(
-            report.body_markdown.contains("Not the authoritative implementation"),
+            report
+                .body_markdown
+                .contains("Not the authoritative implementation"),
             "missing non-endorsement notice"
         );
         let notice_idx = report
@@ -1214,7 +1241,10 @@ mod tests {
         assert!(notice_idx < methods_idx);
 
         // Citation keys: trxviz first, then order-of-appearance.
-        assert_eq!(report.citation_keys.first().map(String::as_str), Some("trxviz"));
+        assert_eq!(
+            report.citation_keys.first().map(String::as_str),
+            Some("trxviz")
+        );
         assert!(report.citation_keys.contains(&"gpustreamlines".to_string()));
         assert!(report.citation_keys.contains(&"dipy".to_string()));
         assert!(report.citation_keys.contains(&"purifibre".to_string()));
@@ -1273,9 +1303,9 @@ mod tests {
         //   excludes unused ones,
         // - the display node contributes no prose and no citations.
         use super::super::graph::{InPort, OutPort};
+        use super::super::types::DipyDirectionGetter;
         use super::super::types::{WorkflowNode, WorkflowNodeUuid, default_document};
         use super::super::{GraphPos, WorkflowNodeKind};
-        use super::super::types::DipyDirectionGetter;
 
         let mut doc = default_document();
         let src = WorkflowNodeUuid(1);
@@ -1330,16 +1360,34 @@ mod tests {
             GraphPos::new(0.0, 0.0),
         );
         doc.graph.connect(
-            OutPort { node: src, output: 0 },
-            InPort { node: puri, input: 0 },
+            OutPort {
+                node: src,
+                output: 0,
+            },
+            InPort {
+                node: puri,
+                input: 0,
+            },
         );
         doc.graph.connect(
-            OutPort { node: puri, output: 0 },
-            InPort { node: track, input: 0 },
+            OutPort {
+                node: puri,
+                output: 0,
+            },
+            InPort {
+                node: track,
+                input: 0,
+            },
         );
         doc.graph.connect(
-            OutPort { node: track, output: 0 },
-            InPort { node: display, input: 0 },
+            OutPort {
+                node: track,
+                output: 0,
+            },
+            InPort {
+                node: display,
+                input: 0,
+            },
         );
         doc.next_node_uuid = 5;
 
@@ -1362,13 +1410,19 @@ mod tests {
         assert!(report.body_markdown.contains("60"));
 
         // citation_keys: trxviz first, then in order of first appearance.
-        assert_eq!(report.citation_keys.first().map(String::as_str), Some("trxviz"));
+        assert_eq!(
+            report.citation_keys.first().map(String::as_str),
+            Some("trxviz")
+        );
         let keys: std::collections::HashSet<&str> =
             report.citation_keys.iter().map(String::as_str).collect();
         for expected in ["trxviz", "purifibre", "nibrary", "dipy"] {
             assert!(keys.contains(expected), "missing citation key: {expected}");
         }
-        assert!(!keys.contains("ptt"), "ptt should not be cited for Probabilistic");
+        assert!(
+            !keys.contains("ptt"),
+            "ptt should not be cited for Probabilistic"
+        );
         // No duplicates.
         let mut deduped: Vec<&str> = report.citation_keys.iter().map(String::as_str).collect();
         deduped.sort();
@@ -1378,9 +1432,11 @@ mod tests {
         // Filtered bibtex: every used key present, unused keys absent.
         for expected in &report.citation_keys {
             assert!(
-                report.bibtex.contains(&format!("@article{{{expected}")) ||
-                report.bibtex.contains(&format!("@software{{{expected}")) ||
-                report.bibtex.contains(&format!("@inproceedings{{{expected}")),
+                report.bibtex.contains(&format!("@article{{{expected}"))
+                    || report.bibtex.contains(&format!("@software{{{expected}"))
+                    || report
+                        .bibtex
+                        .contains(&format!("@inproceedings{{{expected}")),
                 "bibtex missing entry for used key: {expected}\n---\n{}",
                 report.bibtex,
             );

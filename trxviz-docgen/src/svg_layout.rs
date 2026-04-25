@@ -23,10 +23,10 @@
 //! internal layout detail.
 use std::collections::{BTreeMap, HashMap};
 
+use trxviz_core::workflow::port_labels::{input_port_label, output_port_label};
 use trxviz_core::workflow::{
     GraphPos, PortKind, Wire, WorkflowDocument, WorkflowGraph, WorkflowNodeKind, WorkflowNodeUuid,
 };
-use trxviz_core::workflow::port_labels::{input_port_label, output_port_label};
 
 const NODE_WIDTH: f32 = 180.0;
 const PORT_ROW_HEIGHT: f32 = 18.0;
@@ -112,15 +112,15 @@ fn layout(graph: &WorkflowGraph) -> Layout {
     for (&uuid, &layer) in &layer_of {
         by_layer.entry(layer).or_default().push(uuid);
     }
-    let positions: HashMap<WorkflowNodeUuid, GraphPos> = graph
-        .nodes_pos()
-        .map(|(pos, uuid)| (uuid, pos))
-        .collect();
+    let positions: HashMap<WorkflowNodeUuid, GraphPos> =
+        graph.nodes_pos().map(|(pos, uuid)| (uuid, pos)).collect();
     for bucket in by_layer.values_mut() {
         bucket.sort_by(|a, b| {
             let ya = positions.get(a).map(|p| p.y).unwrap_or(0.0);
             let yb = positions.get(b).map(|p| p.y).unwrap_or(0.0);
-            ya.partial_cmp(&yb).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0))
+            ya.partial_cmp(&yb)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.0.cmp(&b.0))
         });
     }
 
@@ -382,15 +382,15 @@ mod tests {
         doc.graph.insert_node(
             WorkflowNode {
                 uuid: b,
-                op: WorkflowNodeKind::SaveStreamlines { output_path: String::new() },
+                op: WorkflowNodeKind::SaveStreamlines {
+                    output_path: String::new(),
+                },
                 label: "sink".into(),
             },
             GraphPos::new(0.0, 0.0),
         );
-        doc.graph.connect(
-            OutPort { node: a, output: 0 },
-            InPort { node: b, input: 0 },
-        );
+        doc.graph
+            .connect(OutPort { node: a, output: 0 }, InPort { node: b, input: 0 });
         doc.next_node_uuid = 3;
         doc
     }
