@@ -391,6 +391,18 @@ impl eframe::App for TrxVizApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.poll_worker_messages(frame);
         self.poll_workflow_job_messages();
+
+        // Cmd+Shift+U / Ctrl+Shift+U — "Update": kick the same path the
+        // toolbar's "Run Expensive Nodes" button uses, so users can keep
+        // their hands on the keyboard while sweeping plan parameters.
+        let run_shortcut = egui::KeyboardShortcut::new(
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+            egui::Key::U,
+        );
+        if ctx.input_mut(|i| i.consume_shortcut(&run_shortcut)) {
+            self.workflow.run_expensive_requested = true;
+            ctx.request_repaint();
+        }
         self.max_storage_buffer_binding_size = frame
             .wgpu_render_state()
             .map(|rs| rs.device.limits().max_storage_buffer_binding_size as usize);

@@ -35,6 +35,8 @@ pub(crate) fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
         WorkflowJobKind::BoundaryField => "boundary field",
         WorkflowJobKind::DipyTractography => "dipy tractography",
         WorkflowJobKind::YehTractography => "yeh tractography",
+        WorkflowJobKind::PrepareHausdorffPlan => "Hausdorff plan",
+        WorkflowJobKind::PreparePyafqPlan => "pyAFQ plan",
     }
 }
 
@@ -720,6 +722,54 @@ impl crate::app::TrxVizApp {
                                         );
                                     s
                                 }
+                                WorkflowJobOutput::PrepareHausdorffPlan {
+                                    plan,
+                                    seed_mask,
+                                    limiting_mask,
+                                    no_end_mask,
+                                    summary,
+                                } => {
+                                    self.workflow
+                                        .execution_cache
+                                        .hausdorff_plan_cache
+                                        .insert(
+                                            node_uuid,
+                                            trxviz_core::workflow::CachedHausdorffPlan {
+                                                fingerprint,
+                                                plan,
+                                                seed_mask,
+                                                limiting_mask,
+                                                no_end_mask,
+                                                summary: summary.clone(),
+                                            },
+                                        );
+                                    summary
+                                }
+                                WorkflowJobOutput::PreparePyafqPlan {
+                                    plan,
+                                    include_mask,
+                                    exclude_mask,
+                                    start_mask,
+                                    end_mask,
+                                    summary,
+                                } => {
+                                    self.workflow
+                                        .execution_cache
+                                        .pyafq_plan_cache
+                                        .insert(
+                                            node_uuid,
+                                            trxviz_core::workflow::CachedPyafqPlan {
+                                                fingerprint,
+                                                plan,
+                                                include_mask,
+                                                exclude_mask,
+                                                start_mask,
+                                                end_mask,
+                                                summary: summary.clone(),
+                                            },
+                                        );
+                                    summary
+                                }
                             };
 
                             if fingerprint_current {
@@ -1041,6 +1091,50 @@ impl crate::app::TrxVizApp {
                     fingerprint,
                     WorkflowJobKind::YehTractography,
                     WorkflowJobPayload::YehTractography { plan },
+                );
+                queued_any = true;
+            }
+        }
+
+        for job in self
+            .workflow
+            .runtime
+            .scene_plan
+            .hausdorff_plan_jobs
+            .clone()
+        {
+            let node_uuid = job.node_uuid;
+            let fingerprint = job.fingerprint;
+            if should_queue_expensive_job(
+                self.workflow.execution_cache.node_runs.get(&node_uuid),
+                fingerprint,
+                &self.workflow.jobs_in_flight,
+                node_uuid,
+            ) {
+                self.queue_workflow_job(
+                    node_uuid,
+                    fingerprint,
+                    WorkflowJobKind::PrepareHausdorffPlan,
+                    WorkflowJobPayload::PrepareHausdorffPlan(job),
+                );
+                queued_any = true;
+            }
+        }
+
+        for job in self.workflow.runtime.scene_plan.pyafq_plan_jobs.clone() {
+            let node_uuid = job.node_uuid;
+            let fingerprint = job.fingerprint;
+            if should_queue_expensive_job(
+                self.workflow.execution_cache.node_runs.get(&node_uuid),
+                fingerprint,
+                &self.workflow.jobs_in_flight,
+                node_uuid,
+            ) {
+                self.queue_workflow_job(
+                    node_uuid,
+                    fingerprint,
+                    WorkflowJobKind::PreparePyafqPlan,
+                    WorkflowJobPayload::PreparePyafqPlan(job),
                 );
                 queued_any = true;
             }
@@ -1488,6 +1582,8 @@ impl crate::app::TrxVizApp {
             }
 
             // Voxel-mask iso-surface meshes reuse the same bundle-mesh pipeline.
+            // Skip the GPU upload when the fingerprint matches the prior frame's,
+            // otherwise N static ROIs re-upload N meshes every frame.
             for draw in &self.workflow.runtime.scene_plan.voxel_mask_mesh_draws {
                 if let Some(cache) = self
                     .workflow
@@ -1496,8 +1592,19 @@ impl crate::app::TrxVizApp {
                     .get(&draw.node_uuid)
                     .filter(|cache| cache.fingerprint == draw.fingerprint)
                 {
+                    if self
+                        .workflow
+                        .uploaded_voxel_mask_fingerprints
+                        .get(&draw.draw_id)
+                        == Some(&draw.fingerprint)
+                    {
+                        continue;
+                    }
                     let one = [(cache.mesh.clone(), draw.label.clone())];
                     mesh_resources.set_bundle_meshes(draw.draw_id, &rs.device, &one);
+                    self.workflow
+                        .uploaded_voxel_mask_fingerprints
+                        .insert(draw.draw_id, draw.fingerprint);
                 }
             }
 
@@ -1507,6 +1614,9 @@ impl crate::app::TrxVizApp {
                 .filter(|id| !active_bundle_ids.contains(id))
             {
                 mesh_resources.clear_bundle_mesh(draw_id);
+                self.workflow
+                    .uploaded_voxel_mask_fingerprints
+                    .remove(&draw_id);
                 if let Some(runtime) = self
                     .workflow
                     .display_runtimes

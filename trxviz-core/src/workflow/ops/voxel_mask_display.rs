@@ -48,17 +48,15 @@ impl Default for VoxelMaskDisplayOp {
 }
 
 impl VoxelMaskDisplayOp {
-    fn fingerprint(&self, mask: &VoxelMask) -> u64 {
+    /// O(1) fingerprint: identity of the upstream `Arc<VoxelMask>` plus
+    /// the display params that affect the cached mesh. The stride-sample
+    /// content hash this replaces was costing ~35K bytes per ROI per
+    /// frame — pure waste, since `Arc<VoxelMask>` only swaps when the
+    /// upstream op rebuilds, and the fingerprint is just there to skip
+    /// re-running marching cubes when nothing has changed.
+    fn fingerprint(&self, mask: &Arc<VoxelMask>) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        mask.dims.hash(&mut h);
-        for c in mask.voxel_to_ras.to_cols_array() {
-            c.to_bits().hash(&mut h);
-        }
-        mask.data.len().hash(&mut h);
-        let stride = (mask.data.len() / 256).max(1);
-        for i in (0..mask.data.len()).step_by(stride) {
-            mask.data[i].hash(&mut h);
-        }
+        (Arc::as_ptr(mask) as usize).hash(&mut h);
         for c in self.color {
             c.to_bits().hash(&mut h);
         }

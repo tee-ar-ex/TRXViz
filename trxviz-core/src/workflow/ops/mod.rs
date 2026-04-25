@@ -21,7 +21,9 @@ mod parcellation_display;
 mod parcellation_source;
 mod plan_add;
 mod prepare_hausdorff;
+mod prepare_pyafq;
 mod prepare_simple;
+pub mod pyafq_bundles;
 mod purifibre;
 mod random_subset;
 mod remove_duplicates;
@@ -68,6 +70,7 @@ pub use parcellation_display::ParcellationDisplayOp;
 pub use parcellation_source::ParcellationSourceOp;
 pub use plan_add::{AddEndRegionOp, AddLimitingOp, AddNoEndOp, AddRoaOp, AddRoiOp, AddTermOp};
 pub use prepare_hausdorff::PrepareHausdorffPlanOp;
+pub use prepare_pyafq::PreparePyafqPlanOp;
 pub use prepare_simple::PrepareSimplePlanOp;
 pub use purifibre::PurifibreOp;
 pub use random_subset::RandomSubsetOp;
@@ -439,6 +442,26 @@ pub enum WorkflowNodeKind {
         not_end_fixel_otsu_factor: f32,
         #[serde(default)]
         max_reference_points: u32,
+    },
+    PreparePyafqPlan {
+        #[serde(default)]
+        working_dir: String,
+        #[serde(default)]
+        bundle_name: String,
+        #[serde(default)]
+        to_space: String,
+        #[serde(default)]
+        dist_to_waypoint_mm: f32,
+        #[serde(default)]
+        dist_to_exclusion_mm: f32,
+        #[serde(default)]
+        dist_to_endpoint_mm: f32,
+        #[serde(default)]
+        prob_threshold: f32,
+        #[serde(default)]
+        override_min_len_mm: Option<f32>,
+        #[serde(default)]
+        override_max_len_mm: Option<f32>,
     },
     DipyTractography {
         #[serde(default)]
@@ -1071,6 +1094,30 @@ macro_rules! with_workflow_op {
                 };
                 $body
             }
+            WorkflowNodeKind::PreparePyafqPlan {
+                working_dir,
+                bundle_name,
+                to_space,
+                dist_to_waypoint_mm,
+                dist_to_exclusion_mm,
+                dist_to_endpoint_mm,
+                prob_threshold,
+                override_min_len_mm,
+                override_max_len_mm,
+            } => {
+                let $op = prepare_pyafq::PreparePyafqPlanOp {
+                    working_dir: working_dir.clone(),
+                    bundle_name: bundle_name.clone(),
+                    to_space: to_space.clone(),
+                    dist_to_waypoint_mm: *dist_to_waypoint_mm,
+                    dist_to_exclusion_mm: *dist_to_exclusion_mm,
+                    dist_to_endpoint_mm: *dist_to_endpoint_mm,
+                    prob_threshold: *prob_threshold,
+                    override_min_len_mm: *override_min_len_mm,
+                    override_max_len_mm: *override_max_len_mm,
+                };
+                $body
+            }
             WorkflowNodeKind::DipyTractography {
                 step_size_mm,
                 max_angle_deg,
@@ -1394,6 +1441,7 @@ pub(super) fn validate_registry() -> WorkflowResult<()> {
         roi_ops::RoiFromShapeOp::default().tag(),
         voxel_mask_display::VoxelMaskDisplayOp::default().tag(),
         prepare_hausdorff::PrepareHausdorffPlanOp::default().tag(),
+        prepare_pyafq::PreparePyafqPlanOp::default().tag(),
         prepare_simple::PrepareSimplePlanOp::default().tag(),
         plan_add::AddRoiOp.tag(),
         plan_add::AddRoaOp.tag(),

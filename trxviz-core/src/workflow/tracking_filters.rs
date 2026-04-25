@@ -61,6 +61,28 @@ pub(crate) fn streamline_satisfies_end_masks(
         .all(|m| point_in_mask(first, m) || point_in_mask(last, m))
 }
 
+/// pyAFQ-style probabilistic-atlas test: pass iff the fraction of streamline
+/// points that fall inside `prob_mask` (a binarized `*_probseg.nii.gz`) is at
+/// least `threshold`. Mirrors the `prob_threshold` semantics in
+/// `AFQ.recognition` (see `pyAFQ/AFQ/recognition/recognize.py`), simplified to
+/// a hard membership test against the binarized mask — sufficient for the
+/// comparison-study use case without needing a soft-prob value type.
+pub(crate) fn streamline_passes_pyafq_prob(
+    streamline: &[[f32; 3]],
+    prob_mask: &VoxelMask,
+    threshold: f32,
+) -> bool {
+    if streamline.is_empty() || threshold <= 0.0 {
+        return true;
+    }
+    let inside = streamline
+        .iter()
+        .filter(|p| point_in_mask(Vec3::from_array(**p), prob_mask))
+        .count();
+    let frac = inside as f32 / streamline.len() as f32;
+    frac >= threshold
+}
+
 /// Mean-min Hausdorff test: each candidate point's minimum distance to the
 /// reference cloud, averaged over the streamline; pass iff mean ≤ `max_mm`.
 pub(crate) fn streamline_passes_hausdorff(

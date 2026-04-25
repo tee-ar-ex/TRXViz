@@ -23,6 +23,8 @@ pub fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
         WorkflowJobKind::BoundaryField => "boundary field",
         WorkflowJobKind::DipyTractography => "dipy tractography",
         WorkflowJobKind::YehTractography => "yeh tractography",
+        WorkflowJobKind::PrepareHausdorffPlan => "Hausdorff plan",
+        WorkflowJobKind::PreparePyafqPlan => "pyAFQ plan",
     }
 }
 
@@ -149,6 +151,57 @@ pub fn run_workflow_job(
         WorkflowJobPayload::YehTractography { plan } => {
             let flow = super::cpu_yeh::run_cpu_yeh(&plan, &cancel)?;
             Ok(WorkflowJobOutput::YehTractography { flow })
+        }
+        WorkflowJobPayload::PrepareHausdorffPlan(job) => {
+            let outputs = crate::gpu::plan_prep::hausdorff::build_hausdorff_plan(
+                &job.odx_scene,
+                &job.gpu_data,
+                &job.selected,
+                job.label,
+                &job.params,
+            );
+            let summary = format!(
+                "{}: Otsu = {:.4} ({} samples, {})",
+                job.fixel_otsu.metric_name,
+                job.fixel_otsu.threshold,
+                job.fixel_otsu.n_values,
+                match job.fixel_otsu.scope {
+                    odx_rs::qc::OtsuScope::AllFixels => "all fixels",
+                    odx_rs::qc::OtsuScope::PrimaryPeak => "primary peak",
+                }
+            );
+            Ok(WorkflowJobOutput::PrepareHausdorffPlan {
+                plan: Arc::new(outputs.plan),
+                seed_mask: outputs.seed_mask,
+                limiting_mask: outputs.limiting_mask,
+                no_end_mask: outputs.no_end_mask,
+                summary,
+            })
+        }
+        WorkflowJobPayload::PreparePyafqPlan(job) => {
+            let outputs = crate::gpu::plan_prep::pyafq::build_pyafq_plan(
+                &job.working_dir,
+                job.bundle_spec,
+                job.label,
+                &job.params,
+            )
+            .map_err(|e| WorkflowError::Evaluation(format!("Prepare pyAFQ Plan: {e}")))?;
+            let summary = format!(
+                "{}: {} include / {} exclude / {} endpoint / probmap {}",
+                job.bundle_spec.display_name,
+                outputs.n_include,
+                outputs.n_exclude,
+                outputs.has_start as usize + outputs.has_end as usize,
+                if outputs.has_prob_map { "loaded" } else { "absent" },
+            );
+            Ok(WorkflowJobOutput::PreparePyafqPlan {
+                plan: Arc::new(outputs.plan),
+                include_mask: outputs.include_union,
+                exclude_mask: outputs.exclude_union,
+                start_mask: outputs.start_mask,
+                end_mask: outputs.end_mask,
+                summary,
+            })
         }
         WorkflowJobPayload::BoundaryField { plan } => {
             let subset = materialize_flow_gpu(plan.flow);

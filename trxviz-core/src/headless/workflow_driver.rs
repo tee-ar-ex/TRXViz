@@ -368,5 +368,47 @@ fn apply_job_result(
             );
             mark_expensive_success(record, fingerprint, "yeh tractography".to_string());
         }
+        WorkflowJobOutput::PrepareHausdorffPlan {
+            plan,
+            seed_mask,
+            limiting_mask,
+            no_end_mask,
+            summary,
+        } => {
+            cache.hausdorff_plan_cache.insert(
+                node_uuid,
+                crate::workflow::CachedHausdorffPlan {
+                    fingerprint,
+                    plan,
+                    seed_mask,
+                    limiting_mask,
+                    no_end_mask,
+                    summary: summary.clone(),
+                },
+            );
+            mark_expensive_success(record, fingerprint, summary);
+        }
+        WorkflowJobOutput::PreparePyafqPlan {
+            plan,
+            include_mask,
+            exclude_mask,
+            start_mask,
+            end_mask,
+            summary,
+        } => {
+            cache.pyafq_plan_cache.insert(
+                node_uuid,
+                crate::workflow::CachedPyafqPlan {
+                    fingerprint,
+                    plan,
+                    include_mask,
+                    exclude_mask,
+                    start_mask,
+                    end_mask,
+                    summary: summary.clone(),
+                },
+            );
+            mark_expensive_success(record, fingerprint, summary);
+        }
     }
 }

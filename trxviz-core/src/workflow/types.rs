@@ -688,6 +688,7 @@ pub struct WorkflowExecutionCache {
     pub yeh_tractography_results: HashMap<WorkflowNodeUuid, CachedTractographyResult>,
     pub voxel_mask_mesh_cache: HashMap<WorkflowNodeUuid, CachedVoxelMaskMesh>,
     pub hausdorff_plan_cache: HashMap<WorkflowNodeUuid, CachedHausdorffPlan>,
+    pub pyafq_plan_cache: HashMap<WorkflowNodeUuid, CachedPyafqPlan>,
     pub tip_prune_cache: HashMap<WorkflowNodeUuid, CachedTipPrune>,
     pub purifibre_cache: HashMap<WorkflowNodeUuid, CachedPurifibre>,
     /// `StreamlineSourceOp` evaluates on every refresh; without
@@ -706,6 +707,22 @@ pub struct CachedHausdorffPlan {
     pub seed_mask: Arc<VoxelMask>,
     pub limiting_mask: Arc<VoxelMask>,
     pub no_end_mask: Arc<VoxelMask>,
+    pub summary: String,
+}
+
+/// pyAFQ plan cache entry. Mirrors `CachedHausdorffPlan` but exposes
+/// per-role union masks (`include`, `exclude`, `start`, `end`) for the
+/// VoxelMaskDisplay outputs. The plan's `roi_masks` field still carries
+/// the *individual* dilated waypoints — the union mask here is for
+/// visualization only.
+#[derive(Clone)]
+pub struct CachedPyafqPlan {
+    pub fingerprint: u64,
+    pub plan: Arc<TrackingPlan>,
+    pub include_mask: Arc<VoxelMask>,
+    pub exclude_mask: Arc<VoxelMask>,
+    pub start_mask: Arc<VoxelMask>,
+    pub end_mask: Arc<VoxelMask>,
     pub summary: String,
 }
 
@@ -794,6 +811,8 @@ pub struct SceneFramePlan {
     pub dipy_tractography_plans: Vec<DipyTractographyPlan>,
     pub yeh_tractography_plans: Vec<YehTractographyPlan>,
     pub voxel_mask_mesh_draws: Vec<VoxelMaskMeshDrawPlan>,
+    pub hausdorff_plan_jobs: Vec<HausdorffPlanJob>,
+    pub pyafq_plan_jobs: Vec<PyafqPlanJob>,
 }
 
 #[derive(Clone)]
@@ -876,6 +895,8 @@ impl Default for SceneFramePlan {
             dipy_tractography_plans: Vec::new(),
             yeh_tractography_plans: Vec::new(),
             voxel_mask_mesh_draws: Vec::new(),
+            hausdorff_plan_jobs: Vec::new(),
+            pyafq_plan_jobs: Vec::new(),
         }
     }
 }
@@ -1153,13 +1174,37 @@ pub(crate) enum WorkflowValue {
 /// A voxel-space binary mask. Replaces the earlier point-cloud `SeedRoi`; now
 /// fills every region role in a `TrackingPlan` (seed / limiting / roa / term /
 /// end / no_end).
-#[derive(Clone, Debug)]
+#[derive(Debug, Default)]
 pub struct VoxelMask {
     pub dims: [u32; 3],
     pub voxel_to_ras: glam::Mat4,
     /// Row-major over (x, y, z): linear index = x + dims.x * (y + dims.y * z).
     /// One byte per voxel; non-zero = inside the mask.
     pub data: Vec<u8>,
+    /// Lazily-computed RAS+mm centers of every non-zero voxel. Filled on
+    /// first call to `nonzero_voxel_centers_ras` so per-attempt seed
+    /// generation in cpu_dipy / gpu/dipy doesn't re-scan O(V) voxels each
+    /// tractography re-run. Public so existing `VoxelMask { dims, … }`
+    /// struct-literal constructions stay valid; pass
+    /// `std::sync::OnceLock::new()` (the `Default`) to leave the cache
+    /// empty.
+    #[doc(hidden)]
+    pub nonzero_centers: std::sync::OnceLock<Arc<Vec<[f32; 3]>>>,
+}
+
+impl Clone for VoxelMask {
+    fn clone(&self) -> Self {
+        Self {
+            dims: self.dims,
+            voxel_to_ras: self.voxel_to_ras,
+            data: self.data.clone(),
+            // The cache is intentionally not shared across clones — the
+            // common case is that the same mask is wrapped in `Arc<VoxelMask>`
+            // and clones are vanishingly rare, so an empty cache here is
+            // simpler than threading shared interior state through Clone.
+            nonzero_centers: std::sync::OnceLock::new(),
+        }
+    }
 }
 
 impl VoxelMask {
@@ -1176,24 +1221,33 @@ impl VoxelMask {
         self.data.iter().all(|&b| b == 0)
     }
 
-    /// Enumerate RAS+mm centers of every non-zero voxel.
+    /// Enumerate RAS+mm centers of every non-zero voxel. Memoized per mask:
+    /// the first call walks the volume and stores the result; subsequent
+    /// calls return a clone of the cached `Arc`. Each tractography re-run
+    /// reuses the same mask Arc, so seed generation no longer pays an O(V)
+    /// scan per parameter sweep.
     pub fn nonzero_voxel_centers_ras(&self) -> Vec<[f32; 3]> {
-        let [nx, ny, nz] = self.dims;
-        let mut out = Vec::new();
-        for z in 0..nz {
-            for y in 0..ny {
-                for x in 0..nx {
-                    let idx = self.lin_idx(x, y, z);
-                    if self.data[idx] != 0 {
-                        let p = self
-                            .voxel_to_ras
-                            .transform_point3(glam::Vec3::new(x as f32, y as f32, z as f32));
-                        out.push([p.x, p.y, p.z]);
+        self.nonzero_centers
+            .get_or_init(|| {
+                let [nx, ny, nz] = self.dims;
+                let mut out = Vec::new();
+                for z in 0..nz {
+                    for y in 0..ny {
+                        for x in 0..nx {
+                            let idx = self.lin_idx(x, y, z);
+                            if self.data[idx] != 0 {
+                                let p = self.voxel_to_ras.transform_point3(glam::Vec3::new(
+                                    x as f32, y as f32, z as f32,
+                                ));
+                                out.push([p.x, p.y, p.z]);
+                            }
+                        }
                     }
                 }
-            }
-        }
-        out
+                Arc::new(out)
+            })
+            .as_ref()
+            .clone()
     }
 }
 
@@ -1245,6 +1299,14 @@ pub enum PostFilter {
     Hausdorff {
         reference_points_ras: Arc<Vec<[f32; 3]>>,
         max_mm: f32,
+    },
+    /// pyAFQ-style probabilistic-atlas filter: reject if the fraction of
+    /// streamline points that fall inside `prob_map` is below `threshold`.
+    /// `prob_map` is a binarized version of pyAFQ's `*_probseg.nii.gz`
+    /// (any non-zero voxel = inside the bundle's spatial prior).
+    PyAFQProb {
+        prob_map: Arc<VoxelMask>,
+        threshold: f32,
     },
 }
 
@@ -1471,6 +1533,8 @@ pub enum WorkflowJobKind {
     BoundaryField,
     DipyTractography,
     YehTractography,
+    PrepareHausdorffPlan,
+    PreparePyafqPlan,
 }
 
 #[derive(Clone)]
@@ -1495,6 +1559,8 @@ pub enum WorkflowJobPayload {
     YehTractography {
         plan: YehTractographyPlan,
     },
+    PrepareHausdorffPlan(HausdorffPlanJob),
+    PreparePyafqPlan(PyafqPlanJob),
 }
 
 #[derive(Clone)]
@@ -1518,6 +1584,46 @@ pub enum WorkflowJobOutput {
     YehTractography {
         flow: StreamlineFlow,
     },
+    PrepareHausdorffPlan {
+        plan: Arc<TrackingPlan>,
+        seed_mask: Arc<VoxelMask>,
+        limiting_mask: Arc<VoxelMask>,
+        no_end_mask: Arc<VoxelMask>,
+        summary: String,
+    },
+    PreparePyafqPlan {
+        plan: Arc<TrackingPlan>,
+        include_mask: Arc<VoxelMask>,
+        exclude_mask: Arc<VoxelMask>,
+        start_mask: Arc<VoxelMask>,
+        end_mask: Arc<VoxelMask>,
+        summary: String,
+    },
+}
+
+/// All inputs needed to run a Hausdorff plan build off-thread. Cloned by the
+/// op's `evaluate()` so the GUI thread doesn't block on EDT/voxelization.
+#[derive(Clone)]
+pub struct HausdorffPlanJob {
+    pub node_uuid: WorkflowNodeUuid,
+    pub fingerprint: u64,
+    pub label: String,
+    pub odx_scene: Arc<crate::data::odx_data::OdxScene>,
+    pub gpu_data: Arc<crate::data::trx_data::TrxGpuData>,
+    pub selected: Vec<u32>,
+    pub params: crate::gpu::plan_prep::hausdorff::HausdorffPlanParams,
+    pub fixel_otsu: odx_rs::qc::FixelOtsu,
+}
+
+/// All inputs needed to run a pyAFQ plan build off-thread.
+#[derive(Clone)]
+pub struct PyafqPlanJob {
+    pub node_uuid: WorkflowNodeUuid,
+    pub fingerprint: u64,
+    pub label: String,
+    pub working_dir: std::path::PathBuf,
+    pub bundle_spec: &'static crate::workflow::ops::pyafq_bundles::PyafqBundleSpec,
+    pub params: crate::gpu::plan_prep::pyafq::PyafqPlanParams,
 }
 
 pub enum WorkflowJobMessage {

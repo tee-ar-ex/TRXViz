@@ -4,3 +4,5 @@
 //! and are invoked by the `Prepare*Plan` workflow ops.
 
 pub mod hausdorff;
+pub(crate) mod mask_dilate;
+pub mod pyafq;

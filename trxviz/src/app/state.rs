@@ -820,6 +820,11 @@ pub struct WorkflowState {
     pub uploaded_odx_glyph_resource_key: Option<OdxGlyphResourceKey>,
     pub uploaded_fixel_3d_fingerprint: u64,
     pub uploaded_fixel_2d_fingerprint: u64,
+    /// Last-uploaded mesh fingerprint per voxel-mask draw_id. Lets the
+    /// per-frame upload loop skip `set_bundle_meshes` when the cached
+    /// mesh's fingerprint hasn't changed — pyAFQ Plan exposes 4–6 of
+    /// these at once and re-uploading every frame stalls the viewport.
+    pub uploaded_voxel_mask_fingerprints: HashMap<FileId, u64>,
     pub measured_node_sizes: HashMap<WorkflowNodeUuid, NodeSize>,
     pub layout_reflow_pending: bool,
     pub layout_reflow_nodes: BTreeSet<WorkflowNodeUuid>,
@@ -873,6 +878,7 @@ impl WorkflowState {
             uploaded_odx_glyph_resource_key: None,
             uploaded_fixel_3d_fingerprint: 0,
             uploaded_fixel_2d_fingerprint: 0,
+            uploaded_voxel_mask_fingerprints: HashMap::new(),
             measured_node_sizes: HashMap::new(),
             layout_reflow_pending: false,
             layout_reflow_nodes: BTreeSet::new(),

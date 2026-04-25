@@ -16,7 +16,7 @@ mod jobs;
 mod layout;
 pub mod methods;
 mod op;
-mod ops;
+pub(crate) mod ops;
 pub mod port_labels;
 mod project_io;
 pub(super) mod purifibre;
@@ -57,6 +57,7 @@ pub use types::*;
 
 pub use op::{ContentHash, Diagnostic, DiagnosticSeverity, FingerprintCtx, ValidateCtx};
 pub use ops::fingerprint as fingerprint_op;
+pub use ops::pyafq_bundles;
 pub use ops::validate as validate_op;
 pub use tracking::CancelFlag;
 
@@ -81,7 +82,8 @@ pub use ops::{
     LimitStreamlinesOp, MergeOp, OdfGlyphRendererOp, OdxFixelScalarSelectOp, OdxSourceOp,
     OdxVolumeSelectOp, ParcelCropOp, ParcelEndOp, ParcelRoaOp, ParcelRoiOp, ParcelSelectOp,
     ParcelSurfaceBuildOp, ParcellationDisplayOp, ParcellationSourceOp, PrepareHausdorffPlanOp,
-    PrepareSimplePlanOp, PurifibreOp, RandomSubsetOp, RemoveDuplicatesOp, RoiFromParcelOp,
+    PreparePyafqPlanOp, PrepareSimplePlanOp, PurifibreOp, RandomSubsetOp, RemoveDuplicatesOp,
+    RoiFromParcelOp,
     RoiFromShapeOp, RoiFromVolumeOp, RoiShape, SaveStreamlinesOp, SphereQueryOp,
     StreamlineDirectionFieldOp, StreamlineDisplayOp, StreamlineSourceOp, SurfaceDepthQueryOp,
     SurfaceDisplayOp, SurfaceOverlayStackOp, SurfaceProjectionDensityOp,

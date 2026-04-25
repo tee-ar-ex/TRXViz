@@ -79,6 +79,7 @@ impl WorkflowOp for RoiFromParcelOp {
                 dims: [nx as u32, ny as u32, nz as u32],
                 voxel_to_ras: vol.voxel_to_ras,
                 data,
+                ..Default::default()
             }))
             .into(),
         ])
@@ -155,6 +156,7 @@ impl WorkflowOp for RoiFromVolumeOp {
                 dims: [nx as u32, ny as u32, nz as u32],
                 voxel_to_ras: vol.voxel_to_ras,
                 data,
+                ..Default::default()
             }))
             .into(),
         ])
@@ -266,6 +268,7 @@ impl WorkflowOp for RoiFromShapeOp {
                 dims,
                 voxel_to_ras,
                 data,
+                ..Default::default()
             }))
             .into(),
         ])

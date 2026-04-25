@@ -716,6 +716,13 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
+                PreparePyafqPlanOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
                 PrepareSimplePlanOp::default().into(),
                 measured_node_sizes,
             );
@@ -851,6 +858,7 @@ fn add_node_button(
     measured_node_sizes: &HashMap<WorkflowNodeUuid, NodeSize>,
 ) {
     if ui.button(op.title()).clicked() {
+        let op = auto_color_op(op, snarl);
         let node = WorkflowNode {
             uuid: WorkflowNodeUuid(0),
             label: op.title().to_string(),
@@ -859,6 +867,53 @@ fn add_node_button(
         let insert_pos = find_nearest_free_node_position(snarl, pos, &node, measured_node_sizes);
         snarl.insert_node(insert_pos, node);
         ui.close();
+    }
+}
+
+/// Distinct ROI colors so multiple `VoxelMaskDisplay` nodes don't all show
+/// up in the same orange. Cycles through a 12-entry qualitative palette
+/// indexed by the count of existing `VoxelMaskDisplay` nodes — covers a
+/// typical pyAFQ Plan layout (4 mask outputs × 1–2 plan nodes) with no
+/// collisions and degrades gracefully past 12.
+const VOXEL_MASK_PALETTE: &[[f32; 4]] = &[
+    [0.85, 0.55, 0.25, 1.0],
+    [0.30, 0.55, 0.85, 1.0],
+    [0.45, 0.75, 0.40, 1.0],
+    [0.85, 0.30, 0.30, 1.0],
+    [0.65, 0.40, 0.75, 1.0],
+    [0.60, 0.45, 0.30, 1.0],
+    [0.85, 0.55, 0.75, 1.0],
+    [0.55, 0.55, 0.55, 1.0],
+    [0.90, 0.80, 0.30, 1.0],
+    [0.30, 0.75, 0.75, 1.0],
+    [0.70, 0.85, 0.30, 1.0],
+    [0.85, 0.30, 0.70, 1.0],
+];
+
+/// If `op` is a `VoxelMaskDisplay` with the default color, replace the
+/// color with the next palette entry based on how many such nodes already
+/// exist. Anything else passes through unchanged.
+fn auto_color_op(op: WorkflowNodeKind, snarl: &Snarl<WorkflowNode>) -> WorkflowNodeKind {
+    match op {
+        WorkflowNodeKind::VoxelMaskDisplay {
+            color: _,
+            opacity,
+            smooth_sigma,
+            min_component_volume_mm3,
+        } => {
+            let existing = snarl
+                .node_ids()
+                .filter(|(_, node)| matches!(node.op, WorkflowNodeKind::VoxelMaskDisplay { .. }))
+                .count();
+            let color = VOXEL_MASK_PALETTE[existing % VOXEL_MASK_PALETTE.len()];
+            WorkflowNodeKind::VoxelMaskDisplay {
+                color,
+                opacity,
+                smooth_sigma,
+                min_component_volume_mm3,
+            }
+        }
+        other => other,
     }
 }
 

@@ -307,5 +307,6 @@ fn union_masks(a: &VoxelMask, b: &VoxelMask) -> VoxelMask {
         dims: a.dims,
         voxel_to_ras: a.voxel_to_ras,
         data,
+        ..Default::default()
     }
 }

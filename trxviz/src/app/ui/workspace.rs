@@ -157,7 +157,13 @@ impl super::super::TrxVizApp {
 
     fn show_graph_pane(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui.button("Run Expensive Nodes").clicked() {
+            let run_shortcut = egui::KeyboardShortcut::new(
+                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                egui::Key::U,
+            );
+            let run_button = egui::Button::new("Run Expensive Nodes")
+                .shortcut_text(ui.ctx().format_shortcut(&run_shortcut));
+            if ui.add(run_button).clicked() {
                 self.workflow.run_expensive_requested = true;
                 ui.ctx().request_repaint();
             }
