@@ -723,6 +723,10 @@ pub struct CachedPyafqPlan {
     pub exclude_mask: Arc<VoxelMask>,
     pub start_mask: Arc<VoxelMask>,
     pub end_mask: Arc<VoxelMask>,
+    /// Continuous probability map output from `*_probseg.nii.gz`. None
+    /// when the bundle lacks a prob map. Surfaces on the
+    /// `PreparePyafqPlan` op's `VolumeScalars` output port.
+    pub prob_map: Option<Arc<VolumeScalars>>,
     pub summary: String,
 }
 
@@ -788,7 +792,6 @@ pub struct SceneFramePlan {
     pub volume_draws: Vec<VolumeDrawPlan>,
     pub surface_draws: Vec<SurfaceDrawPlan>,
     pub stage_surface_draws: Vec<SurfaceDrawPlan>,
-    pub volume_scalar_draws: Vec<VolumeScalarDrawPlan>,
     pub bundle_surface_plans: Vec<BundleSurfacePlan>,
     pub bundle_draws: Vec<BundleDrawPlan>,
     pub parcellation_draws: Vec<ParcellationDrawPlan>,
@@ -815,6 +818,38 @@ pub struct SceneFramePlan {
     pub pyafq_plan_jobs: Vec<PyafqPlanJob>,
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+pub enum VoxelMaskRenderStyle {
+    /// Render every "on" voxel as a literal cube face. No smoothing, no
+    /// marching cubes — what you see is exactly the mask data on disk.
+    /// Default for new nodes; existing serialized workflows that omit the
+    /// `style` field upgrade to this on load.
+    #[default]
+    VoxelAccurate,
+    /// Gaussian-smoothed iso-surface via marching cubes plus Taubin
+    /// smoothing. Stylized look originally designed for outlining messy
+    /// streamline density volumes.
+    SmoothMesh,
+}
+
+/// 2D slice-overlay rendering mode for voxel-accurate masks. Doesn't
+/// affect the 3D mesh, so it isn't part of the mesh fingerprint.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+pub enum VoxelMaskSliceMode {
+    /// Fill each voxel cell that the slice plane intersects.
+    Filled,
+    /// Outline only the perimeter of the masked region in the slice
+    /// (edges between an on-voxel cell and an off-voxel cell are drawn;
+    /// edges between two on-voxel cells are skipped). Composes cleanly
+    /// when multiple masks overlap.
+    #[default]
+    Outline,
+}
+
 #[derive(Clone)]
 pub struct VoxelMaskMeshDrawPlan {
     pub node_uuid: WorkflowNodeUuid,
@@ -823,6 +858,14 @@ pub struct VoxelMaskMeshDrawPlan {
     pub fingerprint: u64,
     pub color: [f32; 4],
     pub opacity: f32,
+    pub style: VoxelMaskRenderStyle,
+    /// 2D-only — render mode for the slice overlay when `style ==
+    /// VoxelAccurate`. Does not affect the 3D mesh.
+    pub slice_mode: VoxelMaskSliceMode,
+    /// The raw mask, kept on the draw plan so the 2D overlay path can
+    /// look up dims / `voxel_to_ras` / data without a separate cache
+    /// lookup keyed off node UUID. Cheap to clone (it's an `Arc`).
+    pub voxel_mask: Arc<VoxelMask>,
 }
 
 #[derive(Clone)]
@@ -882,7 +925,6 @@ impl Default for SceneFramePlan {
             volume_draws: Vec::new(),
             surface_draws: Vec::new(),
             stage_surface_draws: Vec::new(),
-            volume_scalar_draws: Vec::new(),
             bundle_surface_plans: Vec::new(),
             bundle_draws: Vec::new(),
             boundary_fields_in_use: std::collections::HashSet::new(),
@@ -990,9 +1032,169 @@ pub struct BoundaryGlyphDrawPlan {
     pub min_contacts: u32,
 }
 
-#[derive(Clone, Copy)]
+/// Where a `VolumeDisplayOp` gets its voxel data from. `File` references a
+/// loaded NIfTI on disk (or an ODX-DPV materialization keyed in
+/// `execution_cache.odx_dpv_materializations`). `InMemory` carries the
+/// `VolumeScalars` value produced upstream by another op (e.g. the pyAFQ
+/// probability map output) along with a content-derived `handle` used to
+/// key cached GPU slice resources — same handle ⇒ same data ⇒ no
+/// re-upload, even though the value gets cloned through the workflow on
+/// every evaluation.
+#[derive(Clone)]
+pub enum VolumeBacking {
+    File(FileId),
+    InMemory {
+        handle: u64,
+        scalars: Arc<VolumeScalars>,
+    },
+    /// A multi-layer composite produced by `VolumeOverlayStackOp`.
+    /// The renderer composes the requested 2D slice on demand from the
+    /// stack's layers; downstream consumers that need scalar voxel
+    /// access reject this variant.
+    Composite {
+        handle: u64,
+        stack: Arc<CompositeVolumeStack>,
+    },
+}
+
+impl VolumeBacking {
+    /// Stable `usize` key for indexing `AllSliceResources.entries`. For
+    /// `File` it's the `FileId` counter; for `InMemory`/`Composite`
+    /// it's a 64-bit content hash. Counter values and random hashes
+    /// coexist in the same `usize` namespace without practical
+    /// collision risk.
+    pub fn slice_key(&self) -> usize {
+        match self {
+            Self::File(id) => *id,
+            Self::InMemory { handle, .. } => *handle as usize,
+            Self::Composite { handle, .. } => *handle as usize,
+        }
+    }
+
+    pub fn from_scalars(scalars: VolumeScalars) -> Self {
+        let handle = volume_scalars_handle(&scalars);
+        Self::InMemory {
+            handle,
+            scalars: Arc::new(scalars),
+        }
+    }
+}
+
+/// Interpolation kernel for resampling a layer onto another grid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Interp {
+    Nearest,
+    Trilinear,
+}
+
+impl Default for Interp {
+    fn default() -> Self {
+        Self::Trilinear
+    }
+}
+
+/// Per-layer config for a `VolumeOverlayStackOp`.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct VolumeOverlayLayerConfig {
+    pub enabled: bool,
+    pub opacity: f32,
+    pub colormap: crate::data::loaded_files::VolumeColormap,
+    pub window_center: f32,
+    pub window_width: f32,
+    pub threshold_min: f32,
+    pub threshold_max: f32,
+    /// Resampling kernel used when this layer's grid differs from the
+    /// stack's base grid. Defaults to `Trilinear`; the op overrides to
+    /// `Nearest` on first eval if the layer's `ScalarKind` is `Label`.
+    pub interpolation: Interp,
+    pub legend_label: String,
+}
+
+impl Default for VolumeOverlayLayerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            opacity: 1.0,
+            colormap: crate::data::loaded_files::VolumeColormap::Grayscale,
+            window_center: 0.5,
+            window_width: 1.0,
+            threshold_min: 0.0,
+            threshold_max: 1.0,
+            interpolation: Interp::Trilinear,
+            legend_label: String::new(),
+        }
+    }
+}
+
+/// Snapshot of a `VolumeOverlayStackOp` evaluation: the base layer's
+/// target grid plus all enabled-or-disabled layers in order. The
+/// renderer composes 2D slices from this on demand.
+#[derive(Clone)]
+pub struct CompositeVolumeStack {
+    /// Target grid (layer 0's dims).
+    pub dims: [usize; 3],
+    /// Target grid (layer 0's voxel-to-RAS).
+    pub voxel_to_ras: glam::Mat4,
+    /// Layer 0 first; subsequent layers carry their own dims/affine
+    /// inside their `VolumeScalars`.
+    pub layers: Vec<(Arc<VolumeScalars>, VolumeOverlayLayerConfig)>,
+}
+
+impl CompositeVolumeStack {
+    /// Content-derived handle: changes whenever the layer set, any
+    /// underlying `VolumeScalars`, or any layer config changes. Used
+    /// to key the GPU composite slice cache.
+    pub fn handle(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.dims.hash(&mut h);
+        for v in self.voxel_to_ras.to_cols_array() {
+            v.to_bits().hash(&mut h);
+        }
+        for (scalars, cfg) in &self.layers {
+            volume_scalars_handle(scalars).hash(&mut h);
+            cfg.enabled.hash(&mut h);
+            cfg.opacity.to_bits().hash(&mut h);
+            cfg.colormap.as_u32().hash(&mut h);
+            cfg.window_center.to_bits().hash(&mut h);
+            cfg.window_width.to_bits().hash(&mut h);
+            cfg.threshold_min.to_bits().hash(&mut h);
+            cfg.threshold_max.to_bits().hash(&mut h);
+            (cfg.interpolation as u8).hash(&mut h);
+            cfg.legend_label.hash(&mut h);
+        }
+        h.finish()
+    }
+}
+
+/// Four pre-allocated layer slots for a fresh `VolumeOverlayStack`.
+/// Mirrors `default_surface_overlay_layers` — fixed count, only layer
+/// 0 enabled by default.
+pub fn default_volume_overlay_layers() -> Vec<VolumeOverlayLayerConfig> {
+    let mut layers = vec![VolumeOverlayLayerConfig::default(); 4];
+    layers[0].enabled = true;
+    layers[0].legend_label = "Base".to_string();
+    layers
+}
+
+fn volume_scalars_handle(s: &VolumeScalars) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    s.dims.hash(&mut h);
+    for v in s.voxel_to_ras.to_cols_array() {
+        v.to_bits().hash(&mut h);
+    }
+    s.values.len().hash(&mut h);
+    let stride = (s.values.len() / 64).max(1);
+    for i in (0..s.values.len()).step_by(stride) {
+        s.values[i].to_bits().hash(&mut h);
+    }
+    h.finish()
+}
+
+#[derive(Clone)]
 pub struct VolumeDrawPlan {
-    pub source_id: FileId,
+    pub source: VolumeBacking,
     pub colormap: VolumeColormap,
     pub opacity: f32,
     pub window_center: f32,
@@ -1153,13 +1355,12 @@ pub(crate) struct ParcelSelection {
 #[derive(Clone)]
 pub(crate) enum WorkflowValue {
     Streamline(StreamlineFlow),
-    Volume(FileId),
+    Volume(VolumeBacking),
     Cifti(FileId),
     Surface(FileId),
     Parcellation(FileId),
     ParcelSelection(ParcelSelection),
     SurfaceScalars(SurfaceScalars),
-    VolumeScalars(VolumeScalars),
     SurfaceAppearance(SurfaceAppearance),
     BundleSurface(BundleSurfacePlan),
     BoundaryField(BoundaryFieldPlan),
@@ -1190,6 +1391,12 @@ pub struct VoxelMask {
     /// empty.
     #[doc(hidden)]
     pub nonzero_centers: std::sync::OnceLock<Arc<Vec<[f32; 3]>>>,
+    /// Lazily-computed list of (i, j, k) indices for every non-zero
+    /// voxel. Used by the voxel-accurate slice overlay so it iterates
+    /// only on-voxels per frame instead of scanning the full volume.
+    /// Same caching pattern as `nonzero_centers`.
+    #[doc(hidden)]
+    pub nonzero_indices: std::sync::OnceLock<Arc<Vec<[u32; 3]>>>,
 }
 
 impl Clone for VoxelMask {
@@ -1203,6 +1410,7 @@ impl Clone for VoxelMask {
             // and clones are vanishingly rare, so an empty cache here is
             // simpler than threading shared interior state through Clone.
             nonzero_centers: std::sync::OnceLock::new(),
+            nonzero_indices: std::sync::OnceLock::new(),
         }
     }
 }
@@ -1226,6 +1434,28 @@ impl VoxelMask {
     /// calls return a clone of the cached `Arc`. Each tractography re-run
     /// reuses the same mask Arc, so seed generation no longer pays an O(V)
     /// scan per parameter sweep.
+    /// Enumerate (i, j, k) indices of every non-zero voxel. Memoized
+    /// per mask. Cheap to clone (returns an `Arc`).
+    pub fn nonzero_voxel_indices(&self) -> Arc<Vec<[u32; 3]>> {
+        self.nonzero_indices
+            .get_or_init(|| {
+                let [nx, ny, nz] = self.dims;
+                let mut out = Vec::new();
+                for z in 0..nz {
+                    for y in 0..ny {
+                        for x in 0..nx {
+                            let idx = self.lin_idx(x, y, z);
+                            if self.data[idx] != 0 {
+                                out.push([x, y, z]);
+                            }
+                        }
+                    }
+                }
+                Arc::new(out)
+            })
+            .clone()
+    }
+
     pub fn nonzero_voxel_centers_ras(&self) -> Vec<[f32; 3]> {
         self.nonzero_centers
             .get_or_init(|| {
@@ -1299,14 +1529,6 @@ pub enum PostFilter {
     Hausdorff {
         reference_points_ras: Arc<Vec<[f32; 3]>>,
         max_mm: f32,
-    },
-    /// pyAFQ-style probabilistic-atlas filter: reject if the fraction of
-    /// streamline points that fall inside `prob_map` is below `threshold`.
-    /// `prob_map` is a binarized version of pyAFQ's `*_probseg.nii.gz`
-    /// (any non-zero voxel = inside the bundle's spatial prior).
-    PyAFQProb {
-        prob_map: Arc<VoxelMask>,
-        threshold: f32,
     },
 }
 
@@ -1597,6 +1819,7 @@ pub enum WorkflowJobOutput {
         exclude_mask: Arc<VoxelMask>,
         start_mask: Arc<VoxelMask>,
         end_mask: Arc<VoxelMask>,
+        prob_map: Option<Arc<VolumeScalars>>,
         summary: String,
     },
 }
@@ -1658,7 +1881,6 @@ pub enum PortKind {
     Parcellation,
     ParcelSelection,
     SurfaceScalars,
-    VolumeScalars,
     SurfaceAppearance,
     BundleSurface,
     BoundaryField,
@@ -1800,7 +2022,7 @@ mod tests {
                 dpv_name: String::new()
             }
             .outputs(),
-            vec![PortKind::Volume, PortKind::VolumeScalars]
+            vec![PortKind::Volume]
         );
     }
 
@@ -1897,12 +2119,4 @@ pub struct SurfaceAppearance {
     pub structure: Option<CiftiStructure>,
     pub vertex_rgba: Vec<[f32; 4]>,
     pub legend_labels: Vec<String>,
-}
-
-#[derive(Clone, Copy)]
-pub struct VolumeScalarDrawPlan {
-    pub dims: [usize; 3],
-    pub voxel_to_ras: [[f32; 4]; 4],
-    pub colormap: VolumeColormap,
-    pub opacity: f32,
 }

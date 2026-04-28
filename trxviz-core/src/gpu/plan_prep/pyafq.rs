@@ -16,9 +16,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::data::cifti::{ScalarKind, ScalarMetadata, VolumeScalars};
 use crate::data::nifti_data::NiftiVolume;
 use crate::workflow::ops::pyafq_bundles::{PyafqBundleSpec, str_to_desc};
-use crate::workflow::{PostFilter, TrackingPlan, VoxelMask};
+use crate::workflow::{TrackingPlan, VoxelMask};
 
 use super::mask_dilate::dilate_mask;
 
@@ -29,7 +30,6 @@ pub struct PyafqPlanParams {
     pub dist_to_waypoint_mm: f32,
     pub dist_to_exclusion_mm: f32,
     pub dist_to_endpoint_mm: f32,
-    pub prob_threshold: f32,
     pub override_min_len_mm: Option<f32>,
     pub override_max_len_mm: Option<f32>,
 }
@@ -54,7 +54,11 @@ pub struct PyafqPlanOutputs {
     pub n_exclude: usize,
     pub has_start: bool,
     pub has_end: bool,
-    pub has_prob_map: bool,
+    /// Continuous f32 probability map loaded from `*_probseg.nii.gz`.
+    /// `None` for bundles that lack a prob map. Downstream nodes can
+    /// connect this to a sampling op (mean-prob-along-streamline as DPS)
+    /// or display it as a scalar volume in the slice viewport.
+    pub prob_map: Option<Arc<VolumeScalars>>,
     /// Resolved file paths for the inspector / debug log.
     pub include_paths: Vec<PathBuf>,
     pub exclude_paths: Vec<PathBuf>,
@@ -392,10 +396,11 @@ pub fn build_pyafq_plan(
         end_masks.push(end_mask.clone());
     }
 
-    // Probability map (binarized at any non-zero voxel — pyAFQ's
-    // `prob_threshold` then filters by the *fraction* of streamline points
-    // landing inside, see `streamline_passes_pyafq_prob`).
-    let (prob_post_filter, has_prob_map) = match &files.prob_map {
+    // Probability map kept as a continuous-valued `VolumeScalars` so it can
+    // be sampled along streamlines (mean-prob-along-streamline → DPS) and
+    // displayed in the slice viewport. Filtering is no longer baked into
+    // the tracking plan — downstream nodes apply it explicitly.
+    let prob_map = match &files.prob_map {
         Some(p) => {
             let vol = NiftiVolume::load(p).map_err(|source| PyafqPlanError::Nifti {
                 path: p.clone(),
@@ -407,28 +412,25 @@ pub fn build_pyafq_plan(
                     [vol.dims[0] as u32, vol.dims[1] as u32, vol.dims[2] as u32],
                 ));
             }
-            // NiftiVolume normalizes to [0,1]; any voxel > 0 marks the
-            // bundle's probabilistic support region.
-            let prob_data: Vec<u8> = vol
-                .data
-                .iter()
-                .map(|&v| if v > 0.0 { 1u8 } else { 0u8 })
-                .collect();
-            let prob_mask = Arc::new(VoxelMask {
-                dims,
-                voxel_to_ras,
-                data: prob_data,
-                ..Default::default()
-            });
-            (
-                Some(PostFilter::PyAFQProb {
-                    prob_map: prob_mask,
-                    threshold: params.prob_threshold,
-                }),
-                true,
-            )
+            Some(Arc::new(VolumeScalars {
+                dims: [
+                    vol.dims[0] as usize,
+                    vol.dims[1] as usize,
+                    vol.dims[2] as usize,
+                ],
+                voxel_to_ras: vol.voxel_to_ras,
+                values: vol.data.clone(),
+                kind: ScalarKind::Continuous,
+                metadata: ScalarMetadata {
+                    map_name: format!("{} probability", bundle.display_name),
+                    suggested_range: Some((0.0, 1.0)),
+                    series_index: None,
+                    series_value: None,
+                    label_table: Vec::new(),
+                },
+            }))
         }
-        None => (None, false),
+        None => None,
     };
 
     let min_len_mm = params.override_min_len_mm.or(bundle.min_len_mm);
@@ -445,7 +447,7 @@ pub fn build_pyafq_plan(
         roi_masks,
         end_masks,
         no_end_mask: None,
-        post_filter: prob_post_filter,
+        post_filter: None,
         min_len_mm,
         max_len_mm,
         max_angle_deg: None,
@@ -466,7 +468,7 @@ pub fn build_pyafq_plan(
         n_exclude: files.excludes.len(),
         has_start,
         has_end,
-        has_prob_map,
+        prob_map,
         include_paths: files.includes,
         exclude_paths: files.excludes,
         start_path: files.start,
@@ -560,7 +562,7 @@ pub fn scan_available_bundles(
 /// Scan `dir` for any `.nii.gz` filenames containing a `_space-{X}_` token
 /// and return the set of `X` values, sorted. Used to give a useful error
 /// when the user's `to_space` doesn't match what's on disk.
-fn detect_spaces(dir: &Path) -> Vec<String> {
+pub(crate) fn detect_spaces(dir: &Path) -> Vec<String> {
     let mut paths: Vec<PathBuf> = Vec::new();
     let _ = walk_collect(dir, &mut paths);
     let mut found: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -583,6 +585,52 @@ fn detect_spaces(dir: &Path) -> Vec<String> {
         }
     }
     found.into_iter().collect()
+}
+
+/// Pick the most likely `to_space` for a pyAFQ derivatives directory.
+/// Counts occurrences of each `_space-{X}_desc-` token across `.nii.gz`
+/// filenames, preferring tokens that appear on `_mask.nii.gz` or
+/// `_probseg.nii.gz` files (those are ROI / probmap outputs — the actual
+/// targets) over generic preprocessed images. Returns `None` when the
+/// directory has no recognizable space-tagged files.
+pub fn auto_pick_to_space(dir: &Path) -> Option<String> {
+    use std::collections::HashMap;
+    let mut paths: Vec<PathBuf> = Vec::new();
+    let _ = walk_collect(dir, &mut paths);
+    let mut roi_counts: HashMap<String, usize> = HashMap::new();
+    let mut any_counts: HashMap<String, usize> = HashMap::new();
+    for path in &paths {
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !name.ends_with(".nii.gz") {
+            continue;
+        }
+        let Some(start) = name.find("_space-") else {
+            continue;
+        };
+        let rest = &name[start + "_space-".len()..];
+        let end = rest.find('_').unwrap_or(rest.len());
+        let token = &rest[..end];
+        if token.is_empty() {
+            continue;
+        }
+        let after_token = &rest[end..];
+        if !after_token.starts_with("_desc-") {
+            continue;
+        }
+        *any_counts.entry(token.to_string()).or_default() += 1;
+        if name.ends_with("_mask.nii.gz") || name.contains("_probseg") {
+            *roi_counts.entry(token.to_string()).or_default() += 1;
+        }
+    }
+    let pick = |counts: &HashMap<String, usize>| -> Option<String> {
+        counts
+            .iter()
+            .max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0)))
+            .map(|(k, _)| k.clone())
+    };
+    pick(&roi_counts).or_else(|| pick(&any_counts))
 }
 
 fn min_voxel_size_mm(voxel_to_ras: &glam::Mat4) -> f32 {
@@ -689,6 +737,94 @@ mod tests {
                 "{name}: expected ≥1 include from HBN data",
             );
         }
+    }
+
+    /// Modern pyAFQ writes SLF I, II, and III as separate bundles whose
+    /// `str_to_desc` names are prefixes of one another
+    /// (`LeftSuperiorLongitudinalI` ⊂ `...II` ⊂ `...III`). Verify each
+    /// bundle's discovery picks up exactly its own files — no
+    /// cross-contamination when all three coexist on disk.
+    #[test]
+    fn slf_subdivisions_no_substring_collision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let roi_dir = tmp.path().join("ROIs");
+        fs::create_dir_all(&roi_dir).unwrap();
+        let mut expected_per_desc: std::collections::HashMap<&str, Vec<String>> =
+            std::collections::HashMap::new();
+        for desc in [
+            "LeftSuperiorLongitudinalI",
+            "LeftSuperiorLongitudinalII",
+            "LeftSuperiorLongitudinalIII",
+        ] {
+            let base = format!("sub-X_ses-01_space-T1w_desc-{desc}");
+            let mut written = Vec::new();
+            for suffix in [
+                "Include0_mask.nii.gz",
+                "Include1_mask.nii.gz",
+                "Exclude0_mask.nii.gz",
+                "Start_mask.nii.gz",
+            ] {
+                let name = format!("{base}{suffix}");
+                touch(&roi_dir, &name);
+                written.push(name);
+            }
+            expected_per_desc.insert(desc, written);
+        }
+
+        for (display, expected_desc) in [
+            ("Left Superior Longitudinal I", "LeftSuperiorLongitudinalI"),
+            ("Left Superior Longitudinal II", "LeftSuperiorLongitudinalII"),
+            (
+                "Left Superior Longitudinal III",
+                "LeftSuperiorLongitudinalIII",
+            ),
+        ] {
+            let bundle = lookup(display).expect("bundle in catalog");
+            let files = discover_bundle_files(tmp.path(), bundle, "T1w").unwrap();
+            assert_eq!(files.includes.len(), 2, "{display}: include count");
+            assert_eq!(files.excludes.len(), 1, "{display}: exclude count");
+            assert!(files.start.is_some(), "{display}: start present");
+            assert!(files.end.is_none(), "{display}: end absent");
+
+            // Every discovered file must be one this bundle wrote — never
+            // a sibling subdivision's file.
+            let expected = &expected_per_desc[expected_desc];
+            for path in files
+                .includes
+                .iter()
+                .chain(files.excludes.iter())
+                .chain(files.start.iter())
+            {
+                let name = path.file_name().unwrap().to_str().unwrap().to_string();
+                assert!(
+                    expected.contains(&name),
+                    "{display}: discovered {name} which doesn't belong to {expected_desc}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn auto_pick_to_space_prefers_mask_bearing_token() {
+        let tmp = tempfile::tempdir().unwrap();
+        let roi_dir = tmp.path().join("ROIs");
+        fs::create_dir_all(&roi_dir).unwrap();
+        // 3 mask files in T1w space, 1 b0 reference in mni space.
+        touch(
+            &roi_dir,
+            "sub-X_space-T1w_desc-LeftCorticospinalInclude0_mask.nii.gz",
+        );
+        touch(
+            &roi_dir,
+            "sub-X_space-T1w_desc-LeftCorticospinalInclude1_mask.nii.gz",
+        );
+        touch(
+            &roi_dir,
+            "sub-X_space-T1w_desc-LeftCorticospinal_probseg.nii.gz",
+        );
+        touch(tmp.path(), "sub-X_space-mni_b0ref.nii.gz");
+
+        assert_eq!(auto_pick_to_space(tmp.path()).as_deref(), Some("T1w"));
     }
 
     #[test]

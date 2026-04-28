@@ -192,7 +192,7 @@ pub fn run_workflow_job(
                 outputs.n_include,
                 outputs.n_exclude,
                 outputs.has_start as usize + outputs.has_end as usize,
-                if outputs.has_prob_map {
+                if outputs.prob_map.is_some() {
                     "loaded"
                 } else {
                     "absent"
@@ -204,6 +204,7 @@ pub fn run_workflow_job(
                 exclude_mask: outputs.exclude_union,
                 start_mask: outputs.start_mask,
                 end_mask: outputs.end_mask,
+                prob_map: outputs.prob_map,
                 summary,
             })
         }

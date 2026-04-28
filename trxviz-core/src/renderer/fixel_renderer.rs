@@ -33,6 +33,7 @@ struct FixelUniforms {
     post_params: [f32; 4],    // [160..176]
     color_params: [f32; 4],   // [176..192] x=colormap, y=scalar_min, z=scalar_max, w=reserved
     opacity_gate: [f32; 4],   // [192..208] x=range_min, y=range_max, z=below, w=above
+    style_params: [f32; 4],   // [208..224] x=directional∈[0,1] (1 ⇒ half-arrow), yzw=reserved
 }
 
 /// Unit quad: 4 vertices, 2 triangles.
@@ -88,6 +89,9 @@ impl FixelResources {
             color_params: [0.0, 0.0, 1.0, 0.0],
             // Default opacity gate is pass-through (every scalar → 1.0).
             opacity_gate: [0.0, 0.0, 1.0, 1.0],
+            // Default to bidirectional rendering; scenes with asymmetric SH
+            // (`SH_FULL_BASIS=true`) flip this on via `update_directional`.
+            style_params: [0.0, 0.0, 0.0, 0.0],
         };
 
         let viewports =
@@ -246,8 +250,25 @@ impl FixelResources {
             ],
             color_params: [0.0, 0.0, 1.0, 0.0],
             opacity_gate,
+            // `update_uniforms` rewrites the whole uniform block; preserve
+            // the bidirectional default. Callers that need directional
+            // half-arrows (asymmetric ODF scenes) call
+            // `update_directional` *after* this.
+            style_params: [0.0, 0.0, 0.0, 0.0],
         };
         self.viewports.update(queue, viewport, &uniforms);
+    }
+
+    /// Toggle directional rendering. `directional = 1.0` draws each fixel
+    /// as a half-arrow starting at the voxel centre and pointing along
+    /// the peak; `0.0` reverts to the bidirectional line through the
+    /// voxel centre (the default).
+    pub fn update_directional(&self, queue: &wgpu::Queue, viewport: usize, directional: f32) {
+        // Offset of `style_params.x` in `FixelUniforms`: 208.
+        const OFFSET: u64 = 208;
+        let directional = directional.clamp(0.0, 1.0);
+        self.viewports
+            .write(queue, viewport, OFFSET, bytemuck::bytes_of(&directional));
     }
 
     /// Patch colormap + scalar range via `color_params` at offset 176.

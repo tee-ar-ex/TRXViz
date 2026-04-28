@@ -53,7 +53,7 @@ pub(super) fn build_render_data(
             .volume_draws
             .iter()
             .map(|draw| VolumeDrawInfo {
-                file_id: draw.source_id,
+                slice_key: draw.source.slice_key(),
                 window_center: draw.window_center,
                 window_width: draw.window_width,
                 colormap: draw.colormap.as_u32(),
@@ -180,6 +180,13 @@ pub(super) fn build_render_data(
                 ]
             })
             .unwrap_or([0.0, 0.0, 1.0, 1.0]),
+        // Auto-detect from the SH source: full-basis descoteaux ⇒
+        // half-arrow from voxel centre. Symmetric SH stays bidirectional.
+        fixel_directional: scene
+            .odx_scene
+            .as_ref()
+            .map(|odx| odx.has_asymmetric_peaks())
+            .unwrap_or(false),
         fixel_2d_line_width: fixel_2d_draw.map(|p| p.line_width).unwrap_or(0.006),
         fixel_2d_slab_half_width_mm: fixel_2d_draw
             .map(|p| (p.slab_thickness_mm * 0.5).max(Millimeters(0.0)))

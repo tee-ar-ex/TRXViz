@@ -58,7 +58,7 @@ pub(super) fn run_cpu_dipy(
     })?;
     let sphere_verts = mesh.vertices();
     let n_dirs = sphere_verts.len();
-    let sample_plan = mesh.sample_plan();
+    let evaluator = mesh.evaluator();
 
     // Flatten SH: (nb_voxels, ncoeffs) row-major.
     let sh_flat: Vec<f32> = (0..nb_voxels)
@@ -131,7 +131,7 @@ pub(super) fn run_cpu_dipy(
         ras_to_vox,
         gfa_data: &gfa_data,
         fixel_threshold: effective_fixel_threshold,
-        sample_plan,
+        evaluator,
         n_dirs,
         sphere_verts,
         relative_peak_threshold: plan.relative_peak_threshold,

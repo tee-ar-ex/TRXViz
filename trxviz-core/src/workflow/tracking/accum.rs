@@ -32,9 +32,6 @@ pub enum AttemptOutcome {
     RejectNoEnd,
     /// Post-hoc Hausdorff filter rejected the streamline.
     RejectHausdorff,
-    /// Post-hoc pyAFQ probabilistic-atlas filter: too few streamline points
-    /// fell inside the bundle's spatial prior.
-    RejectPyafqProb,
     /// Yeh-specific: attempt picked a voxel outside the seed mask or with
     /// no fixels. Kept as a separate counter so the "what rejected my
     /// streamlines" log line is informative.
@@ -54,7 +51,6 @@ pub struct RejectionCounts {
     pub end: usize,
     pub no_end: usize,
     pub hausdorff: usize,
-    pub pyafq_prob: usize,
 }
 
 impl RejectionCounts {
@@ -68,7 +64,6 @@ impl RejectionCounts {
             + self.end
             + self.no_end
             + self.hausdorff
-            + self.pyafq_prob
     }
 
     pub fn merge(&mut self, other: &RejectionCounts) {
@@ -81,7 +76,6 @@ impl RejectionCounts {
         self.end += other.end;
         self.no_end += other.no_end;
         self.hausdorff += other.hausdorff;
-        self.pyafq_prob += other.pyafq_prob;
     }
 
     pub fn bump(&mut self, outcome: AttemptOutcome) {
@@ -95,7 +89,6 @@ impl RejectionCounts {
             AttemptOutcome::RejectEnd => self.end += 1,
             AttemptOutcome::RejectNoEnd => self.no_end += 1,
             AttemptOutcome::RejectHausdorff => self.hausdorff += 1,
-            AttemptOutcome::RejectPyafqProb => self.pyafq_prob += 1,
         }
     }
 }

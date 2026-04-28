@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use glam::{Mat4, Vec3, Vec4};
 use odx_rs::formats::dsistudio_odf8;
 use odx_rs::typed_view::TypedView2D;
+use odx_rs::ShBasisEvaluator;
 use odx_rs::{OdxDataset, mrtrix_sh};
 
 use crate::data::cifti::VolumeScalars;
@@ -73,7 +74,7 @@ struct ShGlyphSource {
 pub struct ShRenderMesh {
     vertices: Vec<[f32; 3]>,
     indices: Vec<u32>,
-    sample_plan: mrtrix_sh::RowSamplePlan,
+    evaluator: ShBasisEvaluator,
 }
 
 impl ShRenderMesh {
@@ -90,15 +91,15 @@ impl ShRenderMesh {
     }
 
     pub fn transform_flat(&self) -> &[f32] {
-        self.sample_plan.transform_flat()
+        self.evaluator.transform_flat()
     }
 
     pub fn source_dir_count(&self) -> usize {
-        self.sample_plan.source_dir_count()
+        self.evaluator.ndir()
     }
 
-    pub fn sample_plan(&self) -> &mrtrix_sh::RowSamplePlan {
-        &self.sample_plan
+    pub fn evaluator(&self) -> &ShBasisEvaluator {
+        &self.evaluator
     }
 }
 
@@ -311,12 +312,19 @@ impl OdxScene {
 
         let (vertices, indices) = build_full_icosphere_mesh(detail);
         let ncoeffs = self.sh_source.as_ref()?.ncoeffs;
-        let sample_plan =
-            mrtrix_sh::RowSamplePlan::for_sh_rows_nonnegative(&vertices, ncoeffs).ok()?;
+        // Pick the right SH basis (tournier vs descoteaux, sym vs full) from
+        // the file header; falls back to non-negative tournier if the
+        // header is silent (matches behavior before this dispatch existed).
+        let evaluator = ShBasisEvaluator::from_header(
+            self.dataset.header(),
+            &vertices,
+            ncoeffs,
+        )
+        .ok()?;
         let mesh = Arc::new(ShRenderMesh {
             vertices,
             indices,
-            sample_plan,
+            evaluator,
         });
         if let Ok(mut cache) = self.sh_render_mesh_cache.lock() {
             cache.insert(detail, mesh.clone());
@@ -585,7 +593,7 @@ impl OdxScene {
                 let mut out = Vec::with_capacity(slice_indices.len() * mesh.row_width());
                 let mut sampled = vec![0.0f32; mesh.row_width()];
                 for &compact_idx in slice_indices {
-                    mesh.sample_plan()
+                    mesh.evaluator()
                         .apply_row_into(view.row(compact_idx), &mut sampled);
                     out.extend_from_slice(&sampled);
                 }
@@ -596,6 +604,17 @@ impl OdxScene {
 
     pub fn sh_order(&self) -> Option<usize> {
         self.sh_source.as_ref().map(|source| source.sh_order)
+    }
+
+    /// True when the scene's per-voxel peaks come from an asymmetric ODF
+    /// (full-basis descoteaux SH, `SH_FULL_BASIS=true`). Renderers can
+    /// use this to switch fixel display from a bidirectional line through
+    /// the voxel centre to a half-arrow that points along the actual
+    /// fibre direction. For tournier or symmetric descoteaux SH (the
+    /// historical case), this returns `false` and the bidirectional
+    /// default applies.
+    pub fn has_asymmetric_peaks(&self) -> bool {
+        self.dataset.header().sh_full_basis.unwrap_or(false)
     }
 
     pub fn sh_source_dir_count(&self, detail: u32) -> Option<usize> {
@@ -753,7 +772,10 @@ impl OdxScene {
                 let mesh = self
                     .sh_render_mesh(sh_detail)
                     .expect("SH render mesh should exist for glyphs");
-                debug_assert_eq!(mrtrix_sh::ncoeffs_for_lmax(source.sh_order), source.ncoeffs);
+                // ncoeffs depends on whether this SH is even-only or full
+                // basis; both are sanity-checked when the file is loaded, so
+                // no debug_assert here.
+                let _ = source.sh_order;
                 let sh_view = self
                     .dataset
                     .sh::<f32>(&source.name)
@@ -767,7 +789,7 @@ impl OdxScene {
                     count += 1;
                     let amp_offset = amplitudes.len() as u32;
                     let row = sh_view.row(compact_idx);
-                    mesh.sample_plan().apply_row_into(row, &mut sampled);
+                    mesh.evaluator().apply_row_into(row, &mut sampled);
                     amplitudes.extend_from_slice(&sampled);
                     instances.push(GlyphInstance {
                         center: self.centers_ras[compact_idx],
@@ -1255,17 +1277,33 @@ fn resolve_odf_source(dataset: &OdxDataset, warnings: &mut Vec<String>) -> Optio
 fn resolve_sh_source(dataset: &OdxDataset, warnings: &mut Vec<String>) -> Option<ShGlyphSource> {
     let sh_view = dataset.sh::<f32>("coefficients").ok()?;
     let ncoeffs = sh_view.ncols();
-    let sh_order = match dataset.header().sh_order.map(|order| order as usize) {
+    let header = dataset.header();
+    let sh_order = match header.sh_order.map(|order| order as usize) {
         Some(order) => order,
-        None => match mrtrix_sh::lmax_for_ncoeffs(ncoeffs) {
-            Ok(order) => order,
-            Err(err) => {
-                warnings.push(format!(
-                    "SH glyphs disabled: could not infer SH order from {ncoeffs} coefficients ({err})."
-                ));
-                return None;
+        None => {
+            // Inference fallback: try whichever basis the header names; if
+            // the basis is silent, attempt tournier first (legacy
+            // behavior), then full descoteaux.
+            let basis = header.sh_basis.as_deref().unwrap_or("tournier07");
+            let order = match basis {
+                b if b.eq_ignore_ascii_case("descoteaux07") || b.eq_ignore_ascii_case("dipy") => {
+                    let full = header.sh_full_basis.unwrap_or(false);
+                    odx_rs::descoteaux_sh::lmax_for_ncoeffs(ncoeffs, full).ok()
+                }
+                _ => mrtrix_sh::lmax_for_ncoeffs(ncoeffs).ok().or_else(|| {
+                    odx_rs::descoteaux_sh::lmax_for_ncoeffs(ncoeffs, true).ok()
+                }),
+            };
+            match order {
+                Some(o) => o,
+                None => {
+                    warnings.push(format!(
+                        "SH glyphs disabled: could not infer SH order from {ncoeffs} coefficients (basis={basis})."
+                    ));
+                    return None;
+                }
             }
-        },
+        }
     };
     Some(ShGlyphSource {
         name: "coefficients".into(),

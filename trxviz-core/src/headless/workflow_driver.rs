@@ -394,6 +394,7 @@ fn apply_job_result(
             exclude_mask,
             start_mask,
             end_mask,
+            prob_map,
             summary,
         } => {
             cache.pyafq_plan_cache.insert(
@@ -405,6 +406,7 @@ fn apply_job_result(
                     exclude_mask,
                     start_mask,
                     end_mask,
+                    prob_map,
                     summary: summary.clone(),
                 },
             );

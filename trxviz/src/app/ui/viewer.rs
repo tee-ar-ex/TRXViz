@@ -1069,11 +1069,39 @@ impl super::super::TrxVizApp {
                 let scroll = ui.input(|i| i.smooth_scroll_delta.y);
                 if scroll.abs() > 0.0 {
                     let step = if scroll > 0.0 { 1 } else { -1 };
+                    // Anchor for voxel-grid stepping: prefer a real ODX
+                    // scene, otherwise fall back to any in-memory volume
+                    // produced by the workflow (CIFTI subcortical, pyAFQ
+                    // probmap, ODX DPV).
+                    let (anchor_dims, anchor_affine) = match &self.scene.odx_scene {
+                        Some(s) => (Some(s.dimensions()), Some(s.voxel_to_ras())),
+                        None => self
+                            .workflow
+                            .runtime
+                            .scene_plan
+                            .volume_draws
+                            .iter()
+                            .find_map(|d| match &d.source {
+                                trxviz_core::workflow::VolumeBacking::InMemory {
+                                    scalars, ..
+                                } => Some((
+                                    [
+                                        scalars.dims[0] as u64,
+                                        scalars.dims[1] as u64,
+                                        scalars.dims[2] as u64,
+                                    ],
+                                    scalars.voxel_to_ras,
+                                )),
+                                _ => None,
+                            })
+                            .map(|(d, a)| (Some(d), Some(a)))
+                            .unwrap_or((None, None)),
+                    };
                     self.viewport.step_slice(
                         &self.scene.nifti_files,
                         &self.scene.gifti_surfaces,
-                        self.scene.odx_scene.as_ref().map(|s| s.dimensions()),
-                        self.scene.odx_scene.as_ref().map(|s| s.voxel_to_ras()),
+                        anchor_dims,
+                        anchor_affine,
                         axis_index,
                         step,
                     );
@@ -1211,7 +1239,7 @@ impl super::super::TrxVizApp {
             .volume_draws
             .iter()
             .map(|draw| VolumeDrawInfo {
-                file_id: draw.source_id,
+                slice_key: draw.source.slice_key(),
                 window_center: draw.window_center,
                 window_width: draw.window_width,
                 colormap: draw.colormap.as_u32(),
@@ -1496,6 +1524,11 @@ impl super::super::TrxVizApp {
             && self.scene.gifti_surfaces.is_empty()
             && self.scene.parcellations.is_empty()
             && self.scene.odx_scene.is_none()
+            // Workflow-produced in-memory volumes (CIFTI subcortical, pyAFQ
+            // probmap, ODX DPV) live only on the scene plan — count them
+            // too so the 3D viewport doesn't claim emptiness when the
+            // user has wired one into a Volume Display.
+            && self.workflow.runtime.scene_plan.volume_draws.is_empty()
     }
 
     fn max_slice_index(&self, axis_index: usize) -> usize {
@@ -1512,6 +1545,25 @@ impl super::super::TrxVizApp {
                 0 => (dims[2] as usize).saturating_sub(1),
                 1 => (dims[1] as usize).saturating_sub(1),
                 _ => (dims[0] as usize).saturating_sub(1),
+            };
+        }
+        if let Some(dims) = self
+            .workflow
+            .runtime
+            .scene_plan
+            .volume_draws
+            .iter()
+            .find_map(|d| match &d.source {
+                trxviz_core::workflow::VolumeBacking::InMemory { scalars, .. } => {
+                    Some(scalars.dims)
+                }
+                _ => None,
+            })
+        {
+            return match axis_index {
+                0 => dims[2].saturating_sub(1),
+                1 => dims[1].saturating_sub(1),
+                _ => dims[0].saturating_sub(1),
             };
         }
         self.viewport.slice_indices()[axis_index].saturating_add(128)

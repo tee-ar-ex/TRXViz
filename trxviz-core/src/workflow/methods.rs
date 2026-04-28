@@ -549,14 +549,6 @@ pub fn all_op_doc_info() -> Vec<OpDocInfo> {
             window_width: vd.window_width,
         },
     ));
-    let vsd = VolumeScalarsDisplayOp::default();
-    v.push(describe(
-        &vsd,
-        K::VolumeScalarsDisplay {
-            colormap: vsd.colormap,
-            opacity: vsd.opacity,
-        },
-    ));
     // SurfaceOverlayStack has dynamic ports — surface `None` so the
     // docgen can annotate the page instead of trying to draw them.
     let overlay = SurfaceOverlayStackOp::default();
@@ -661,6 +653,8 @@ pub fn all_op_doc_info() -> Vec<OpDocInfo> {
             opacity: vmd.opacity,
             smooth_sigma: vmd.smooth_sigma,
             min_component_volume_mm3: vmd.min_component_volume_mm3,
+            style: vmd.style,
+            slice_mode: vmd.slice_mode,
         },
     ));
     let ph = PrepareHausdorffPlanOp::default();

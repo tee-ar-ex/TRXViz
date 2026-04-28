@@ -189,8 +189,13 @@ impl super::super::TrxVizApp {
             measured_node_sizes: &mut self.workflow.measured_node_sizes,
             layout_reflow_nodes: &mut self.workflow.layout_reflow_nodes,
         };
+        let snarl_style = egui_snarl::ui::SnarlStyle {
+            pin_placement: Some(egui_snarl::ui::PinPlacement::Edge),
+            ..Default::default()
+        };
         let response = egui_snarl::ui::SnarlWidget::new()
             .id(egui::Id::new("workflow_graph"))
+            .style(snarl_style)
             .show(&mut self.workflow.editor_snarl, &mut viewer, ui);
 
         let mut summary: workflow::GraphEditSummary = workflow::sync_graph_from_snarl(

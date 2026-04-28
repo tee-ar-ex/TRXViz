@@ -130,6 +130,9 @@ struct HeadlessRenderData {
     fixel_3d_colormap_code: u32,
     fixel_3d_scalar_range: [f32; 2],
     fixel_3d_opacity_gate: [f32; 4],
+    /// True when the source SH is full-basis descoteaux (asymmetric ODFs);
+    /// renderer flips fixel display to a half-arrow from voxel centre.
+    fixel_directional: bool,
     fixel_2d_line_width: f32,
     fixel_2d_slab_half_width_mm: Millimeters,
     fixel_2d_opacity: f32,
@@ -141,7 +144,7 @@ struct HeadlessRenderData {
 }
 
 pub(super) struct VolumeDrawInfo {
-    file_id: usize,
+    slice_key: usize,
     window_center: f32,
     window_width: f32,
     colormap: u32,

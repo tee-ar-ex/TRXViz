@@ -247,15 +247,11 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
         snarl: &mut Snarl<WorkflowNode>,
     ) -> impl egui_snarl::ui::SnarlPin + 'static {
         let port = snarl[pin.id.node].op.outputs()[pin.id.output];
-        ui.horizontal(|ui| {
-            ui.label(output_port_label(
-                &snarl[pin.id.node].op,
-                pin.id.output,
-                port,
-            ));
-            // Reserve space so the pin circle doesn't overlap the trailing label glyphs.
-            ui.add_space(18.0);
-        });
+        ui.label(output_port_label(
+            &snarl[pin.id.node].op,
+            pin.id.output,
+            port,
+        ));
         pin_info_for_port(port)
     }
 
@@ -462,6 +458,13 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 PurifibreOp::default().into(),
                 measured_node_sizes,
             );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                SampleVolumeAlongStreamlineOp::default().into(),
+                measured_node_sizes,
+            );
             add_node_button(ui, snarl, pos, MergeOp.into(), measured_node_sizes);
             add_node_button(
                 ui,
@@ -585,6 +588,13 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 snarl,
                 pos,
                 VolumeDisplayOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                VolumeOverlayStackOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
@@ -900,6 +910,8 @@ fn auto_color_op(op: WorkflowNodeKind, snarl: &Snarl<WorkflowNode>) -> WorkflowN
             opacity,
             smooth_sigma,
             min_component_volume_mm3,
+            style,
+            slice_mode,
         } => {
             let existing = snarl
                 .node_ids()
@@ -911,6 +923,8 @@ fn auto_color_op(op: WorkflowNodeKind, snarl: &Snarl<WorkflowNode>) -> WorkflowN
                 opacity,
                 smooth_sigma,
                 min_component_volume_mm3,
+                style,
+                slice_mode,
             }
         }
         other => other,
@@ -1015,7 +1029,6 @@ fn pin_info_for_port(port: PortKind) -> PinInfo {
         PortKind::ParcelSelection => egui::Color32::from_rgb(255, 217, 79),
         PortKind::Cifti => egui::Color32::from_rgb(120, 176, 255),
         PortKind::SurfaceScalars => egui::Color32::from_rgb(214, 139, 255),
-        PortKind::VolumeScalars => egui::Color32::from_rgb(255, 145, 112),
         PortKind::SurfaceAppearance => egui::Color32::from_rgb(170, 226, 145),
         PortKind::BundleSurface => egui::Color32::from_rgb(143, 224, 201),
         PortKind::BoundaryField => egui::Color32::from_rgb(255, 160, 96),
@@ -1159,22 +1172,12 @@ mod tests {
     fn odf_glyph_renderer_volume_inputs_have_specific_labels() {
         let node: WorkflowNodeKind = OdfGlyphRendererOp::default().into();
         assert_eq!(
-            input_port_label(&node, 1, PortKind::VolumeScalars),
+            input_port_label(&node, 1, PortKind::Volume),
             "Opacity Scalars"
         );
         assert_eq!(
-            input_port_label(&node, 2, PortKind::VolumeScalars),
+            input_port_label(&node, 2, PortKind::Volume),
             "Size Scalars"
-        );
-    }
-
-    #[test]
-    fn odx_volume_select_outputs_have_specific_labels() {
-        let node: WorkflowNodeKind = OdxVolumeSelectOp::default().into();
-        assert_eq!(output_port_label(&node, 0, PortKind::Volume), "Volume");
-        assert_eq!(
-            output_port_label(&node, 1, PortKind::VolumeScalars),
-            "Volume Scalars"
         );
     }
 }

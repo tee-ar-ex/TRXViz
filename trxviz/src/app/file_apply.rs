@@ -179,11 +179,78 @@ impl super::TrxVizApp {
         explicit_id: Option<FileId>,
         register_workflow_asset: bool,
     ) {
-        let first_nifti = self.scene.nifti_files.is_empty();
+        // Clear any prior error before deciding whether to set a new
+        // one for this drop.
+        self.error_msg = None;
+
+        // Workflow-produced in-memory volumes (CIFTI subcortical, pyAFQ
+        // probmap, ODX DPV) and any loaded ODX scene should also count
+        // as "scene already has content" so dropping a NIfTI on top is
+        // treated as additive — don't re-anchor the camera or jump the
+        // slice plane away from what the user is currently looking at.
+        let workflow_has_volumes = !self
+            .workflow
+            .runtime
+            .scene_plan
+            .volume_draws
+            .is_empty();
+        let has_odx = self.scene.odx_scene.is_some();
+        let first_nifti =
+            self.scene.nifti_files.is_empty() && !workflow_has_volumes && !has_odx;
         let slice_indices = [vol.dims[2] / 2, vol.dims[1] / 2, vol.dims[0] / 2];
         let is_first = self.scene.nifti_files.is_empty()
             && self.scene.trx_files.is_empty()
-            && self.scene.gifti_surfaces.is_empty();
+            && self.scene.gifti_surfaces.is_empty()
+            && !workflow_has_volumes
+            && !has_odx;
+
+        // Warn loudly if the new NIfTI's RAS bounding box doesn't
+        // overlap any existing volume. Without this, the dropped quad
+        // is silently rendered far from the camera and the user has
+        // no idea why "the slice didn't show up".
+        if !first_nifti {
+            let new_box = ras_aabb(vol.dims, vol.voxel_to_ras);
+            let mut overlaps = false;
+            for nf in &self.scene.nifti_files {
+                if aabb_overlap(new_box, ras_aabb(nf.volume.dims, nf.volume.voxel_to_ras)) {
+                    overlaps = true;
+                    break;
+                }
+            }
+            if !overlaps {
+                if let Some(odx) = &self.scene.odx_scene {
+                    let dims = odx.dimensions();
+                    let dims = [dims[0] as usize, dims[1] as usize, dims[2] as usize];
+                    if aabb_overlap(new_box, ras_aabb(dims, odx.voxel_to_ras())) {
+                        overlaps = true;
+                    }
+                }
+            }
+            if !overlaps {
+                for draw in &self.workflow.runtime.scene_plan.volume_draws {
+                    if let trxviz_core::workflow::VolumeBacking::InMemory { scalars, .. } =
+                        &draw.source
+                        && aabb_overlap(
+                            new_box,
+                            ras_aabb(scalars.dims, scalars.voxel_to_ras),
+                        )
+                    {
+                        overlaps = true;
+                        break;
+                    }
+                }
+            }
+            if !overlaps {
+                self.error_msg = Some(format!(
+                    "Dropped volume '{}' has no RAS overlap with the existing \
+                     scene — its slice quad will render far from the camera. \
+                     Check that the volumes are in the same coordinate space.",
+                    path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "(unnamed)".into())
+                ));
+            }
+        }
         if is_first {
             let volume_center = vol.voxel_to_world(Vec3::new(
                 vol.dims[0] as f32 / 2.0,
@@ -227,12 +294,14 @@ impl super::TrxVizApp {
         let id = self.allocate_file_id(explicit_id);
 
         {
+            use trxviz_core::renderer::slice_renderer::SliceResourceKind;
             let mut renderer = rs.renderer.write();
             if let Some(all) = renderer.callback_resources.get_mut::<AllSliceResources>() {
-                all.entries.push((id, slice_resources));
+                all.entries
+                    .push((id, SliceResourceKind::Scalar(slice_resources)));
             } else {
                 renderer.callback_resources.insert(AllSliceResources {
-                    entries: vec![(id, slice_resources)],
+                    entries: vec![(id, SliceResourceKind::Scalar(slice_resources))],
                 });
             }
         }
@@ -268,7 +337,8 @@ impl super::TrxVizApp {
         } else {
             self.viewport.clear_slices_dirty();
         }
-        self.error_msg = None;
+        // Preserve the no-overlap warning set above; otherwise clear
+        // any leftover error from a prior load.
         self.status_msg = None;
     }
 
@@ -677,4 +747,32 @@ impl super::TrxVizApp {
         self.viewport
             .set_slice_world_offsets([center.z, center.y, center.x]);
     }
+}
+
+/// RAS-space axis-aligned bounding box of a voxel grid. Walks the 8
+/// corners of the (i,j,k) cube through the voxel-to-RAS affine and
+/// takes the min/max — handles arbitrary orientation, not just
+/// axis-aligned affines.
+fn ras_aabb(dims: [usize; 3], voxel_to_ras: glam::Mat4) -> (Vec3, Vec3) {
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for &x in &[0.0, dims[0] as f32] {
+        for &y in &[0.0, dims[1] as f32] {
+            for &z in &[0.0, dims[2] as f32] {
+                let p = voxel_to_ras.transform_point3(Vec3::new(x, y, z));
+                min = min.min(p);
+                max = max.max(p);
+            }
+        }
+    }
+    (min, max)
+}
+
+fn aabb_overlap(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
+    a.0.x <= b.1.x
+        && a.1.x >= b.0.x
+        && a.0.y <= b.1.y
+        && a.1.y >= b.0.y
+        && a.0.z <= b.1.z
+        && a.1.z >= b.0.z
 }

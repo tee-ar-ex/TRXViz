@@ -19,13 +19,13 @@ use crate::workflow::methods::OpCategory;
 use crate::workflow::types::{PyafqPlanJob, WorkflowValue};
 
 use super::super::{
-    EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp, prime_expensive_record,
-    sync_node_state_from_run_record,
+    EvalCtx, EvaluatedValue, PortKind, VolumeBacking, WorkflowNodeKind, WorkflowOp,
+    prime_expensive_record, sync_node_state_from_run_record,
 };
 use super::pyafq_bundles::{DEFAULT_DIST_TO_ENDPOINT_MM, DEFAULT_DIST_TO_WAYPOINT_MM, lookup};
 
 fn default_to_space() -> String {
-    "subject".to_string()
+    String::new()
 }
 fn default_dist_to_waypoint_mm() -> f32 {
     DEFAULT_DIST_TO_WAYPOINT_MM
@@ -35,9 +35,6 @@ fn default_dist_to_exclusion_mm() -> f32 {
 }
 fn default_dist_to_endpoint_mm() -> f32 {
     DEFAULT_DIST_TO_ENDPOINT_MM
-}
-fn default_prob_threshold() -> f32 {
-    0.0
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -49,7 +46,9 @@ pub struct PreparePyafqPlanOp {
     /// Display name from `PYAFQ_BUNDLES` (e.g. "Left Corticospinal").
     #[serde(default)]
     pub bundle_name: String,
-    /// pyAFQ's `to_space` token; default "subject" matches a normal run.
+    /// pyAFQ's `to_space` token. Default is empty — the inspector
+    /// auto-detects the most common `_space-{X}_desc-` token in the
+    /// working directory when this is blank.
     #[serde(default = "default_to_space")]
     pub to_space: String,
     /// Dilation radius applied to each waypoint mask. Mirrors pyAFQ's
@@ -64,10 +63,6 @@ pub struct PreparePyafqPlanOp {
     /// `dist_to_atlas`.
     #[serde(default = "default_dist_to_endpoint_mm")]
     pub dist_to_endpoint_mm: f32,
-    /// Min fraction of streamline points that must fall inside the
-    /// probability map for a streamline to be kept. 0 disables the filter.
-    #[serde(default = "default_prob_threshold")]
-    pub prob_threshold: f32,
     /// `Some` overrides the bundle's catalog `min_len_mm`.
     #[serde(default)]
     pub override_min_len_mm: Option<f32>,
@@ -84,7 +79,6 @@ impl Default for PreparePyafqPlanOp {
             dist_to_waypoint_mm: default_dist_to_waypoint_mm(),
             dist_to_exclusion_mm: default_dist_to_exclusion_mm(),
             dist_to_endpoint_mm: default_dist_to_endpoint_mm(),
-            prob_threshold: default_prob_threshold(),
             override_min_len_mm: None,
             override_max_len_mm: None,
         }
@@ -107,10 +101,11 @@ impl WorkflowOp for PreparePyafqPlanOp {
     fn output_ports(&self) -> &'static [PortKind] {
         &[
             PortKind::TrackingPlan,
-            PortKind::VoxelMask, // include union (visualization)
-            PortKind::VoxelMask, // exclude union
-            PortKind::VoxelMask, // start
-            PortKind::VoxelMask, // end
+            PortKind::VoxelMask,     // include union (visualization)
+            PortKind::VoxelMask,     // exclude union
+            PortKind::VoxelMask,     // start
+            PortKind::VoxelMask,     // end
+            PortKind::Volume, // continuous probability map (omitted when none)
         ]
     }
 
@@ -132,12 +127,10 @@ impl WorkflowOp for PreparePyafqPlanOp {
             "A tractography plan for {bundle} was prepared from pyAFQ \
              derivatives [@yeatman2012tract] using a {wp:.1}-mm waypoint \
              tolerance, {ex:.1}-mm exclusion tolerance, and {ep:.1}-mm \
-             endpoint tolerance; the bundle's probability map was applied \
-             at threshold {pt:.2}.",
+             endpoint tolerance.",
             wp = self.dist_to_waypoint_mm,
             ex = self.dist_to_exclusion_mm,
             ep = self.dist_to_endpoint_mm,
-            pt = self.prob_threshold,
         )))
     }
 
@@ -166,7 +159,6 @@ impl WorkflowOp for PreparePyafqPlanOp {
             self.dist_to_waypoint_mm.to_bits().hash(&mut h);
             self.dist_to_exclusion_mm.to_bits().hash(&mut h);
             self.dist_to_endpoint_mm.to_bits().hash(&mut h);
-            self.prob_threshold.to_bits().hash(&mut h);
             self.override_min_len_mm.map(f32::to_bits).hash(&mut h);
             self.override_max_len_mm.map(f32::to_bits).hash(&mut h);
             h.finish()
@@ -199,7 +191,6 @@ impl WorkflowOp for PreparePyafqPlanOp {
                 dist_to_waypoint_mm: self.dist_to_waypoint_mm,
                 dist_to_exclusion_mm: self.dist_to_exclusion_mm,
                 dist_to_endpoint_mm: self.dist_to_endpoint_mm,
-                prob_threshold: self.prob_threshold,
                 override_min_len_mm: self.override_min_len_mm,
                 override_max_len_mm: self.override_max_len_mm,
             };
@@ -227,7 +218,7 @@ impl WorkflowOp for PreparePyafqPlanOp {
             cached.summary.clone()
         };
 
-        Ok(vec![
+        let mut outputs = vec![
             EvaluatedValue {
                 value: WorkflowValue::TrackingPlan(cached.plan.clone()),
                 stale,
@@ -248,13 +239,21 @@ impl WorkflowOp for PreparePyafqPlanOp {
                 value: WorkflowValue::VoxelMask(cached.end_mask.clone()),
                 stale,
             },
-        ])
+        ];
+        if let Some(arc) = &cached.prob_map {
+            outputs.push(EvaluatedValue {
+                value: WorkflowValue::Volume(VolumeBacking::from_scalars((**arc).clone())),
+                stale,
+            });
+        }
+        Ok(outputs)
     }
 }
 
 /// Five empty placeholders for the case where the user hasn't picked a
 /// directory or bundle yet. Marked `stale = false` because they are the
 /// correct steady-state output for this configuration (no work pending).
+/// The 6th (probability map) port is left unwired by omitting it.
 fn empty_outputs() -> Vec<EvaluatedValue> {
     let empty_mask = Arc::new(crate::workflow::types::VoxelMask {
         dims: [0, 0, 0],
@@ -326,7 +325,6 @@ impl From<PreparePyafqPlanOp> for WorkflowNodeKind {
             dist_to_waypoint_mm: op.dist_to_waypoint_mm,
             dist_to_exclusion_mm: op.dist_to_exclusion_mm,
             dist_to_endpoint_mm: op.dist_to_endpoint_mm,
-            prob_threshold: op.prob_threshold,
             override_min_len_mm: op.override_min_len_mm,
             override_max_len_mm: op.override_max_len_mm,
         }

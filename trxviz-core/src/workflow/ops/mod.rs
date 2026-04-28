@@ -28,6 +28,7 @@ pub mod pyafq_bundles;
 mod random_subset;
 mod remove_duplicates;
 mod roi_ops;
+mod sample_volume_along_streamline;
 mod save_streamlines;
 mod sphere_query;
 mod streamline_display;
@@ -40,6 +41,7 @@ mod tip_prune;
 mod tracking_params;
 mod uniform_color;
 mod volume_display;
+mod volume_overlay_stack;
 mod volume_source;
 mod voxel_mask_display;
 mod yeh_tractography;
@@ -76,6 +78,7 @@ pub use purifibre::PurifibreOp;
 pub use random_subset::RandomSubsetOp;
 pub use remove_duplicates::RemoveDuplicatesOp;
 pub use roi_ops::{RoiFromParcelOp, RoiFromShapeOp, RoiFromVolumeOp, RoiShape};
+pub use sample_volume_along_streamline::SampleVolumeAlongStreamlineOp;
 pub use save_streamlines::SaveStreamlinesOp;
 pub use sphere_query::SphereQueryOp;
 pub use streamline_display::StreamlineDisplayOp;
@@ -86,7 +89,8 @@ pub use surface_projection::{SurfaceProjectionDensityOp, SurfaceProjectionMeanDp
 pub use surface_source::SurfaceSourceOp;
 pub use tip_prune::TipPruneOp;
 pub use uniform_color::UniformColorOp;
-pub use volume_display::{VolumeDisplayOp, VolumeScalarsDisplayOp};
+pub use volume_display::VolumeDisplayOp;
+pub use volume_overlay_stack::VolumeOverlayStackOp;
 pub use volume_source::VolumeSourceOp;
 pub use voxel_mask_display::VoxelMaskDisplayOp;
 pub use yeh_tractography::YehTractographyOp;
@@ -168,6 +172,10 @@ pub enum WorkflowNodeKind {
         puri_fraction: f32,
         spherical_smoothing_deg: f32,
     },
+    SampleVolumeAlongStreamline {
+        #[serde(default)]
+        dps_name: String,
+    },
     Merge,
     AddGroupsFromParcellation,
     ParcelSelect {
@@ -242,6 +250,10 @@ pub enum WorkflowNodeKind {
         window_center: f32,
         window_width: f32,
     },
+    VolumeOverlayStack {
+        #[serde(default = "crate::workflow::types::default_volume_overlay_layers")]
+        layers: Vec<crate::workflow::types::VolumeOverlayLayerConfig>,
+    },
     SurfaceDisplay {
         color: [f32; 3],
         opacity: f32,
@@ -255,10 +267,6 @@ pub enum WorkflowNodeKind {
         range_min: f32,
         range_max: f32,
         space: SurfaceDisplaySpace,
-    },
-    VolumeScalarsDisplay {
-        colormap: VolumeColormap,
-        opacity: f32,
     },
     BundleSurfaceDisplay {
         #[serde(default)]
@@ -390,6 +398,10 @@ pub enum WorkflowNodeKind {
         smooth_sigma: f32,
         #[serde(default)]
         min_component_volume_mm3: Millimeters,
+        #[serde(default)]
+        style: crate::workflow::types::VoxelMaskRenderStyle,
+        #[serde(default)]
+        slice_mode: crate::workflow::types::VoxelMaskSliceMode,
     },
     AddRoi,
     AddRoa,
@@ -457,8 +469,6 @@ pub enum WorkflowNodeKind {
         #[serde(default)]
         dist_to_endpoint_mm: f32,
         #[serde(default)]
-        prob_threshold: f32,
-        #[serde(default)]
         override_min_len_mm: Option<f32>,
         #[serde(default)]
         override_max_len_mm: Option<f32>,
@@ -520,6 +530,11 @@ impl WorkflowNodeKind {
                 ports.push(PortKind::Surface);
                 ports.extend(std::iter::repeat(PortKind::SurfaceScalars).take(layers.len()));
                 ports
+            }
+            Self::VolumeOverlayStack { layers } => {
+                std::iter::repeat(PortKind::Volume)
+                    .take(layers.len())
+                    .collect()
             }
             _ => input_ports(self)
                 .expect("handled by workflow op registry")
@@ -642,6 +657,12 @@ macro_rules! with_workflow_op {
                     trim_fraction: *trim_fraction,
                     puri_fraction: *puri_fraction,
                     spherical_smoothing_deg: *spherical_smoothing_deg,
+                };
+                $body
+            }
+            WorkflowNodeKind::SampleVolumeAlongStreamline { dps_name } => {
+                let $op = sample_volume_along_streamline::SampleVolumeAlongStreamlineOp {
+                    dps_name: dps_name.clone(),
                 };
                 $body
             }
@@ -800,6 +821,12 @@ macro_rules! with_workflow_op {
                 };
                 $body
             }
+            WorkflowNodeKind::VolumeOverlayStack { layers } => {
+                let $op = volume_overlay_stack::VolumeOverlayStackOp {
+                    layers: layers.clone(),
+                };
+                $body
+            }
             WorkflowNodeKind::SurfaceDisplay {
                 color,
                 opacity,
@@ -827,13 +854,6 @@ macro_rules! with_workflow_op {
                     range_min: *range_min,
                     range_max: *range_max,
                     space: *space,
-                };
-                $body
-            }
-            WorkflowNodeKind::VolumeScalarsDisplay { colormap, opacity } => {
-                let $op = volume_display::VolumeScalarsDisplayOp {
-                    colormap: *colormap,
-                    opacity: *opacity,
                 };
                 $body
             }
@@ -1007,12 +1027,16 @@ macro_rules! with_workflow_op {
                 opacity,
                 smooth_sigma,
                 min_component_volume_mm3,
+                style,
+                slice_mode,
             } => {
                 let $op = voxel_mask_display::VoxelMaskDisplayOp {
                     color: *color,
                     opacity: *opacity,
                     smooth_sigma: *smooth_sigma,
                     min_component_volume_mm3: *min_component_volume_mm3,
+                    style: *style,
+                    slice_mode: *slice_mode,
                 };
                 $body
             }
@@ -1101,7 +1125,6 @@ macro_rules! with_workflow_op {
                 dist_to_waypoint_mm,
                 dist_to_exclusion_mm,
                 dist_to_endpoint_mm,
-                prob_threshold,
                 override_min_len_mm,
                 override_max_len_mm,
             } => {
@@ -1112,7 +1135,6 @@ macro_rules! with_workflow_op {
                     dist_to_waypoint_mm: *dist_to_waypoint_mm,
                     dist_to_exclusion_mm: *dist_to_exclusion_mm,
                     dist_to_endpoint_mm: *dist_to_endpoint_mm,
-                    prob_threshold: *prob_threshold,
                     override_min_len_mm: *override_min_len_mm,
                     override_max_len_mm: *override_max_len_mm,
                 };
@@ -1227,6 +1249,7 @@ pub(super) fn title(kind: &WorkflowNodeKind) -> &'static str {
 pub(super) fn input_ports(kind: &WorkflowNodeKind) -> Option<&'static [PortKind]> {
     match kind {
         WorkflowNodeKind::SurfaceOverlayStack { .. } => None,
+        WorkflowNodeKind::VolumeOverlayStack { .. } => None,
         _ => Some(with_workflow_op!(kind, |op| op.input_ports())),
     }
 }
@@ -1393,11 +1416,6 @@ pub(super) fn validate_registry() -> WorkflowResult<()> {
             window_width: 1.0,
         }
         .tag(),
-        volume_display::VolumeScalarsDisplayOp {
-            colormap: crate::data::loaded_files::VolumeColormap::Grayscale,
-            opacity: 1.0,
-        }
-        .tag(),
         surface_display::SurfaceOverlayStackOp { layers: Vec::new() }.tag(),
         surface_display::SurfaceDisplayOp {
             color: [0.0; 3],
@@ -1442,6 +1460,7 @@ pub(super) fn validate_registry() -> WorkflowResult<()> {
         voxel_mask_display::VoxelMaskDisplayOp::default().tag(),
         prepare_hausdorff::PrepareHausdorffPlanOp::default().tag(),
         prepare_pyafq::PreparePyafqPlanOp::default().tag(),
+        sample_volume_along_streamline::SampleVolumeAlongStreamlineOp::default().tag(),
         prepare_simple::PrepareSimplePlanOp::default().tag(),
         plan_add::AddRoiOp.tag(),
         plan_add::AddRoaOp.tag(),

@@ -6,3 +6,4 @@ resolver = "2"
 [workspace.lints.rust]
 unused_imports = "warn"
 dead_code = "warn"
+

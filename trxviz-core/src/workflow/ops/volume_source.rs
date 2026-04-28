@@ -1,7 +1,7 @@
 use crate::data::loaded_files::FileId;
 use crate::workflow::methods::OpCategory;
 
-use super::super::{EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue};
+use super::super::{EvalCtx, PortKind, VolumeBacking, WorkflowNodeKind, WorkflowOp, WorkflowValue};
 
 #[derive(Debug, Clone, Copy)]
 pub struct VolumeSourceOp {
@@ -39,7 +39,9 @@ impl WorkflowOp for VolumeSourceOp {
                 self.source_id
             ))
         })?;
-        Ok(vec![WorkflowValue::Volume(self.source_id).into()])
+        Ok(vec![
+            WorkflowValue::Volume(VolumeBacking::File(self.source_id)).into(),
+        ])
     }
 }
 

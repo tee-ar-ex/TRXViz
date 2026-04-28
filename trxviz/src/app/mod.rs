@@ -101,14 +101,46 @@ impl TrxVizApp {
         self.viewport.set_slice_visible_all(slice_view.visible);
         self.viewport
             .set_slice_world_offsets(slice_view.positions_ras);
-        if let Some(nf) = self.scene.nifti_files.first() {
+        // Pick any active volume to anchor slice-index sync. File-backed
+        // sources live in `scene.nifti_files`; in-memory sources (CIFTI
+        // subcortical, pyAFQ probmap, ODX DPV) only show up as
+        // `VolumeBacking::InMemory` entries on the scene plan.
+        use trxviz_core::data::nifti_data::NiftiVolume;
+        use trxviz_core::workflow::VolumeBacking;
+        let anchor: Option<NiftiVolume> = self
+            .scene
+            .nifti_files
+            .first()
+            .map(|nf| NiftiVolume {
+                data: nf.volume.data.clone(),
+                dims: nf.volume.dims,
+                voxel_to_ras: nf.volume.voxel_to_ras,
+            })
+            .or_else(|| {
+                self.workflow
+                    .runtime
+                    .scene_plan
+                    .volume_draws
+                    .iter()
+                    .find_map(|draw| match &draw.source {
+                        VolumeBacking::InMemory { scalars, .. } => Some(NiftiVolume {
+                            data: scalars.values.clone(),
+                            dims: scalars.dims,
+                            voxel_to_ras: scalars.voxel_to_ras,
+                        }),
+                        VolumeBacking::Composite { stack, .. } => Some(NiftiVolume {
+                            data: Vec::new(),
+                            dims: stack.dims,
+                            voxel_to_ras: stack.voxel_to_ras,
+                        }),
+                        VolumeBacking::File(_) => None,
+                    })
+            });
+        if let Some(volume) = anchor {
             self.viewport.set_slice_indices([
-                nf.volume
-                    .nearest_slice_index(0, slice_view.positions_ras[0]),
-                nf.volume
-                    .nearest_slice_index(1, slice_view.positions_ras[1]),
-                nf.volume
-                    .nearest_slice_index(2, slice_view.positions_ras[2]),
+                volume.nearest_slice_index(0, slice_view.positions_ras[0]),
+                volume.nearest_slice_index(1, slice_view.positions_ras[1]),
+                volume.nearest_slice_index(2, slice_view.positions_ras[2]),
             ]);
             self.viewport.mark_slices_dirty();
         }
@@ -410,47 +442,130 @@ impl eframe::App for TrxVizApp {
         // Update slice positions if dirty
         if self.viewport.slices_dirty() {
             if let Some(rs) = frame.wgpu_render_state() {
+                use trxviz_core::renderer::slice_renderer::SliceResourceKind;
+                let mut renderer = rs.renderer.write();
+                if let Some(all) = renderer
+                    .callback_resources
+                    .get_mut::<AllSliceResources>()
                 {
-                    let renderer = rs.renderer.read();
-                    if let Some(all) = renderer.callback_resources.get::<AllSliceResources>() {
-                        for (file_id, sr) in &all.entries {
-                            let vol_ref = self
-                                .scene
-                                .nifti_files
-                                .iter()
-                                .find(|n| n.id == *file_id)
-                                .map(|nf| &nf.volume as &trxviz_core::data::nifti_data::NiftiVolume)
-                                .or_else(|| {
+                    for (file_id, sr) in all.entries.iter_mut() {
+                        let world = self.viewport.slice_world_offsets();
+                        match sr {
+                            SliceResourceKind::Scalar(scalar) => {
+                                // File-backed: NIfTI scene asset or
+                                // ODX-DPV materialization (both keyed
+                                // by FileId).
+                                let file_vol = self
+                                    .scene
+                                    .nifti_files
+                                    .iter()
+                                    .find(|n| n.id == *file_id)
+                                    .map(|nf| {
+                                        &nf.volume
+                                            as &trxviz_core::data::nifti_data::NiftiVolume
+                                    })
+                                    .or_else(|| {
+                                        self.workflow
+                                            .execution_cache
+                                            .odx_dpv_materializations
+                                            .values()
+                                            .find(|m| m.source_id == *file_id)
+                                            .map(|m| m.volume.as_ref())
+                                    });
+                                // In-memory backing: synthesize a
+                                // bufferless NiftiVolume — `update_slice`
+                                // for the scalar path only reads
+                                // dims+affine.
+                                let mem_vol_owned = file_vol.is_none().then(|| {
                                     self.workflow
-                                        .execution_cache
-                                        .odx_dpv_materializations
-                                        .values()
-                                        .find(|m| m.source_id == *file_id)
-                                        .map(|m| m.volume.as_ref())
-                                });
-                            if let Some(vol) = vol_ref {
-                                sr.update_slice(
-                                    &rs.queue,
-                                    SliceAxis::Axial,
-                                    self.viewport.slice_index(0),
-                                    vol,
-                                );
-                                sr.update_slice(
-                                    &rs.queue,
-                                    SliceAxis::Coronal,
-                                    self.viewport.slice_index(1),
-                                    vol,
-                                );
-                                sr.update_slice(
-                                    &rs.queue,
-                                    SliceAxis::Sagittal,
-                                    self.viewport.slice_index(2),
-                                    vol,
-                                );
+                                        .runtime
+                                        .scene_plan
+                                        .volume_draws
+                                        .iter()
+                                        .find_map(|d| match &d.source {
+                                            trxviz_core::workflow::VolumeBacking::InMemory {
+                                                handle,
+                                                scalars,
+                                            } if (*handle as usize) == *file_id => Some(
+                                                trxviz_core::data::nifti_data::NiftiVolume {
+                                                    data: Vec::new(),
+                                                    dims: scalars.dims,
+                                                    voxel_to_ras: scalars.voxel_to_ras,
+                                                },
+                                            ),
+                                            _ => None,
+                                        })
+                                }).flatten();
+                                let vol_ref = file_vol.or(mem_vol_owned.as_ref());
+                                if let Some(vol) = vol_ref {
+                                    scalar.update_slice(
+                                        &rs.queue,
+                                        SliceAxis::Axial,
+                                        vol.nearest_slice_index(0, world[0]),
+                                        vol,
+                                    );
+                                    scalar.update_slice(
+                                        &rs.queue,
+                                        SliceAxis::Coronal,
+                                        vol.nearest_slice_index(1, world[1]),
+                                        vol,
+                                    );
+                                    scalar.update_slice(
+                                        &rs.queue,
+                                        SliceAxis::Sagittal,
+                                        vol.nearest_slice_index(2, world[2]),
+                                        vol,
+                                    );
+                                }
+                            }
+                            SliceResourceKind::Composite(composite) => {
+                                let stack = self
+                                    .workflow
+                                    .runtime
+                                    .scene_plan
+                                    .volume_draws
+                                    .iter()
+                                    .find_map(|d| match &d.source {
+                                        trxviz_core::workflow::VolumeBacking::Composite {
+                                            handle,
+                                            stack,
+                                        } if (*handle as usize) == *file_id => Some(stack.clone()),
+                                        _ => None,
+                                    });
+                                if let Some(stack) = stack {
+                                    let synth_vol =
+                                        trxviz_core::data::nifti_data::NiftiVolume {
+                                            data: Vec::new(),
+                                            dims: stack.dims,
+                                            voxel_to_ras: stack.voxel_to_ras,
+                                        };
+                                    composite.update_slice(
+                                        &rs.device,
+                                        &rs.queue,
+                                        SliceAxis::Axial,
+                                        synth_vol.nearest_slice_index(0, world[0]),
+                                        &stack,
+                                    );
+                                    composite.update_slice(
+                                        &rs.device,
+                                        &rs.queue,
+                                        SliceAxis::Coronal,
+                                        synth_vol.nearest_slice_index(1, world[1]),
+                                        &stack,
+                                    );
+                                    composite.update_slice(
+                                        &rs.device,
+                                        &rs.queue,
+                                        SliceAxis::Sagittal,
+                                        synth_vol.nearest_slice_index(2, world[2]),
+                                        &stack,
+                                    );
+                                }
                             }
                         }
                     }
                 }
+                drop(renderer);
                 // Re-upload ODX glyphs for the new axial slice (3D view).
                 // Fixels are full-volume and don't need re-uploading on slice change —
                 // the 2D slice views use shader slab clipping to show only the current slice.

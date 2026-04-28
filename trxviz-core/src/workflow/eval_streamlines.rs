@@ -53,7 +53,22 @@ pub(crate) fn summarize_value(value: &WorkflowValue) -> String {
         WorkflowValue::Streamline(flow) => {
             format!("{} streamlines", flow.selected_streamlines.len())
         }
-        WorkflowValue::Volume(_) => "Volume ready".to_string(),
+        WorkflowValue::Volume(b) => match b {
+            crate::workflow::VolumeBacking::File(_) => "Volume ready".to_string(),
+            crate::workflow::VolumeBacking::InMemory { scalars, .. } => {
+                format!(
+                    "Volume {}x{}x{}",
+                    scalars.dims[0], scalars.dims[1], scalars.dims[2]
+                )
+            }
+            crate::workflow::VolumeBacking::Composite { stack, .. } => {
+                let active = stack.layers.iter().filter(|(_, c)| c.enabled).count();
+                format!(
+                    "Composite {}x{}x{} ({active} active layer(s))",
+                    stack.dims[0], stack.dims[1], stack.dims[2]
+                )
+            }
+        },
         WorkflowValue::Surface(_) => "Surface ready".to_string(),
         WorkflowValue::Parcellation(_) => "Parcellation ready".to_string(),
         WorkflowValue::ParcelSelection(selection) => {
@@ -61,12 +76,6 @@ pub(crate) fn summarize_value(value: &WorkflowValue) -> String {
         }
         WorkflowValue::SurfaceScalars(projection) => {
             format!("Surface scalars ({} values)", projection.values.len())
-        }
-        WorkflowValue::VolumeScalars(volume) => {
-            format!(
-                "Volume scalars {}x{}x{}",
-                volume.dims[0], volume.dims[1], volume.dims[2]
-            )
         }
         WorkflowValue::SurfaceAppearance(appearance) => {
             format!("Surface appearance for surface {}", appearance.source_id)

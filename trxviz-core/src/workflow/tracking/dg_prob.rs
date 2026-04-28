@@ -16,9 +16,10 @@ use super::rng::lcg_f32;
 ///
 /// The SH buffer is a flat `Vec<f32>` of `(nb_voxels, ncoeffs)` (row-major),
 /// stored sparse: row `v` is the SH vector of compact voxel `v`. The
-/// `sample_plan` is an odx-rs `RowSamplePlan` — a precomputed mapping
-/// from SH → sphere amplitudes, cached so `sample_direction` is a single
-/// matrix-vector product per voxel.
+/// `evaluator` is an odx-rs `ShBasisEvaluator` — a precomputed mapping
+/// from SH → sphere amplitudes that dispatches to the correct basis
+/// (tournier even-only or descoteaux full/symmetric), cached so
+/// `sample_direction` is a single matrix-vector product per voxel.
 pub struct DipyProbGlobal<'a> {
     pub sh_flat: &'a [f32],
     pub ncoeffs: usize,
@@ -33,7 +34,7 @@ pub struct DipyProbGlobal<'a> {
     /// returns None if no corners survive).
     pub gfa_data: &'a [f32],
     pub fixel_threshold: f32,
-    pub sample_plan: &'a odx_rs::mrtrix_sh::RowSamplePlan,
+    pub evaluator: &'a odx_rs::ShBasisEvaluator,
     pub n_dirs: usize,
     pub sphere_verts: &'a [[f32; 3]],
     /// Relative PMF threshold: any sphere vertex whose PMF value is
@@ -120,13 +121,18 @@ fn sample_direction(
     let sh_interp = trilinear_sh(vox, global)?;
 
     // PMF on sphere. `apply_row_into` is a precomputed matrix-vector
-    // product (SH → amplitudes on the current sphere).
+    // product (SH → amplitudes on the current sphere) that dispatches to
+    // the correct basis (tournier vs descoteaux, sym vs full).
     scratch.pmf.resize(global.n_dirs, 0.0);
     global
-        .sample_plan
+        .evaluator
         .apply_row_into(&sh_interp, &mut scratch.pmf);
 
-    // Clamp negatives to zero: the SH reconstruction can over/undershoot.
+    // Clamp negatives to zero: SH reconstruction can over/undershoot.
+    // For asymmetric (full-basis) SH, the evaluator already returns
+    // signed amplitudes — clamping negatives here is what gives the
+    // forward lobe while the antipodal lobe goes to zero (which is what
+    // probabilistic tracking with directional SH wants).
     for v in scratch.pmf.iter_mut() {
         if *v < 0.0 {
             *v = 0.0;
@@ -134,7 +140,9 @@ fn sample_direction(
     }
 
     // When continuing, zero any sphere vertex outside the angular cone.
-    // Uses absolute dot product to respect antipodal symmetry.
+    // Uses absolute dot product to respect antipodal symmetry; for
+    // asymmetric SH the antipodal vertex's amplitude is independently
+    // signed, so .abs() here is just a cone test, not a fold.
     if !is_start {
         for (i, v) in scratch.pmf.iter_mut().enumerate() {
             if *v > 0.0 {

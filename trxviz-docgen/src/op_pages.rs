@@ -162,7 +162,6 @@ fn port_label(port: PortKind) -> &'static str {
         PortKind::Parcellation => "Parcellation",
         PortKind::ParcelSelection => "ParcelSelection",
         PortKind::SurfaceScalars => "SurfaceScalars",
-        PortKind::VolumeScalars => "VolumeScalars",
         PortKind::SurfaceAppearance => "SurfaceAppearance",
         PortKind::BundleSurface => "BundleSurface",
         PortKind::BoundaryField => "BoundaryField",

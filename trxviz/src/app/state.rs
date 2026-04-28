@@ -709,6 +709,20 @@ impl ViewportState {
                 .clamp(0, max_idx as isize) as usize;
             if new_idx != self.slices.slice_indices[axis_index] {
                 self.slices.slice_indices[axis_index] = new_idx;
+                // Mirror the new index into world space so per-volume
+                // slice updates (which resolve from world offsets) move
+                // in lockstep with the anchor NIfTI.
+                let probe = match axis_index {
+                    0 => Vec3::new(0.0, 0.0, new_idx as f32),
+                    1 => Vec3::new(0.0, new_idx as f32, 0.0),
+                    _ => Vec3::new(new_idx as f32, 0.0, 0.0),
+                };
+                let world = vol.voxel_to_world(probe);
+                self.slices.slice_world_offsets[axis_index] = match axis_index {
+                    0 => world.z,
+                    1 => world.y,
+                    _ => world.x,
+                };
                 self.slices.slices_dirty = true;
                 return true;
             }

@@ -63,14 +63,13 @@ pub use tracking::CancelFlag;
 
 pub(crate) use evaluate::{
     compose_surface_appearance, expect_boundary_field_input, expect_bundle_surface_input,
-    expect_cifti_input, expect_surface_appearance_input, expect_volume_input,
-    expect_volume_scalars_input, surface_display_model_matrix,
+    expect_cifti_input, expect_surface_appearance_input, surface_display_model_matrix,
 };
 pub(crate) use evaluate::{evaluate_derived_streamline_plan, expect_streamline_input};
 pub(crate) use evaluate::{
     expect_fixel_scalars_input, expect_fixels_input, expect_odf_field_input,
     expect_odx_catalog_input, expect_parcel_selection_input, expect_parcellation_input,
-    expect_surface_input, optional_volume_scalars_input, resolve_selected_labels, summarize_value,
+    expect_surface_input, optional_volume_input, resolve_selected_labels, summarize_value,
     volume_scalars_from_nifti_volume,
 };
 pub(crate) use op::{EvalCtx, WorkflowOp};
@@ -83,11 +82,12 @@ pub use ops::{
     OdxVolumeSelectOp, ParcelCropOp, ParcelEndOp, ParcelRoaOp, ParcelRoiOp, ParcelSelectOp,
     ParcelSurfaceBuildOp, ParcellationDisplayOp, ParcellationSourceOp, PrepareHausdorffPlanOp,
     PreparePyafqPlanOp, PrepareSimplePlanOp, PurifibreOp, RandomSubsetOp, RemoveDuplicatesOp,
-    RoiFromParcelOp, RoiFromShapeOp, RoiFromVolumeOp, RoiShape, SaveStreamlinesOp, SphereQueryOp,
-    StreamlineDirectionFieldOp, StreamlineDisplayOp, StreamlineSourceOp, SurfaceDepthQueryOp,
-    SurfaceDisplayOp, SurfaceOverlayStackOp, SurfaceProjectionDensityOp,
-    SurfaceProjectionMeanDpsOp, SurfaceSourceOp, TipPruneOp, UniformColorOp, VolumeDisplayOp,
-    VolumeScalarsDisplayOp, VolumeSourceOp, VoxelMaskDisplayOp, WorkflowNodeKind,
+    RoiFromParcelOp, RoiFromShapeOp, RoiFromVolumeOp, RoiShape, SampleVolumeAlongStreamlineOp,
+    SaveStreamlinesOp, SphereQueryOp, StreamlineDirectionFieldOp, StreamlineDisplayOp,
+    StreamlineSourceOp, SurfaceDepthQueryOp, SurfaceDisplayOp, SurfaceOverlayStackOp,
+    SurfaceProjectionDensityOp, SurfaceProjectionMeanDpsOp, SurfaceSourceOp, TipPruneOp,
+    UniformColorOp, VolumeDisplayOp, VolumeOverlayStackOp, VolumeSourceOp, VoxelMaskDisplayOp,
+    WorkflowNodeKind,
     YehTractographyOp,
 };
 pub(crate) use types::{EvaluatedValue, WorkflowValue};

@@ -240,4 +240,38 @@ impl EvalCtx<'_, '_> {
     pub fn upstream_stale(&self) -> bool {
         self.inputs.iter().flatten().any(|value| value.stale)
     }
+
+    /// Yield the `VolumeScalars` view of a `VolumeBacking`. For `InMemory`
+    /// the underlying `Arc` is borrowed; for `File` the loaded NIfTI is
+    /// converted via `volume_scalars_from_nifti_volume` (clones the voxel
+    /// buffer). Errors if the asset isn't loaded.
+    pub fn scalars_for<'b>(
+        &'b self,
+        backing: &'b super::VolumeBacking,
+    ) -> WorkflowResult<Cow<'b, crate::data::cifti::VolumeScalars>> {
+        match backing {
+            super::VolumeBacking::InMemory { scalars, .. } => {
+                Ok(Cow::Borrowed(scalars.as_ref()))
+            }
+            super::VolumeBacking::File(id) => {
+                let loaded = self.volume_assets.get(id).ok_or_else(|| {
+                    crate::error::WorkflowError::Evaluation(format!(
+                        "Missing volume asset {id}"
+                    ))
+                })?;
+                Ok(Cow::Owned(super::volume_scalars_from_nifti_volume(
+                    &loaded.volume,
+                    String::new(),
+                    *id,
+                )))
+            }
+            super::VolumeBacking::Composite { .. } => Err(
+                crate::error::WorkflowError::Evaluation(
+                    "Composite volume (from Volume Overlay Stack) can't be sampled as \
+                     a single scalar volume — wire scalar producers directly to this op."
+                        .into(),
+                ),
+            ),
+        }
+    }
 }

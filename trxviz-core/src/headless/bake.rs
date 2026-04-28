@@ -93,3 +93,38 @@ pub(super) fn bake_slice_png(
     )?;
     Ok(png)
 }
+
+/// Bake a composite slice (multi-layer windowed/threshold/colormap
+/// composition) into a PNG, reusing the same `composite_slice_into`
+/// helper the live renderer uses so the GLB output matches the GUI.
+#[cfg(feature = "png-export")]
+pub(super) fn bake_composite_slice_png(
+    stack: &crate::workflow::CompositeVolumeStack,
+    axis_index: usize,
+    slice_index: usize,
+) -> anyhow::Result<Vec<u8>> {
+    use crate::renderer::slice_composite::composite_slice_into;
+    use crate::renderer::slice_renderer::SliceAxis;
+
+    let axis = match axis_index {
+        0 => SliceAxis::Axial,
+        1 => SliceAxis::Coronal,
+        _ => SliceAxis::Sagittal,
+    };
+    let (width, height) = match axis_index {
+        0 => (stack.dims[0] as u32, stack.dims[1] as u32),
+        1 => (stack.dims[0] as u32, stack.dims[2] as u32),
+        _ => (stack.dims[1] as u32, stack.dims[2] as u32),
+    };
+    let mut rgba = vec![0u8; (width as usize) * (height as usize) * 4];
+    composite_slice_into(&mut rgba, stack, axis, slice_index);
+
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png).write_image(
+        &rgba,
+        width,
+        height,
+        image::ExtendedColorType::Rgba8,
+    )?;
+    Ok(png)
+}

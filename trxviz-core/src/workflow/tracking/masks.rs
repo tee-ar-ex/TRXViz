@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use super::super::tracking_filters::{
     point_in_mask, streamline_endpoint_in, streamline_hits_all_rois, streamline_passes_hausdorff,
-    streamline_passes_pyafq_prob, streamline_satisfies_end_masks,
+    streamline_satisfies_end_masks,
 };
 use super::super::types::{PostFilter, VoxelMask};
 use super::accum::AttemptOutcome;
@@ -61,14 +61,6 @@ impl<'a> PostFilterSet<'a> {
             }) => {
                 if !streamline_passes_hausdorff(streamline, reference_points_ras, *max_mm) {
                     return Some(AttemptOutcome::RejectHausdorff);
-                }
-            }
-            Some(PostFilter::PyAFQProb {
-                prob_map,
-                threshold,
-            }) => {
-                if !streamline_passes_pyafq_prob(streamline, prob_map, *threshold) {
-                    return Some(AttemptOutcome::RejectPyafqProb);
                 }
             }
             None => {}

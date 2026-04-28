@@ -27,7 +27,6 @@ pub fn port_name(port: PortKind) -> &'static str {
         PortKind::ParcelSelection => "Parcel Set",
         PortKind::Cifti => "CIFTI",
         PortKind::SurfaceScalars => "Surface Scalars",
-        PortKind::VolumeScalars => "Volume Scalars",
         PortKind::SurfaceAppearance => "Surface Appearance",
         PortKind::BundleSurface => "Bundle Surface",
         PortKind::BoundaryField => "Boundary Field",
@@ -89,11 +88,6 @@ pub fn output_port_label(
     port: PortKind,
 ) -> String {
     match node_kind {
-        WorkflowNodeKind::OdxVolumeSelect { .. } => match output_index {
-            0 => "Volume".to_string(),
-            1 => "Volume Scalars".to_string(),
-            _ => port_name(port).to_string(),
-        },
         WorkflowNodeKind::PrepareHausdorffPlan { .. } => match output_index {
             0 => "Plan".to_string(),
             1 => "Seed Mask".to_string(),
@@ -103,6 +97,15 @@ pub fn output_port_label(
         },
         WorkflowNodeKind::PrepareSimplePlan { .. } => match output_index {
             0 => "Plan".to_string(),
+            _ => port_name(port).to_string(),
+        },
+        WorkflowNodeKind::PreparePyafqPlan { .. } => match output_index {
+            0 => "Plan".to_string(),
+            1 => "Include".to_string(),
+            2 => "Exclude".to_string(),
+            3 => "Start Mask".to_string(),
+            4 => "End Mask".to_string(),
+            5 => "Probability Map".to_string(),
             _ => port_name(port).to_string(),
         },
         WorkflowNodeKind::Purifibre { .. } => match output_index {

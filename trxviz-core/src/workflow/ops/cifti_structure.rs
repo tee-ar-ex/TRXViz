@@ -2,7 +2,8 @@ use crate::data::cifti::CiftiStructure;
 use crate::workflow::methods::OpCategory;
 
 use super::super::{
-    EvalCtx, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue, expect_cifti_input,
+    EvalCtx, PortKind, VolumeBacking, WorkflowNodeKind, WorkflowOp, WorkflowValue,
+    expect_cifti_input,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -30,7 +31,7 @@ impl WorkflowOp for CiftiStructureOp {
 
     fn output_ports(&self) -> &'static [PortKind] {
         match self.structure {
-            CiftiStructure::Subcortical => &[PortKind::VolumeScalars],
+            CiftiStructure::Subcortical => &[PortKind::Volume],
             _ => &[PortKind::SurfaceScalars],
         }
     }
@@ -82,7 +83,7 @@ impl WorkflowOp for CiftiStructureOp {
                 .get(self.map_index)
                 .cloned()
                 .flatten()
-                .map(|value| WorkflowValue::VolumeScalars(value).into())
+                .map(|value| WorkflowValue::Volume(VolumeBacking::from_scalars(value)).into())
                 .ok_or_else(|| {
                     crate::error::WorkflowError::Evaluation(format!(
                         "CIFTI subcortical map {} is unavailable",
