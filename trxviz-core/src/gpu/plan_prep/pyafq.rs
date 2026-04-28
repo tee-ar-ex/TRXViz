@@ -773,7 +773,10 @@ mod tests {
 
         for (display, expected_desc) in [
             ("Left Superior Longitudinal I", "LeftSuperiorLongitudinalI"),
-            ("Left Superior Longitudinal II", "LeftSuperiorLongitudinalII"),
+            (
+                "Left Superior Longitudinal II",
+                "LeftSuperiorLongitudinalII",
+            ),
             (
                 "Left Superior Longitudinal III",
                 "LeftSuperiorLongitudinalIII",

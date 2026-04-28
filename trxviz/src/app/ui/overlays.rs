@@ -747,15 +747,12 @@ fn draw_voxel_accurate_overlay(
     // (impossible for an invertible affine, but guarded for safety).
     if matches!(slice_mode, VoxelMaskSliceMode::Outline) {
         if let Some(normal_axis) = dominant_voxel_axis(n_v) {
-            draw_voxel_outline_contour(
-                painter, project, mask, aff, n_v, d_v, normal_axis, color,
-            );
+            draw_voxel_outline_contour(painter, project, mask, aff, n_v, d_v, normal_axis, color);
             return;
         }
     }
 
-    let cube_half_extent =
-        0.5 * (n_v.x.abs() + n_v.y.abs() + n_v.z.abs());
+    let cube_half_extent = 0.5 * (n_v.x.abs() + n_v.y.abs() + n_v.z.abs());
 
     // Iterate only on-voxels (cached on the mask). For typical ROIs of
     // ~10K voxels in a 256³ volume this is ~1600× cheaper than
@@ -772,13 +769,7 @@ fn draw_voxel_accurate_overlay(
             continue;
         }
         let voxel_origin = glam::Vec3::new(*i as f32, *j as f32, *k as f32);
-        cube_slice_polygon_voxel_offsets(
-            aff,
-            voxel_origin,
-            world_axis,
-            slice_pos,
-            &mut offset_buf,
-        );
+        cube_slice_polygon_voxel_offsets(aff, voxel_origin, world_axis, slice_pos, &mut offset_buf);
         if offset_buf.len() < 3 {
             continue;
         }
@@ -1004,11 +995,16 @@ fn cube_slice_polygon_voxel_offsets(
     }
     // The 12 cube edges (pairs of corner indices).
     const EDGES: [(usize, usize); 12] = [
-        (0, 1), (0, 2), (0, 4),
-        (1, 3), (1, 5),
-        (2, 3), (2, 6),
+        (0, 1),
+        (0, 2),
+        (0, 4),
+        (1, 3),
+        (1, 5),
+        (2, 3),
+        (2, 6),
         (3, 7),
-        (4, 5), (4, 6),
+        (4, 5),
+        (4, 6),
         (5, 7),
         (6, 7),
     ];
@@ -1043,7 +1039,10 @@ fn cube_slice_polygon_voxel_offsets(
     let dup_eps2 = 1e-8f32;
     let mut deduped: Vec<glam::Vec3> = Vec::with_capacity(offsets.len());
     for p in offsets {
-        if !deduped.iter().any(|q| (*q - p).length_squared() <= dup_eps2) {
+        if !deduped
+            .iter()
+            .any(|q| (*q - p).length_squared() <= dup_eps2)
+        {
             deduped.push(p);
         }
     }
@@ -1061,8 +1060,8 @@ fn cube_slice_polygon_voxel_offsets(
         .iter()
         .map(|o| voxel_to_ras.transform_point3(voxel_origin + *o))
         .collect();
-    let centroid_w = world.iter().copied().fold(glam::Vec3::ZERO, |a, b| a + b)
-        / (world.len() as f32);
+    let centroid_w =
+        world.iter().copied().fold(glam::Vec3::ZERO, |a, b| a + b) / (world.len() as f32);
     let mut indexed: Vec<(usize, f32)> = world
         .iter()
         .enumerate()
@@ -1079,22 +1078,14 @@ fn cube_slice_polygon_voxel_offsets(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        cube_slice_polygon_voxel_offsets, dominant_voxel_axis, voxel_outline_edges,
-    };
+    use super::{cube_slice_polygon_voxel_offsets, dominant_voxel_axis, voxel_outline_edges};
     use trxviz_core::workflow::VoxelMask;
 
     #[test]
     fn cube_slice_axis_aligned_axial_returns_unit_square() {
         // Identity affine, voxel at origin, slice at z = 0.5 (mid-cube).
         let mut out = Vec::new();
-        cube_slice_polygon_voxel_offsets(
-            glam::Mat4::IDENTITY,
-            glam::Vec3::ZERO,
-            2,
-            0.5,
-            &mut out,
-        );
+        cube_slice_polygon_voxel_offsets(glam::Mat4::IDENTITY, glam::Vec3::ZERO, 2, 0.5, &mut out);
         assert_eq!(out.len(), 4, "axial mid-slice ⇒ 4-corner quad");
         let mut x_min = f32::INFINITY;
         let mut x_max = f32::NEG_INFINITY;
@@ -1109,26 +1100,14 @@ mod tests {
     #[test]
     fn cube_slice_through_face_emits_face_polygon() {
         let mut out = Vec::new();
-        cube_slice_polygon_voxel_offsets(
-            glam::Mat4::IDENTITY,
-            glam::Vec3::ZERO,
-            2,
-            0.0,
-            &mut out,
-        );
+        cube_slice_polygon_voxel_offsets(glam::Mat4::IDENTITY, glam::Vec3::ZERO, 2, 0.0, &mut out);
         assert_eq!(out.len(), 4);
     }
 
     #[test]
     fn cube_slice_outside_returns_empty() {
         let mut out = Vec::new();
-        cube_slice_polygon_voxel_offsets(
-            glam::Mat4::IDENTITY,
-            glam::Vec3::ZERO,
-            2,
-            5.0,
-            &mut out,
-        );
+        cube_slice_polygon_voxel_offsets(glam::Mat4::IDENTITY, glam::Vec3::ZERO, 2, 5.0, &mut out);
         assert!(out.is_empty());
     }
 
@@ -1142,14 +1121,8 @@ mod tests {
 
     #[test]
     fn dominant_voxel_axis_picks_largest_component() {
-        assert_eq!(
-            dominant_voxel_axis(glam::Vec3::new(0.0, 0.0, 2.0)),
-            Some(2)
-        );
-        assert_eq!(
-            dominant_voxel_axis(glam::Vec3::new(1.5, 0.0, 0.0)),
-            Some(0)
-        );
+        assert_eq!(dominant_voxel_axis(glam::Vec3::new(0.0, 0.0, 2.0)), Some(2));
+        assert_eq!(dominant_voxel_axis(glam::Vec3::new(1.5, 0.0, 0.0)), Some(0));
     }
 
     #[test]
@@ -1180,10 +1153,7 @@ mod tests {
     }
 
     /// Build a 3×3×3 mask with the given on-voxel indices and affine.
-    fn mask_with(
-        on: &[[u32; 3]],
-        voxel_to_ras: glam::Mat4,
-    ) -> VoxelMask {
+    fn mask_with(on: &[[u32; 3]], voxel_to_ras: glam::Mat4) -> VoxelMask {
         let mut data = vec![0u8; 27];
         for [i, j, k] in on {
             let idx = *i as usize + 3 * (*j as usize + 3 * *k as usize);
@@ -1226,9 +1196,16 @@ mod tests {
         assert_eq!(normal_axis, 2);
 
         let mut edges: Vec<[glam::Vec3; 2]> = Vec::new();
-        voxel_outline_edges(&mask, glam::Mat4::IDENTITY, n_v, d_v, normal_axis, |a, b| {
-            edges.push([a, b]);
-        });
+        voxel_outline_edges(
+            &mask,
+            glam::Mat4::IDENTITY,
+            n_v,
+            d_v,
+            normal_axis,
+            |a, b| {
+                edges.push([a, b]);
+            },
+        );
         assert_eq!(edges.len(), 4, "isolated voxel should emit 4 edges");
         for [a, b] in &edges {
             assert!((a.z - 1.5).abs() < 1e-5);
@@ -1293,9 +1270,16 @@ mod tests {
         let normal_axis = dominant_voxel_axis(n_v).unwrap();
 
         let mut edges: Vec<[glam::Vec3; 2]> = Vec::new();
-        voxel_outline_edges(&mask, glam::Mat4::IDENTITY, n_v, d_v, normal_axis, |a, b| {
-            edges.push([a, b]);
-        });
+        voxel_outline_edges(
+            &mask,
+            glam::Mat4::IDENTITY,
+            n_v,
+            d_v,
+            normal_axis,
+            |a, b| {
+                edges.push([a, b]);
+            },
+        );
         assert_eq!(
             edges.len(),
             6,

@@ -85,8 +85,10 @@ impl WorkflowOp for VolumeOverlayStackOp {
             ));
         };
 
-        let mut layers: Vec<(Arc<crate::data::cifti::VolumeScalars>, VolumeOverlayLayerConfig)> =
-            Vec::with_capacity(self.layers.len());
+        let mut layers: Vec<(
+            Arc<crate::data::cifti::VolumeScalars>,
+            VolumeOverlayLayerConfig,
+        )> = Vec::with_capacity(self.layers.len());
         for (i, cfg) in self.layers.iter().enumerate() {
             let Some(scalars) = layer_scalars[i].clone() else {
                 continue;

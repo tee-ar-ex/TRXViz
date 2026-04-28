@@ -444,10 +444,7 @@ impl eframe::App for TrxVizApp {
             if let Some(rs) = frame.wgpu_render_state() {
                 use trxviz_core::renderer::slice_renderer::SliceResourceKind;
                 let mut renderer = rs.renderer.write();
-                if let Some(all) = renderer
-                    .callback_resources
-                    .get_mut::<AllSliceResources>()
-                {
+                if let Some(all) = renderer.callback_resources.get_mut::<AllSliceResources>() {
                     for (file_id, sr) in all.entries.iter_mut() {
                         let world = self.viewport.slice_world_offsets();
                         match sr {
@@ -461,8 +458,7 @@ impl eframe::App for TrxVizApp {
                                     .iter()
                                     .find(|n| n.id == *file_id)
                                     .map(|nf| {
-                                        &nf.volume
-                                            as &trxviz_core::data::nifti_data::NiftiVolume
+                                        &nf.volume as &trxviz_core::data::nifti_data::NiftiVolume
                                     })
                                     .or_else(|| {
                                         self.workflow
@@ -476,13 +472,16 @@ impl eframe::App for TrxVizApp {
                                 // bufferless NiftiVolume — `update_slice`
                                 // for the scalar path only reads
                                 // dims+affine.
-                                let mem_vol_owned = file_vol.is_none().then(|| {
-                                    self.workflow
-                                        .runtime
-                                        .scene_plan
-                                        .volume_draws
-                                        .iter()
-                                        .find_map(|d| match &d.source {
+                                let mem_vol_owned = file_vol
+                                    .is_none()
+                                    .then(|| {
+                                        self.workflow
+                                            .runtime
+                                            .scene_plan
+                                            .volume_draws
+                                            .iter()
+                                            .find_map(|d| {
+                                                match &d.source {
                                             trxviz_core::workflow::VolumeBacking::InMemory {
                                                 handle,
                                                 scalars,
@@ -494,8 +493,10 @@ impl eframe::App for TrxVizApp {
                                                 },
                                             ),
                                             _ => None,
-                                        })
-                                }).flatten();
+                                        }
+                                            })
+                                    })
+                                    .flatten();
                                 let vol_ref = file_vol.or(mem_vol_owned.as_ref());
                                 if let Some(vol) = vol_ref {
                                     scalar.update_slice(
@@ -533,12 +534,11 @@ impl eframe::App for TrxVizApp {
                                         _ => None,
                                     });
                                 if let Some(stack) = stack {
-                                    let synth_vol =
-                                        trxviz_core::data::nifti_data::NiftiVolume {
-                                            data: Vec::new(),
-                                            dims: stack.dims,
-                                            voxel_to_ras: stack.voxel_to_ras,
-                                        };
+                                    let synth_vol = trxviz_core::data::nifti_data::NiftiVolume {
+                                        data: Vec::new(),
+                                        dims: stack.dims,
+                                        voxel_to_ras: stack.voxel_to_ras,
+                                    };
                                     composite.update_slice(
                                         &rs.device,
                                         &rs.queue,

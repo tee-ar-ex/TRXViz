@@ -531,11 +531,9 @@ impl WorkflowNodeKind {
                 ports.extend(std::iter::repeat(PortKind::SurfaceScalars).take(layers.len()));
                 ports
             }
-            Self::VolumeOverlayStack { layers } => {
-                std::iter::repeat(PortKind::Volume)
-                    .take(layers.len())
-                    .collect()
-            }
+            Self::VolumeOverlayStack { layers } => std::iter::repeat(PortKind::Volume)
+                .take(layers.len())
+                .collect(),
             _ => input_ports(self)
                 .expect("handled by workflow op registry")
                 .to_vec(),

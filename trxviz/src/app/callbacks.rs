@@ -349,11 +349,7 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                                     1 => SliceAxis::Coronal,
                                     _ => SliceAxis::Sagittal,
                                 };
-                                render_pass.set_bind_group(
-                                    0,
-                                    c.bind_group(viewport_3d, axis),
-                                    &[],
-                                );
+                                render_pass.set_bind_group(0, c.bind_group(viewport_3d, axis), &[]);
                                 render_pass.set_vertex_buffer(0, c.quad_buffers[i].slice(..));
                                 render_pass.draw_indexed(0..6, 0, 0..1);
                             }
@@ -671,16 +667,13 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                     match sr {
                         SliceResourceKind::Scalar(s) => {
                             render_pass.set_pipeline(&s.pipeline);
-                            render_pass
-                                .set_bind_group(0, s.bind_group(self.viewport.into()), &[]);
+                            render_pass.set_bind_group(0, s.bind_group(self.viewport.into()), &[]);
                             render_pass.set_index_buffer(
                                 s.quad_index_buffer.slice(..),
                                 wgpu::IndexFormat::Uint16,
                             );
-                            render_pass.set_vertex_buffer(
-                                0,
-                                s.quad_buffers[self.quad_index].slice(..),
-                            );
+                            render_pass
+                                .set_vertex_buffer(0, s.quad_buffers[self.quad_index].slice(..));
                             render_pass.draw_indexed(0..6, 0, 0..1);
                         }
                         SliceResourceKind::Composite(c) => {
@@ -694,10 +687,8 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                                 c.quad_index_buffer.slice(..),
                                 wgpu::IndexFormat::Uint16,
                             );
-                            render_pass.set_vertex_buffer(
-                                0,
-                                c.quad_buffers[self.quad_index].slice(..),
-                            );
+                            render_pass
+                                .set_vertex_buffer(0, c.quad_buffers[self.quad_index].slice(..));
                             render_pass.draw_indexed(0..6, 0, 0..1);
                         }
                     }

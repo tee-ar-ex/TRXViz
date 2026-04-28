@@ -1225,9 +1225,9 @@ pub(crate) fn edit_node_op(
             let mut auto_filled_space: Option<String> = None;
             let mut auto_detect_failed = false;
             if to_space.is_empty() && !working_dir.is_empty() {
-                match trxviz_core::gpu::plan_prep::pyafq::auto_pick_to_space(
-                    std::path::Path::new(working_dir.as_str()),
-                ) {
+                match trxviz_core::gpu::plan_prep::pyafq::auto_pick_to_space(std::path::Path::new(
+                    working_dir.as_str(),
+                )) {
                     Some(picked) => {
                         *to_space = picked.clone();
                         auto_filled_space = Some(picked);

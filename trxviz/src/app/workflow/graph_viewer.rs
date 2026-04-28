@@ -1175,9 +1175,6 @@ mod tests {
             input_port_label(&node, 1, PortKind::Volume),
             "Opacity Scalars"
         );
-        assert_eq!(
-            input_port_label(&node, 2, PortKind::Volume),
-            "Size Scalars"
-        );
+        assert_eq!(input_port_label(&node, 2, PortKind::Volume), "Size Scalars");
     }
 }

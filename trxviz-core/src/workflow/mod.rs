@@ -87,7 +87,6 @@ pub use ops::{
     StreamlineSourceOp, SurfaceDepthQueryOp, SurfaceDisplayOp, SurfaceOverlayStackOp,
     SurfaceProjectionDensityOp, SurfaceProjectionMeanDpsOp, SurfaceSourceOp, TipPruneOp,
     UniformColorOp, VolumeDisplayOp, VolumeOverlayStackOp, VolumeSourceOp, VoxelMaskDisplayOp,
-    WorkflowNodeKind,
-    YehTractographyOp,
+    WorkflowNodeKind, YehTractographyOp,
 };
 pub(crate) use types::{EvaluatedValue, WorkflowValue};

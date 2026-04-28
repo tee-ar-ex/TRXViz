@@ -188,15 +188,9 @@ impl super::TrxVizApp {
         // as "scene already has content" so dropping a NIfTI on top is
         // treated as additive — don't re-anchor the camera or jump the
         // slice plane away from what the user is currently looking at.
-        let workflow_has_volumes = !self
-            .workflow
-            .runtime
-            .scene_plan
-            .volume_draws
-            .is_empty();
+        let workflow_has_volumes = !self.workflow.runtime.scene_plan.volume_draws.is_empty();
         let has_odx = self.scene.odx_scene.is_some();
-        let first_nifti =
-            self.scene.nifti_files.is_empty() && !workflow_has_volumes && !has_odx;
+        let first_nifti = self.scene.nifti_files.is_empty() && !workflow_has_volumes && !has_odx;
         let slice_indices = [vol.dims[2] / 2, vol.dims[1] / 2, vol.dims[0] / 2];
         let is_first = self.scene.nifti_files.is_empty()
             && self.scene.trx_files.is_empty()
@@ -230,10 +224,7 @@ impl super::TrxVizApp {
                 for draw in &self.workflow.runtime.scene_plan.volume_draws {
                     if let trxviz_core::workflow::VolumeBacking::InMemory { scalars, .. } =
                         &draw.source
-                        && aabb_overlap(
-                            new_box,
-                            ras_aabb(scalars.dims, scalars.voxel_to_ras),
-                        )
+                        && aabb_overlap(new_box, ras_aabb(scalars.dims, scalars.voxel_to_ras))
                     {
                         overlaps = true;
                         break;

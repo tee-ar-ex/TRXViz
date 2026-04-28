@@ -101,11 +101,11 @@ impl WorkflowOp for PreparePyafqPlanOp {
     fn output_ports(&self) -> &'static [PortKind] {
         &[
             PortKind::TrackingPlan,
-            PortKind::VoxelMask,     // include union (visualization)
-            PortKind::VoxelMask,     // exclude union
-            PortKind::VoxelMask,     // start
-            PortKind::VoxelMask,     // end
-            PortKind::Volume, // continuous probability map (omitted when none)
+            PortKind::VoxelMask, // include union (visualization)
+            PortKind::VoxelMask, // exclude union
+            PortKind::VoxelMask, // start
+            PortKind::VoxelMask, // end
+            PortKind::Volume,    // continuous probability map (omitted when none)
         ]
     }
 

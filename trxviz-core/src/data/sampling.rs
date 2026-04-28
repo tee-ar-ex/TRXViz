@@ -28,9 +28,8 @@ pub fn trilinear(scalars: &VolumeScalars, voxel: Vec3) -> Option<f32> {
     let fz = voxel.z - z0 as f32;
     let dxs = scalars.dims[0];
     let dys = scalars.dims[1];
-    let idx = |x: i32, y: i32, z: i32| -> usize {
-        x as usize + dxs * (y as usize + dys * z as usize)
-    };
+    let idx =
+        |x: i32, y: i32, z: i32| -> usize { x as usize + dxs * (y as usize + dys * z as usize) };
     let v000 = scalars.values[idx(x0, y0, z0)];
     let v100 = scalars.values[idx(x0 + 1, y0, z0)];
     let v010 = scalars.values[idx(x0, y0 + 1, z0)];

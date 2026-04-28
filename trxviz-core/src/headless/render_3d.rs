@@ -206,7 +206,11 @@ pub(super) fn render_scene3d_to_png(
         resources.fixels_3d.update_directional(
             queue,
             viewport_3d,
-            if render_data.fixel_directional { 1.0 } else { 0.0 },
+            if render_data.fixel_directional {
+                1.0
+            } else {
+                0.0
+            },
         );
     }
 
@@ -285,11 +289,7 @@ pub(super) fn render_scene3d_to_png(
                                 1 => crate::renderer::slice_renderer::SliceAxis::Coronal,
                                 _ => crate::renderer::slice_renderer::SliceAxis::Sagittal,
                             };
-                            render_pass.set_bind_group(
-                                0,
-                                c.bind_group(viewport_3d, axis),
-                                &[],
-                            );
+                            render_pass.set_bind_group(0, c.bind_group(viewport_3d, axis), &[]);
                             render_pass.set_vertex_buffer(0, c.quad_buffers[i].slice(..));
                             render_pass.draw_indexed(0..6, 0, 0..1);
                         }

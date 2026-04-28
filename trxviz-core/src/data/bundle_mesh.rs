@@ -957,9 +957,7 @@ pub fn build_voxel_mask_boundary_mesh(
                     if on(nx_i, ny_i, nz_i) {
                         continue;
                     }
-                    let n_world = normal_xform
-                        .mul_vec3(face.normal_voxel)
-                        .normalize_or_zero();
+                    let n_world = normal_xform.mul_vec3(face.normal_voxel).normalize_or_zero();
                     let normal = if n_world.length_squared() > 0.0 {
                         n_world.to_array()
                     } else {
@@ -977,7 +975,14 @@ pub fn build_voxel_mask_boundary_mesh(
                         });
                     }
                     // Two triangles, CCW: (0,1,2) and (0,2,3).
-                    indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+                    indices.extend_from_slice(&[
+                        base,
+                        base + 1,
+                        base + 2,
+                        base,
+                        base + 2,
+                        base + 3,
+                    ]);
                 }
             }
         }
@@ -1308,13 +1313,9 @@ mod tests {
         let i = 1usize + 4 * (2usize + 4 * 3usize);
         mask[i] = 1;
 
-        let mesh = build_voxel_mask_boundary_mesh(
-            dims,
-            glam::Mat4::IDENTITY,
-            &mask,
-            [1.0, 0.0, 0.0, 1.0],
-        )
-        .expect("mesh");
+        let mesh =
+            build_voxel_mask_boundary_mesh(dims, glam::Mat4::IDENTITY, &mask, [1.0, 0.0, 0.0, 1.0])
+                .expect("mesh");
         assert_eq!(mesh.indices.len(), 6 * 6, "12 triangles × 3 indices");
         assert_eq!(mesh.vertices.len(), 6 * 4, "4 unique verts per face");
 

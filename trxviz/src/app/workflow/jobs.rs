@@ -2298,20 +2298,18 @@ impl crate::app::TrxVizApp {
                                 .get::<GlyphResources>()
                                 .is_none()
                             {
-                                renderer.callback_resources.insert(GlyphResources::new(
-                                    &rs.device,
-                                    rs.target_format,
-                                ));
+                                renderer
+                                    .callback_resources
+                                    .insert(GlyphResources::new(&rs.device, rs.target_format));
                             }
                             if renderer
                                 .callback_resources
                                 .get::<OdxFixelResources>()
                                 .is_none()
                             {
-                                renderer.callback_resources.insert(OdxFixelResources::new(
-                                    &rs.device,
-                                    rs.target_format,
-                                ));
+                                renderer
+                                    .callback_resources
+                                    .insert(OdxFixelResources::new(&rs.device, rs.target_format));
                             }
                             if let Some(fr) =
                                 renderer.callback_resources.get_mut::<OdxFixelResources>()

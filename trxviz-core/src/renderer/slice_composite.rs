@@ -299,13 +299,8 @@ impl CompositeSliceResources {
         // allow a clean re-init if anything slipped through).
         let (w, h) = plane_size(stack.dims, axis);
         if self.axes[buffer_index].size != [w, h] {
-            self.axes[buffer_index] = create_axis_resources(
-                device,
-                &self.bind_group_layout,
-                &self.sampler,
-                w,
-                h,
-            );
+            self.axes[buffer_index] =
+                create_axis_resources(device, &self.bind_group_layout, &self.sampler, w, h);
             // Re-bind the new texture's view into each viewport's
             // bind group, pointing at the real uniform buffers.
             self.axes[buffer_index].bind_groups = std::array::from_fn(|vp| {
@@ -399,7 +394,6 @@ impl CompositeSliceResources {
     pub fn bind_group(&self, viewport: usize, axis: SliceAxis) -> &wgpu::BindGroup {
         &self.axes[axis_index(axis)].bind_groups[viewport]
     }
-
 }
 
 fn axis_index(axis: SliceAxis) -> usize {
@@ -491,8 +485,7 @@ fn slice_corners(
     axis: SliceAxis,
     slice_index: usize,
 ) -> [Vec3; 4] {
-    let to_world =
-        |voxel: Vec3| -> Vec3 { voxel_to_ras.transform_point3(voxel) };
+    let to_world = |voxel: Vec3| -> Vec3 { voxel_to_ras.transform_point3(voxel) };
     match axis {
         SliceAxis::Axial => {
             let kf = slice_index as f32;
@@ -601,9 +594,7 @@ pub fn composite_slice_into(
                 } else {
                     let layer_voxel = layer_ras_to_voxel[layer_idx].transform_point3(ras);
                     let sampled = match cfg.interpolation {
-                        Interp::Trilinear => {
-                            crate::data::sampling::trilinear(scalars, layer_voxel)
-                        }
+                        Interp::Trilinear => crate::data::sampling::trilinear(scalars, layer_voxel),
                         Interp::Nearest => crate::data::sampling::nearest(scalars, layer_voxel),
                     };
                     match sampled {
@@ -613,10 +604,7 @@ pub fn composite_slice_into(
                 };
 
                 // Threshold gate.
-                if !value.is_finite()
-                    || value < cfg.threshold_min
-                    || value > cfg.threshold_max
-                {
+                if !value.is_finite() || value < cfg.threshold_min || value > cfg.threshold_max {
                     continue;
                 }
 
@@ -645,12 +633,7 @@ pub fn composite_slice_into(
                 // Porter-Duff "src over dst" with `src` = current
                 // layer (front), `acc` = accumulated layers (back).
                 // Premultiplied form: out = src + dst * (1 - src.a).
-                let src = Vec4::new(
-                    rgb[0] * alpha,
-                    rgb[1] * alpha,
-                    rgb[2] * alpha,
-                    alpha,
-                );
+                let src = Vec4::new(rgb[0] * alpha, rgb[1] * alpha, rgb[2] * alpha, alpha);
                 acc = src + acc * (1.0 - alpha);
             }
 

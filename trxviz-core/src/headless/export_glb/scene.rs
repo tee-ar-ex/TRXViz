@@ -331,20 +331,19 @@ pub(crate) fn build_glb_scene(
             // Otherwise look for a Composite stack matching this draw's
             // handle. (InMemory scalar volumes still have no GLB
             // export path — that's a separate gap.)
-            if let Some(stack) =
-                workflow
-                    .runtime
-                    .scene_plan
-                    .volume_draws
-                    .iter()
-                    .find_map(|d| match &d.source {
-                        crate::workflow::VolumeBacking::Composite { handle, stack }
-                            if (*handle as usize) == volume.slice_key =>
-                        {
-                            Some(stack.clone())
-                        }
-                        _ => None,
-                    })
+            if let Some(stack) = workflow
+                .runtime
+                .scene_plan
+                .volume_draws
+                .iter()
+                .find_map(|d| match &d.source {
+                    crate::workflow::VolumeBacking::Composite { handle, stack }
+                        if (*handle as usize) == volume.slice_key =>
+                    {
+                        Some(stack.clone())
+                    }
+                    _ => None,
+                })
             {
                 for axis_index in 0..3 {
                     if !scene.slice_visible[axis_index] {

@@ -3,9 +3,9 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use glam::{Mat4, Vec3, Vec4};
+use odx_rs::ShBasisEvaluator;
 use odx_rs::formats::dsistudio_odf8;
 use odx_rs::typed_view::TypedView2D;
-use odx_rs::ShBasisEvaluator;
 use odx_rs::{OdxDataset, mrtrix_sh};
 
 use crate::data::cifti::VolumeScalars;
@@ -315,12 +315,8 @@ impl OdxScene {
         // Pick the right SH basis (tournier vs descoteaux, sym vs full) from
         // the file header; falls back to non-negative tournier if the
         // header is silent (matches behavior before this dispatch existed).
-        let evaluator = ShBasisEvaluator::from_header(
-            self.dataset.header(),
-            &vertices,
-            ncoeffs,
-        )
-        .ok()?;
+        let evaluator =
+            ShBasisEvaluator::from_header(self.dataset.header(), &vertices, ncoeffs).ok()?;
         let mesh = Arc::new(ShRenderMesh {
             vertices,
             indices,
@@ -1290,9 +1286,9 @@ fn resolve_sh_source(dataset: &OdxDataset, warnings: &mut Vec<String>) -> Option
                     let full = header.sh_full_basis.unwrap_or(false);
                     odx_rs::descoteaux_sh::lmax_for_ncoeffs(ncoeffs, full).ok()
                 }
-                _ => mrtrix_sh::lmax_for_ncoeffs(ncoeffs).ok().or_else(|| {
-                    odx_rs::descoteaux_sh::lmax_for_ncoeffs(ncoeffs, true).ok()
-                }),
+                _ => mrtrix_sh::lmax_for_ncoeffs(ncoeffs)
+                    .ok()
+                    .or_else(|| odx_rs::descoteaux_sh::lmax_for_ncoeffs(ncoeffs, true).ok()),
             };
             match order {
                 Some(o) => o,
