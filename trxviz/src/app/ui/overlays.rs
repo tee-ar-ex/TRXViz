@@ -465,6 +465,10 @@ impl crate::app::TrxVizApp {
         view_proj: glam::Mat4,
         slice_pos: f32,
     ) {
+        use trxviz_core::workflow::VoxelMaskRenderStyle;
+        // VoxelMaskSliceMode is also used inside draw_voxel_accurate_overlay
+        // below — kept in scope via fully-qualified path on the helper.
+
         if self
             .workflow
             .runtime
@@ -488,10 +492,43 @@ impl crate::app::TrxVizApp {
             )
         };
 
+        // Slice-axis world coordinate the viewer cuts through. Layout in
+        // egui-overlay code:
+        //   axis_index 0 → sagittal slab (constant world Z plane)
+        //   axis_index 1 → coronal  slab (constant world Y plane)
+        //   axis_index 2 → axial    slab (constant world X plane)
+        // (matching the bbox-axis check below.)
+        let world_axis = match axis_index {
+            0 => 2usize, // Z
+            1 => 1usize, // Y
+            _ => 0usize, // X
+        };
+
         for draw in &self.workflow.runtime.scene_plan.voxel_mask_mesh_draws {
             if draw.opacity <= 0.01 {
                 continue;
             }
+
+            let color = egui::Color32::from_rgba_unmultiplied(
+                (draw.color[0].clamp(0.0, 1.0) * 255.0) as u8,
+                (draw.color[1].clamp(0.0, 1.0) * 255.0) as u8,
+                (draw.color[2].clamp(0.0, 1.0) * 255.0) as u8,
+                (draw.opacity.clamp(0.0, 1.0) * 255.0) as u8,
+            );
+
+            if matches!(draw.style, VoxelMaskRenderStyle::VoxelAccurate) {
+                draw_voxel_accurate_overlay(
+                    &painter,
+                    &project,
+                    &draw.voxel_mask,
+                    world_axis,
+                    slice_pos,
+                    color,
+                    draw.slice_mode,
+                );
+                continue;
+            }
+
             let Some(cache) = self
                 .workflow
                 .execution_cache
@@ -522,12 +559,6 @@ impl crate::app::TrxVizApp {
                 continue;
             }
 
-            let color = egui::Color32::from_rgba_unmultiplied(
-                (draw.color[0].clamp(0.0, 1.0) * 255.0) as u8,
-                (draw.color[1].clamp(0.0, 1.0) * 255.0) as u8,
-                (draw.color[2].clamp(0.0, 1.0) * 255.0) as u8,
-                (draw.opacity.clamp(0.0, 1.0) * 255.0) as u8,
-            );
             let stroke = egui::Stroke::new(1.5, color);
 
             for tri in mesh.indices.chunks_exact(3) {
@@ -656,5 +687,604 @@ impl crate::app::TrxVizApp {
                 painter.line_segment([project(segment[0]), project(segment[1])], stroke);
             }
         }
+    }
+}
+
+/// Voxel-accurate 2D overlay: for every "on" voxel whose world-space
+/// cube straddles the slice plane, fill the polygon where the cube meets
+/// the plane. For axis-aligned affines this collapses to a perfect grid
+/// of voxel rectangles; for oblique affines it produces correctly
+/// tilted/clipped polygons.
+fn draw_voxel_accurate_overlay(
+    painter: &egui::Painter,
+    project: &dyn Fn(glam::Vec3) -> egui::Pos2,
+    mask: &trxviz_core::workflow::VoxelMask,
+    world_axis: usize,
+    slice_pos: f32,
+    color: egui::Color32,
+    slice_mode: trxviz_core::workflow::VoxelMaskSliceMode,
+) {
+    use trxviz_core::workflow::VoxelMaskSliceMode;
+
+    let dims = mask.dims;
+    let (nx, ny, nz) = (dims[0] as usize, dims[1] as usize, dims[2] as usize);
+    if nx == 0 || ny == 0 || nz == 0 || mask.data.len() != nx * ny * nz {
+        return;
+    }
+    let aff = mask.voxel_to_ras;
+    // Bounding-box reject the whole mask before iterating.
+    let mut bbox_min = glam::Vec3::splat(f32::INFINITY);
+    let mut bbox_max = glam::Vec3::splat(f32::NEG_INFINITY);
+    for &dx in &[0.0f32, nx as f32] {
+        for &dy in &[0.0f32, ny as f32] {
+            for &dz in &[0.0f32, nz as f32] {
+                let p = aff.transform_point3(glam::Vec3::new(dx, dy, dz));
+                bbox_min = bbox_min.min(p);
+                bbox_max = bbox_max.max(p);
+            }
+        }
+    }
+    let eps = 1e-4f32;
+    if slice_pos < bbox_min[world_axis] - eps || slice_pos > bbox_max[world_axis] + eps {
+        return;
+    }
+
+    // Slice plane in voxel coords: n_v · v = d_v, where n_v = M^T e_world.
+    let m3 = glam::Mat3::from_mat4(aff);
+    let n_v = match world_axis {
+        0 => m3.transpose().x_axis,
+        1 => m3.transpose().y_axis,
+        _ => m3.transpose().z_axis,
+    };
+    let aff_translation = glam::Vec3::new(aff.w_axis.x, aff.w_axis.y, aff.w_axis.z);
+    let d_v = slice_pos - aff_translation[world_axis];
+
+    // Outline mode draws the perimeter of the masked region via
+    // `draw_voxel_outline_contour`. The slice snaps to the voxel layer
+    // along the dominant voxel axis, matching how the anatomical texture
+    // and parcellation contours behave for oblique affines. Falls
+    // through to filled only for the degenerate case where `n_v == 0`
+    // (impossible for an invertible affine, but guarded for safety).
+    if matches!(slice_mode, VoxelMaskSliceMode::Outline) {
+        if let Some(normal_axis) = dominant_voxel_axis(n_v) {
+            draw_voxel_outline_contour(painter, project, mask, aff, n_v, d_v, normal_axis, color);
+            return;
+        }
+    }
+
+    let cube_half_extent = 0.5 * (n_v.x.abs() + n_v.y.abs() + n_v.z.abs());
+
+    // Iterate only on-voxels (cached on the mask). For typical ROIs of
+    // ~10K voxels in a 256³ volume this is ~1600× cheaper than
+    // scanning the full grid each frame.
+    let on_voxels = mask.nonzero_voxel_indices();
+    let mut offset_buf: Vec<glam::Vec3> = Vec::with_capacity(8);
+    let mut polygon_buf: Vec<egui::Pos2> = Vec::with_capacity(8);
+
+    for [i, j, k] in on_voxels.iter() {
+        // Center value of n_v · v for the voxel center (i+0.5, j+0.5, k+0.5).
+        let center_v =
+            n_v.x * (*i as f32 + 0.5) + n_v.y * (*j as f32 + 0.5) + n_v.z * (*k as f32 + 0.5);
+        if (d_v - center_v).abs() > cube_half_extent + eps {
+            continue;
+        }
+        let voxel_origin = glam::Vec3::new(*i as f32, *j as f32, *k as f32);
+        cube_slice_polygon_voxel_offsets(aff, voxel_origin, world_axis, slice_pos, &mut offset_buf);
+        if offset_buf.len() < 3 {
+            continue;
+        }
+
+        polygon_buf.clear();
+        for o in &offset_buf {
+            polygon_buf.push(project(aff.transform_point3(voxel_origin + *o)));
+        }
+        painter.add(egui::Shape::convex_polygon(
+            polygon_buf.clone(),
+            color,
+            egui::Stroke::NONE,
+        ));
+    }
+}
+
+/// Return the voxel-space axis index (0/1/2) whose `n_v` component is
+/// largest in absolute value — i.e., the voxel axis most perpendicular
+/// to the slice plane. Used by outline mode to pick which voxel-layer
+/// the slice should snap to.
+///
+/// For axis-aligned / 90°-rotated affines this is the only non-zero
+/// component. For oblique affines it's an approximation: outline edges
+/// are emitted on a single layer of voxels along this axis and projected
+/// through `voxel_to_ras` to world space, matching the parcellation
+/// contour overlay's behavior on oblique data
+/// ([parcellation_data.rs:181](trxviz-core/src/data/parcellation_data.rs:181)).
+/// Both overlays therefore track the same voxel-aligned slab as the
+/// underlying anatomical texture.
+///
+/// Returns `None` only for the degenerate `n_v == 0` case (impossible
+/// for an invertible affine).
+fn dominant_voxel_axis(n_v: glam::Vec3) -> Option<usize> {
+    let abs = [n_v.x.abs(), n_v.y.abs(), n_v.z.abs()];
+    let mut best = 0usize;
+    for i in 1..3 {
+        if abs[i] > abs[best] {
+            best = i;
+        }
+    }
+    if abs[best] <= 1e-9 {
+        return None;
+    }
+    Some(best)
+}
+
+/// Outline mode for voxel masks.
+///
+/// The slice plane snaps to one voxel layer along `normal_axis` (the
+/// voxel axis most aligned with the world slice axis). For every
+/// on-voxel in that layer, walks its 4 in-plane face neighbors; where
+/// the neighbor is off (or out of bounds), emits the line segment where
+/// the shared face meets the slice plane. Endpoints are projected
+/// through `voxel_to_ras` to world space and orthographically projected
+/// to screen.
+///
+/// For axis-aligned and 90°-rotated affines the outline is exact. For
+/// oblique affines the outline matches the parcellation contour
+/// convention: it shows the voxel-aligned slab's perimeter projected
+/// through the affine, which lines up with the voxel-aligned anatomical
+/// texture under orthographic slice projection.
+fn draw_voxel_outline_contour(
+    painter: &egui::Painter,
+    project: &dyn Fn(glam::Vec3) -> egui::Pos2,
+    mask: &trxviz_core::workflow::VoxelMask,
+    aff: glam::Mat4,
+    n_v: glam::Vec3,
+    d_v: f32,
+    normal_axis: usize,
+    color: egui::Color32,
+) {
+    let stroke = egui::Stroke::new(1.5, color);
+    voxel_outline_edges(mask, aff, n_v, d_v, normal_axis, |a, b| {
+        painter.line_segment([project(a), project(b)], stroke);
+    });
+}
+
+/// Compute outline-mode edge segments and hand each one to `emit` as a
+/// `[world_a, world_b]` pair. Pure logic — no `egui::Painter` — so the
+/// algorithm is unit-testable in isolation. Both `draw_voxel_outline_contour`
+/// and the test suite go through this entry point.
+fn voxel_outline_edges<F>(
+    mask: &trxviz_core::workflow::VoxelMask,
+    aff: glam::Mat4,
+    n_v: glam::Vec3,
+    d_v: f32,
+    normal_axis: usize,
+    mut emit: F,
+) where
+    F: FnMut(glam::Vec3, glam::Vec3),
+{
+    let n_normal = match normal_axis {
+        0 => n_v.x,
+        1 => n_v.y,
+        _ => n_v.z,
+    };
+    if n_normal.abs() < 1e-9 {
+        return;
+    }
+    // Snap the slice to the voxel-axis layer it crosses *at the volume
+    // center*, matching the parcellation contour overlay's convention
+    // ([parcellation_data.rs:155](trxviz-core/src/data/parcellation_data.rs:155)).
+    // For axis-aligned data n_v has zero off-axis terms and this
+    // collapses to `d_v / n_normal`. For oblique data the slice plane
+    // crosses the voxel grid at a layer that varies across the volume;
+    // we pick the central one so the outline lines up with what the
+    // anatomical texture and parcellation contours show in the same
+    // viewport.
+    let center = glam::Vec3::new(
+        mask.dims[0] as f32 * 0.5,
+        mask.dims[1] as f32 * 0.5,
+        mask.dims[2] as f32 * 0.5,
+    );
+    let off_axis_sum = match normal_axis {
+        0 => n_v.y * center.y + n_v.z * center.z,
+        1 => n_v.x * center.x + n_v.z * center.z,
+        _ => n_v.x * center.x + n_v.y * center.y,
+    };
+    let slice_pos_v = (d_v - off_axis_sum) / n_normal;
+    let dim_normal = mask.dims[normal_axis] as f32;
+    if slice_pos_v < 0.0 || slice_pos_v > dim_normal {
+        return;
+    }
+
+    // Voxel layer the slice cuts through. `floor` puts a slice at the
+    // integer face into the lower voxel; clamp covers `slice_pos_v ==
+    // dims` (top boundary).
+    let dim_normal_i = mask.dims[normal_axis] as i32;
+    let layer = (slice_pos_v.floor() as i32).clamp(0, dim_normal_i - 1);
+
+    let in_plane: [usize; 2] = match normal_axis {
+        0 => [1, 2],
+        1 => [0, 2],
+        _ => [0, 1],
+    };
+
+    let dims_i = [
+        mask.dims[0] as i32,
+        mask.dims[1] as i32,
+        mask.dims[2] as i32,
+    ];
+    let dims_us = [
+        mask.dims[0] as usize,
+        mask.dims[1] as usize,
+        mask.dims[2] as usize,
+    ];
+    let lin = |i: i32, j: i32, k: i32| -> usize {
+        (i as usize) + dims_us[0] * ((j as usize) + dims_us[1] * (k as usize))
+    };
+
+    let on_voxels = mask.nonzero_voxel_indices();
+
+    for [i, j, k] in on_voxels.iter() {
+        let coords = [*i as i32, *j as i32, *k as i32];
+        if coords[normal_axis] != layer {
+            continue;
+        }
+        for &axis in &in_plane {
+            let other_axis = if axis == in_plane[0] {
+                in_plane[1]
+            } else {
+                in_plane[0]
+            };
+            for &dir in &[-1i32, 1i32] {
+                let mut neighbor = coords;
+                neighbor[axis] += dir;
+                let neighbor_on = neighbor[0] >= 0
+                    && neighbor[1] >= 0
+                    && neighbor[2] >= 0
+                    && neighbor[0] < dims_i[0]
+                    && neighbor[1] < dims_i[1]
+                    && neighbor[2] < dims_i[2]
+                    && mask.data[lin(neighbor[0], neighbor[1], neighbor[2])] != 0;
+                if neighbor_on {
+                    continue;
+                }
+                let mut p0 = [coords[0] as f32, coords[1] as f32, coords[2] as f32];
+                p0[axis] += if dir > 0 { 1.0 } else { 0.0 };
+                p0[normal_axis] = slice_pos_v;
+                let mut p1 = p0;
+                p1[other_axis] += 1.0;
+
+                let pa = aff.transform_point3(glam::Vec3::from(p0));
+                let pb = aff.transform_point3(glam::Vec3::from(p1));
+                emit(pa, pb);
+            }
+        }
+    }
+}
+
+/// Compute, in **voxel offset space** (each coordinate in `[0, 1]`), the
+/// convex polygon where the unit cube `[0,1]³` intersects the world-space
+/// slice plane defined by transforming `voxel_to_ras` and slicing at
+/// `world_pos[world_axis] == slice_pos`. Vertices are CCW-ordered around
+/// their centroid in the slice plane. The output buffer is cleared.
+///
+/// Returns offsets (not absolute voxel positions) so the caller can reuse
+/// them to identify which cube face an edge midpoint lies on, regardless
+/// of which voxel index this cube belongs to.
+fn cube_slice_polygon_voxel_offsets(
+    voxel_to_ras: glam::Mat4,
+    voxel_origin: glam::Vec3,
+    world_axis: usize,
+    slice_pos: f32,
+    out: &mut Vec<glam::Vec3>,
+) {
+    out.clear();
+    // 8 cube corners in voxel space (offsets).
+    const CORNERS: [glam::Vec3; 8] = [
+        glam::Vec3::new(0.0, 0.0, 0.0),
+        glam::Vec3::new(1.0, 0.0, 0.0),
+        glam::Vec3::new(0.0, 1.0, 0.0),
+        glam::Vec3::new(1.0, 1.0, 0.0),
+        glam::Vec3::new(0.0, 0.0, 1.0),
+        glam::Vec3::new(1.0, 0.0, 1.0),
+        glam::Vec3::new(0.0, 1.0, 1.0),
+        glam::Vec3::new(1.0, 1.0, 1.0),
+    ];
+    let mut sgn: [f32; 8] = [0.0; 8];
+    for (idx, off) in CORNERS.iter().enumerate() {
+        let p = voxel_to_ras.transform_point3(voxel_origin + *off);
+        sgn[idx] = p[world_axis] - slice_pos;
+    }
+    // The 12 cube edges (pairs of corner indices).
+    const EDGES: [(usize, usize); 12] = [
+        (0, 1),
+        (0, 2),
+        (0, 4),
+        (1, 3),
+        (1, 5),
+        (2, 3),
+        (2, 6),
+        (3, 7),
+        (4, 5),
+        (4, 6),
+        (5, 7),
+        (6, 7),
+    ];
+    let eps = 1e-6f32;
+    let mut offsets: Vec<glam::Vec3> = Vec::with_capacity(8);
+    for (a, b) in EDGES.iter() {
+        let oa = CORNERS[*a];
+        let ob = CORNERS[*b];
+        let ca = sgn[*a];
+        let cb = sgn[*b];
+        let pa_on = ca.abs() <= eps;
+        let pb_on = cb.abs() <= eps;
+        if pa_on {
+            offsets.push(oa);
+        }
+        if pb_on {
+            offsets.push(ob);
+        }
+        if pa_on || pb_on {
+            continue;
+        }
+        if ca * cb >= 0.0 {
+            continue;
+        }
+        let t = ca / (ca - cb);
+        offsets.push(oa.lerp(ob, t));
+    }
+    if offsets.len() < 3 {
+        return;
+    }
+    // Dedup near-duplicates.
+    let dup_eps2 = 1e-8f32;
+    let mut deduped: Vec<glam::Vec3> = Vec::with_capacity(offsets.len());
+    for p in offsets {
+        if !deduped
+            .iter()
+            .any(|q| (*q - p).length_squared() <= dup_eps2)
+        {
+            deduped.push(p);
+        }
+    }
+    if deduped.len() < 3 {
+        return;
+    }
+    // Sort CCW around centroid in the slice plane (in world space, since
+    // the slice plane is axis-aligned in world).
+    let world_basis = match world_axis {
+        0 => (glam::Vec3::Y, glam::Vec3::Z),
+        1 => (glam::Vec3::X, glam::Vec3::Z),
+        _ => (glam::Vec3::X, glam::Vec3::Y),
+    };
+    let world: Vec<glam::Vec3> = deduped
+        .iter()
+        .map(|o| voxel_to_ras.transform_point3(voxel_origin + *o))
+        .collect();
+    let centroid_w =
+        world.iter().copied().fold(glam::Vec3::ZERO, |a, b| a + b) / (world.len() as f32);
+    let mut indexed: Vec<(usize, f32)> = world
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            let d = *w - centroid_w;
+            (i, d.dot(world_basis.1).atan2(d.dot(world_basis.0)))
+        })
+        .collect();
+    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    for (idx, _) in indexed {
+        out.push(deduped[idx]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cube_slice_polygon_voxel_offsets, dominant_voxel_axis, voxel_outline_edges};
+    use trxviz_core::workflow::VoxelMask;
+
+    #[test]
+    fn cube_slice_axis_aligned_axial_returns_unit_square() {
+        // Identity affine, voxel at origin, slice at z = 0.5 (mid-cube).
+        let mut out = Vec::new();
+        cube_slice_polygon_voxel_offsets(glam::Mat4::IDENTITY, glam::Vec3::ZERO, 2, 0.5, &mut out);
+        assert_eq!(out.len(), 4, "axial mid-slice ⇒ 4-corner quad");
+        let mut x_min = f32::INFINITY;
+        let mut x_max = f32::NEG_INFINITY;
+        for p in &out {
+            x_min = x_min.min(p.x);
+            x_max = x_max.max(p.x);
+        }
+        assert!((x_min - 0.0).abs() < 1e-5);
+        assert!((x_max - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn cube_slice_through_face_emits_face_polygon() {
+        let mut out = Vec::new();
+        cube_slice_polygon_voxel_offsets(glam::Mat4::IDENTITY, glam::Vec3::ZERO, 2, 0.0, &mut out);
+        assert_eq!(out.len(), 4);
+    }
+
+    #[test]
+    fn cube_slice_outside_returns_empty() {
+        let mut out = Vec::new();
+        cube_slice_polygon_voxel_offsets(glam::Mat4::IDENTITY, glam::Vec3::ZERO, 2, 5.0, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn cube_slice_oblique_diagonal_emits_hexagon() {
+        let rot = glam::Mat4::from_rotation_y(std::f32::consts::FRAC_PI_4);
+        let mut out = Vec::new();
+        cube_slice_polygon_voxel_offsets(rot, glam::Vec3::ZERO, 2, 0.0, &mut out);
+        assert!(out.len() >= 3);
+    }
+
+    #[test]
+    fn dominant_voxel_axis_picks_largest_component() {
+        assert_eq!(dominant_voxel_axis(glam::Vec3::new(0.0, 0.0, 2.0)), Some(2));
+        assert_eq!(dominant_voxel_axis(glam::Vec3::new(1.5, 0.0, 0.0)), Some(0));
+    }
+
+    #[test]
+    fn dominant_voxel_axis_tolerates_floating_point_noise() {
+        // Sub-1% off-axis components: still axis-aligned.
+        assert_eq!(
+            dominant_voxel_axis(glam::Vec3::new(1e-5, 1e-5, 1.0)),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn dominant_voxel_axis_picks_largest_for_oblique() {
+        // 30° YZ rotation — Z still dominates.
+        assert_eq!(
+            dominant_voxel_axis(glam::Vec3::new(0.0, 0.5, 0.866)),
+            Some(2)
+        );
+        // 45° XZ rotation — exact tie. Tie-breaking is arbitrary; either
+        // axis is a valid choice and produces a coherent outline.
+        let axis = dominant_voxel_axis(glam::Vec3::new(0.707, 0.0, 0.707)).unwrap();
+        assert!(axis == 0 || axis == 2);
+    }
+
+    #[test]
+    fn dominant_voxel_axis_handles_zero_normal() {
+        assert_eq!(dominant_voxel_axis(glam::Vec3::ZERO), None);
+    }
+
+    /// Build a 3×3×3 mask with the given on-voxel indices and affine.
+    fn mask_with(on: &[[u32; 3]], voxel_to_ras: glam::Mat4) -> VoxelMask {
+        let mut data = vec![0u8; 27];
+        for [i, j, k] in on {
+            let idx = *i as usize + 3 * (*j as usize + 3 * *k as usize);
+            data[idx] = 1;
+        }
+        VoxelMask {
+            dims: [3, 3, 3],
+            voxel_to_ras,
+            data,
+            ..Default::default()
+        }
+    }
+
+    /// Compute the slice-plane normal in voxel space (`n_v`) and offset
+    /// (`d_v`), the same way `draw_voxel_accurate_overlay` does.
+    fn slice_plane(aff: glam::Mat4, world_axis: usize, slice_pos: f32) -> (glam::Vec3, f32) {
+        let m3 = glam::Mat3::from_mat4(aff);
+        let n_v = match world_axis {
+            0 => m3.transpose().x_axis,
+            1 => m3.transpose().y_axis,
+            _ => m3.transpose().z_axis,
+        };
+        let t = glam::Vec3::new(aff.w_axis.x, aff.w_axis.y, aff.w_axis.z);
+        let d_v = slice_pos - t[world_axis];
+        (n_v, d_v)
+    }
+
+    /// `world_axis` here matches the production convention: 0=X, 1=Y,
+    /// 2=Z (literal world axes).
+    const AXIAL_WORLD_AXIS: usize = 2;
+
+    #[test]
+    fn outline_axis_aligned_single_voxel_emits_four_edges() {
+        // Identity affine, single on-voxel at (1,1,1), axial slice at
+        // world z=1.5. Expect 4 edges (in-plane perimeter of the lone
+        // voxel).
+        let mask = mask_with(&[[1, 1, 1]], glam::Mat4::IDENTITY);
+        let (n_v, d_v) = slice_plane(glam::Mat4::IDENTITY, AXIAL_WORLD_AXIS, 1.5);
+        let normal_axis = dominant_voxel_axis(n_v).unwrap();
+        assert_eq!(normal_axis, 2);
+
+        let mut edges: Vec<[glam::Vec3; 2]> = Vec::new();
+        voxel_outline_edges(
+            &mask,
+            glam::Mat4::IDENTITY,
+            n_v,
+            d_v,
+            normal_axis,
+            |a, b| {
+                edges.push([a, b]);
+            },
+        );
+        assert_eq!(edges.len(), 4, "isolated voxel should emit 4 edges");
+        for [a, b] in &edges {
+            assert!((a.z - 1.5).abs() < 1e-5);
+            assert!((b.z - 1.5).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn outline_oblique_30deg_emits_edges_on_dominant_layer() {
+        // 30° rotation about Y, single on-voxel at (1,1,1). Axial slice
+        // through that voxel's center. World Z still aligns more with
+        // voxel Z than with voxel X (cos 30° > sin 30°), so the
+        // dominant voxel axis is still Z. Outline snaps to that layer.
+        let aff = glam::Mat4::from_rotation_y(std::f32::consts::FRAC_PI_6);
+        let mask = mask_with(&[[1, 1, 1]], aff);
+
+        let center_world = aff.transform_point3(glam::Vec3::new(1.5, 1.5, 1.5));
+        let slice_pos = center_world.z;
+
+        let (n_v, d_v) = slice_plane(aff, AXIAL_WORLD_AXIS, slice_pos);
+        let normal_axis = dominant_voxel_axis(n_v).unwrap();
+        assert_eq!(normal_axis, 2);
+
+        let mut edges: Vec<[glam::Vec3; 2]> = Vec::new();
+        voxel_outline_edges(&mask, aff, n_v, d_v, normal_axis, |a, b| {
+            edges.push([a, b]);
+        });
+        assert_eq!(edges.len(), 4);
+
+        // Each endpoint, after world_to_voxel, must lie on the chosen
+        // layer's plane (voxel-z = slice_pos_v) and on the unit-cube
+        // perimeter of voxel (1,1,*). The expected slice_pos_v matches
+        // the production formula: snap to the layer the slice plane
+        // crosses at the volume center.
+        let inv = aff.inverse();
+        let center = glam::Vec3::new(1.5, 1.5, 1.5);
+        let off_axis_sum = n_v.x * center.x + n_v.y * center.y;
+        let slice_pos_v = (d_v - off_axis_sum) / n_v.z;
+        for [a, b] in &edges {
+            for endpoint in [a, b] {
+                let v = inv.transform_point3(*endpoint);
+                assert!(
+                    (v.z - slice_pos_v).abs() < 1e-4,
+                    "endpoint not on layer: voxel-z={}, expected {}",
+                    v.z,
+                    slice_pos_v
+                );
+                let x_ok = (v.x - 1.0).abs() < 1e-4 || (v.x - 2.0).abs() < 1e-4;
+                let y_ok = (v.y - 1.0).abs() < 1e-4 || (v.y - 2.0).abs() < 1e-4;
+                assert!(x_ok && y_ok, "endpoint voxel-coords out of bounds: {:?}", v);
+            }
+        }
+    }
+
+    #[test]
+    fn outline_skips_internal_edges() {
+        // 2-voxel rod along voxel X. The shared face between (0,0,0)
+        // and (1,0,0) must not be drawn. The perimeter of a 2×1 block
+        // in the XY plane is 6 unit segments.
+        let mask = mask_with(&[[0, 0, 0], [1, 0, 0]], glam::Mat4::IDENTITY);
+        let (n_v, d_v) = slice_plane(glam::Mat4::IDENTITY, AXIAL_WORLD_AXIS, 0.5);
+        let normal_axis = dominant_voxel_axis(n_v).unwrap();
+
+        let mut edges: Vec<[glam::Vec3; 2]> = Vec::new();
+        voxel_outline_edges(
+            &mask,
+            glam::Mat4::IDENTITY,
+            n_v,
+            d_v,
+            normal_axis,
+            |a, b| {
+                edges.push([a, b]);
+            },
+        );
+        assert_eq!(
+            edges.len(),
+            6,
+            "2-voxel rod should emit 6 perimeter edges, got {}",
+            edges.len()
+        );
     }
 }

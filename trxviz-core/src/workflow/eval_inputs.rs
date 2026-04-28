@@ -64,15 +64,15 @@ pub(crate) fn expect_odx_catalog_input(
     )))
 }
 
-pub(crate) fn optional_volume_scalars_input(
+pub(crate) fn optional_volume_input(
     inputs: &[Option<EvaluatedValue>],
     index: usize,
-) -> Option<VolumeScalars> {
+) -> Option<crate::workflow::VolumeBacking> {
     match inputs.get(index).cloned().flatten() {
         Some(EvaluatedValue {
-            value: WorkflowValue::VolumeScalars(v),
+            value: WorkflowValue::Volume(b),
             ..
-        }) => Some(v),
+        }) => Some(b),
         _ => None,
     }
 }
@@ -175,21 +175,6 @@ pub(crate) fn expect_bundle_surface_input(
     }
 }
 
-pub(crate) fn expect_volume_scalars_input(
-    inputs: &[Option<EvaluatedValue>],
-    label: &str,
-) -> WorkflowResult<VolumeScalars> {
-    match inputs.first().cloned().flatten() {
-        Some(EvaluatedValue {
-            value: WorkflowValue::VolumeScalars(value),
-            ..
-        }) => Ok(value),
-        _ => Err(WorkflowError::Evaluation(format!(
-            "{label} needs volume scalars"
-        ))),
-    }
-}
-
 pub(crate) fn expect_surface_appearance_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
@@ -226,12 +211,12 @@ pub(crate) fn expect_boundary_field_input(
 pub(crate) fn expect_volume_input(
     inputs: &[Option<EvaluatedValue>],
     label: &str,
-) -> WorkflowResult<FileId> {
+) -> WorkflowResult<crate::workflow::VolumeBacking> {
     match inputs.first().cloned().flatten() {
         Some(EvaluatedValue {
-            value: WorkflowValue::Volume(source_id),
+            value: WorkflowValue::Volume(backing),
             ..
-        }) => Ok(source_id),
+        }) => Ok(backing),
         _ => Err(WorkflowError::Evaluation(format!(
             "{label} needs a volume input"
         ))),

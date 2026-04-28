@@ -2613,7 +2613,7 @@ dependencies = [
 [[package]]
 name = "odx-rs"
 version = "0.1.0"
-source = "git+https://github.com/PennLINC/odx-rs#f8ef30849118ef8d6a5df8fdf32241699d22a715"
+source = "git+https://github.com/PennLINC/odx-rs?branch=main#c586e7aab442f85d13c2a922bdcfbb20c1a0d666"
 dependencies = [
  "bytemuck",
  "clap",
@@ -3649,7 +3649,7 @@ dependencies = [
 [[package]]
 name = "trx-rs"
 version = "0.1.0"
-source = "git+https://github.com/tee-ar-ex/trx-rs#993fa17b97482b81d738e4a365259689f46087bb"
+source = "git+https://github.com/tee-ar-ex/trx-rs?branch=main#16e5316df9809a572e213140393368b9dc40ef5f"
 dependencies = [
  "bytemuck",
  "clap",
@@ -3657,6 +3657,7 @@ dependencies = [
  "half",
  "memmap2",
  "nifti",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "tempfile",

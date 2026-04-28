@@ -100,17 +100,24 @@ pub(super) fn render_scene2d_to_png(
                 .slices
                 .entries
                 .iter()
-                .find(|(id, _)| *id == volume.file_id)
+                .find(|(id, _)| *id == volume.slice_key)
             {
-                slice.update_uniforms(
-                    queue,
-                    viewport.into(),
-                    view_proj,
-                    volume.window_center,
-                    volume.window_width,
-                    volume.colormap,
-                    volume.opacity,
-                );
+                match slice {
+                    crate::renderer::slice_renderer::SliceResourceKind::Scalar(s) => {
+                        s.update_uniforms(
+                            queue,
+                            viewport.into(),
+                            view_proj,
+                            volume.window_center,
+                            volume.window_width,
+                            volume.colormap,
+                            volume.opacity,
+                        );
+                    }
+                    crate::renderer::slice_renderer::SliceResourceKind::Composite(c) => {
+                        c.update_uniforms(queue, viewport.into(), view_proj, volume.opacity);
+                    }
+                }
             }
         }
         let (slab_normal, slab_center) = slice_plane_for_panel(scene, panel);
@@ -189,6 +196,15 @@ pub(super) fn render_scene2d_to_png(
                     render_data.fixel_2d_scalar_range[1],
                 ),
             );
+            resources.fixels_2d.update_directional(
+                queue,
+                viewport.into(),
+                if render_data.fixel_directional {
+                    1.0
+                } else {
+                    0.0
+                },
+            );
         }
     }
 
@@ -248,17 +264,37 @@ pub(super) fn render_scene2d_to_png(
                     .slices
                     .entries
                     .iter()
-                    .find(|(id, _)| *id == volume.file_id)
+                    .find(|(id, _)| *id == volume.slice_key)
                 {
-                    render_pass.set_pipeline(&slice.pipeline);
-                    render_pass.set_bind_group(0, slice.bind_group(viewport.into()), &[]);
-                    render_pass.set_index_buffer(
-                        slice.quad_index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint16,
-                    );
-                    render_pass
-                        .set_vertex_buffer(0, slice.quad_buffers[panel.axis_index].slice(..));
-                    render_pass.draw_indexed(0..6, 0, 0..1);
+                    let axis = match panel.axis_index {
+                        0 => crate::renderer::slice_renderer::SliceAxis::Axial,
+                        1 => crate::renderer::slice_renderer::SliceAxis::Coronal,
+                        _ => crate::renderer::slice_renderer::SliceAxis::Sagittal,
+                    };
+                    match slice {
+                        crate::renderer::slice_renderer::SliceResourceKind::Scalar(s) => {
+                            render_pass.set_pipeline(&s.pipeline);
+                            render_pass.set_bind_group(0, s.bind_group(viewport.into()), &[]);
+                            render_pass.set_index_buffer(
+                                s.quad_index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            render_pass
+                                .set_vertex_buffer(0, s.quad_buffers[panel.axis_index].slice(..));
+                            render_pass.draw_indexed(0..6, 0, 0..1);
+                        }
+                        crate::renderer::slice_renderer::SliceResourceKind::Composite(c) => {
+                            render_pass.set_pipeline(&c.pipeline);
+                            render_pass.set_bind_group(0, c.bind_group(viewport.into(), axis), &[]);
+                            render_pass.set_index_buffer(
+                                c.quad_index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            render_pass
+                                .set_vertex_buffer(0, c.quad_buffers[panel.axis_index].slice(..));
+                            render_pass.draw_indexed(0..6, 0, 0..1);
+                        }
+                    }
                 }
             }
 

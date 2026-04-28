@@ -15,8 +15,7 @@ pub(crate) use super::eval_inputs::{
     expect_fixel_scalars_input, expect_fixels_input, expect_odf_field_input,
     expect_odx_catalog_input, expect_parcel_selection_input, expect_parcellation_input,
     expect_streamline_input, expect_surface_appearance_input, expect_surface_input,
-    expect_volume_input, expect_volume_scalars_input, optional_volume_scalars_input,
-    resolve_selected_labels, volume_scalars_from_nifti_volume,
+    optional_volume_input, resolve_selected_labels, volume_scalars_from_nifti_volume,
 };
 pub use super::eval_streamlines::save_streamline_plan;
 pub(crate) use super::eval_streamlines::{

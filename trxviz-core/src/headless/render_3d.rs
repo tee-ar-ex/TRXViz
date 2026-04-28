@@ -77,17 +77,24 @@ pub(super) fn render_scene3d_to_png(
             .slices
             .entries
             .iter()
-            .find(|(id, _)| *id == volume.file_id)
+            .find(|(id, _)| *id == volume.slice_key)
         {
-            slice.update_uniforms(
-                queue,
-                viewport_3d,
-                view_proj,
-                volume.window_center,
-                volume.window_width,
-                volume.colormap,
-                volume.opacity,
-            );
+            match slice {
+                crate::renderer::slice_renderer::SliceResourceKind::Scalar(s) => {
+                    s.update_uniforms(
+                        queue,
+                        viewport_3d,
+                        view_proj,
+                        volume.window_center,
+                        volume.window_width,
+                        volume.colormap,
+                        volume.opacity,
+                    );
+                }
+                crate::renderer::slice_renderer::SliceResourceKind::Composite(c) => {
+                    c.update_uniforms(queue, viewport_3d, view_proj, volume.opacity);
+                }
+            }
         }
     }
     for streamline in &render_data.streamline_draws {
@@ -196,6 +203,15 @@ pub(super) fn render_scene3d_to_png(
                 render_data.fixel_3d_scalar_range[1],
             ),
         );
+        resources.fixels_3d.update_directional(
+            queue,
+            viewport_3d,
+            if render_data.fixel_directional {
+                1.0
+            } else {
+                0.0
+            },
+        );
     }
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -240,18 +256,44 @@ pub(super) fn render_scene3d_to_png(
                 .slices
                 .entries
                 .iter()
-                .find(|(id, _)| *id == volume.file_id)
+                .find(|(id, _)| *id == volume.slice_key)
             {
-                render_pass.set_pipeline(&slice.pipeline);
-                render_pass.set_bind_group(0, slice.bind_group(viewport_3d), &[]);
-                render_pass
-                    .set_index_buffer(slice.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                for i in 0..3 {
-                    if !slice_visible[i] {
-                        continue;
+                match slice {
+                    crate::renderer::slice_renderer::SliceResourceKind::Scalar(s) => {
+                        render_pass.set_pipeline(&s.pipeline);
+                        render_pass.set_bind_group(0, s.bind_group(viewport_3d), &[]);
+                        render_pass.set_index_buffer(
+                            s.quad_index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint16,
+                        );
+                        for i in 0..3 {
+                            if !slice_visible[i] {
+                                continue;
+                            }
+                            render_pass.set_vertex_buffer(0, s.quad_buffers[i].slice(..));
+                            render_pass.draw_indexed(0..6, 0, 0..1);
+                        }
                     }
-                    render_pass.set_vertex_buffer(0, slice.quad_buffers[i].slice(..));
-                    render_pass.draw_indexed(0..6, 0, 0..1);
+                    crate::renderer::slice_renderer::SliceResourceKind::Composite(c) => {
+                        render_pass.set_pipeline(&c.pipeline);
+                        render_pass.set_index_buffer(
+                            c.quad_index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint16,
+                        );
+                        for i in 0..3 {
+                            if !slice_visible[i] {
+                                continue;
+                            }
+                            let axis = match i {
+                                0 => crate::renderer::slice_renderer::SliceAxis::Axial,
+                                1 => crate::renderer::slice_renderer::SliceAxis::Coronal,
+                                _ => crate::renderer::slice_renderer::SliceAxis::Sagittal,
+                            };
+                            render_pass.set_bind_group(0, c.bind_group(viewport_3d, axis), &[]);
+                            render_pass.set_vertex_buffer(0, c.quad_buffers[i].slice(..));
+                            render_pass.draw_indexed(0..6, 0, 0..1);
+                        }
+                    }
                 }
             }
         }

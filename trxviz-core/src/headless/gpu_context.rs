@@ -122,12 +122,51 @@ pub(super) fn build_gpu_resources(
             scene.slice_indices[2],
             &nifti.volume,
         );
-        slices.entries.push((nifti.id, slice_resources));
+        slices.entries.push((
+            nifti.id,
+            crate::renderer::slice_renderer::SliceResourceKind::Scalar(slice_resources),
+        ));
 
         for x in [0.0, nifti.volume.dims[0] as f32] {
             for y in [0.0, nifti.volume.dims[1] as f32] {
                 for z in [0.0, nifti.volume.dims[2] as f32] {
                     expand(nifti.volume.voxel_to_world(Vec3::new(x, y, z)));
+                }
+            }
+        }
+    }
+
+    // VolumeBacking::InMemory draws (e.g. pyAFQ probability maps) don't
+    // live in `scene.nifti_files`; build slice resources for them on the
+    // fly from their `VolumeScalars` payload, keyed by the same content
+    // handle the renderer uses.
+    use crate::data::nifti_data::NiftiVolume;
+    use crate::workflow::VolumeBacking;
+    for draw in &workflow.runtime.scene_plan.volume_draws {
+        let VolumeBacking::InMemory { handle, scalars } = &draw.source else {
+            continue;
+        };
+        let key = *handle as usize;
+        if slices.entries.iter().any(|(id, _)| *id == key) {
+            continue;
+        }
+        let volume = NiftiVolume {
+            data: scalars.values.clone(),
+            dims: scalars.dims,
+            voxel_to_ras: scalars.voxel_to_ras,
+        };
+        let slice_resources = SliceResources::new(device, queue, TARGET_FORMAT, &volume);
+        slice_resources.update_slice(queue, SliceAxis::Axial, scene.slice_indices[0], &volume);
+        slice_resources.update_slice(queue, SliceAxis::Coronal, scene.slice_indices[1], &volume);
+        slice_resources.update_slice(queue, SliceAxis::Sagittal, scene.slice_indices[2], &volume);
+        slices.entries.push((
+            key,
+            crate::renderer::slice_renderer::SliceResourceKind::Scalar(slice_resources),
+        ));
+        for x in [0.0, volume.dims[0] as f32] {
+            for y in [0.0, volume.dims[1] as f32] {
+                for z in [0.0, volume.dims[2] as f32] {
+                    expand(volume.voxel_to_world(Vec3::new(x, y, z)));
                 }
             }
         }

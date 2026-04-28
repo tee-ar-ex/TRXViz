@@ -709,6 +709,20 @@ impl ViewportState {
                 .clamp(0, max_idx as isize) as usize;
             if new_idx != self.slices.slice_indices[axis_index] {
                 self.slices.slice_indices[axis_index] = new_idx;
+                // Mirror the new index into world space so per-volume
+                // slice updates (which resolve from world offsets) move
+                // in lockstep with the anchor NIfTI.
+                let probe = match axis_index {
+                    0 => Vec3::new(0.0, 0.0, new_idx as f32),
+                    1 => Vec3::new(0.0, new_idx as f32, 0.0),
+                    _ => Vec3::new(new_idx as f32, 0.0, 0.0),
+                };
+                let world = vol.voxel_to_world(probe);
+                self.slices.slice_world_offsets[axis_index] = match axis_index {
+                    0 => world.z,
+                    1 => world.y,
+                    _ => world.x,
+                };
                 self.slices.slices_dirty = true;
                 return true;
             }
@@ -820,6 +834,11 @@ pub struct WorkflowState {
     pub uploaded_odx_glyph_resource_key: Option<OdxGlyphResourceKey>,
     pub uploaded_fixel_3d_fingerprint: u64,
     pub uploaded_fixel_2d_fingerprint: u64,
+    /// Last-uploaded mesh fingerprint per voxel-mask draw_id. Lets the
+    /// per-frame upload loop skip `set_bundle_meshes` when the cached
+    /// mesh's fingerprint hasn't changed — pyAFQ Plan exposes 4–6 of
+    /// these at once and re-uploading every frame stalls the viewport.
+    pub uploaded_voxel_mask_fingerprints: HashMap<FileId, u64>,
     pub measured_node_sizes: HashMap<WorkflowNodeUuid, NodeSize>,
     pub layout_reflow_pending: bool,
     pub layout_reflow_nodes: BTreeSet<WorkflowNodeUuid>,
@@ -873,6 +892,7 @@ impl WorkflowState {
             uploaded_odx_glyph_resource_key: None,
             uploaded_fixel_3d_fingerprint: 0,
             uploaded_fixel_2d_fingerprint: 0,
+            uploaded_voxel_mask_fingerprints: HashMap::new(),
             measured_node_sizes: HashMap::new(),
             layout_reflow_pending: false,
             layout_reflow_nodes: BTreeSet::new(),

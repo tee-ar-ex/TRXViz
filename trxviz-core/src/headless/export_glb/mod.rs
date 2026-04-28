@@ -1,4 +1,5 @@
 mod bundle_mesh;
+mod composite_slice_plane;
 mod scene;
 mod slice_plane;
 

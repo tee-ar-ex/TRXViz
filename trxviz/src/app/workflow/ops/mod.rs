@@ -223,6 +223,17 @@ pub(crate) fn edit_node_op(
                  Needs a BoundaryField upstream on input 1.",
             );
         }
+        workflow::WorkflowNodeKind::SampleVolumeAlongStreamline { dps_name } => {
+            ui.horizontal(|ui| {
+                ui.label("DPS name");
+                ui.text_edit_singleline(dps_name);
+            });
+            ui.small(
+                "Trilinearly samples the input VolumeScalars at every \
+                 streamline vertex, then attaches the per-streamline mean \
+                 as a DPS field. Wire `Color By DPS` downstream.",
+            );
+        }
         workflow::WorkflowNodeKind::RemoveDuplicates { params } => {
             egui::ComboBox::from_id_salt(format!("duplicate_mode_{}", node_uuid.0))
                 .selected_text(match params.mode {
@@ -310,6 +321,86 @@ pub(crate) fn edit_node_op(
             ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
             ui.add(egui::Slider::new(window_center, 0.0..=1.0).text("Window center"));
             ui.add(egui::Slider::new(window_width, 0.01..=2.0).text("Window width"));
+        }
+        workflow::WorkflowNodeKind::VolumeOverlayStack { layers } => {
+            ui.small(
+                "Layer 0 sets the target grid; later layers are resampled per slice. \
+                 Each layer is windowed, thresholded, colormapped and alpha-over composited \
+                 atop the previous one.",
+            );
+            ui.separator();
+            for (layer_index, layer) in layers.iter_mut().enumerate() {
+                let is_base = layer_index == 0;
+                let title = if is_base {
+                    format!("Layer 0: Base — {}", layer.legend_label)
+                } else {
+                    format!("Layer {layer_index} — {}", layer.legend_label)
+                };
+                ui.collapsing(title, |ui| {
+                    ui.checkbox(&mut layer.enabled, "Enabled");
+                    ui.horizontal(|ui| {
+                        ui.label("Legend");
+                        ui.text_edit_singleline(&mut layer.legend_label);
+                    });
+                    egui::ComboBox::from_id_salt(format!(
+                        "volume_overlay_colormap_{}_{}",
+                        node_uuid.0, layer_index
+                    ))
+                    .selected_text(layer.colormap.label())
+                    .show_ui(ui, |ui| {
+                        for value in VolumeColormap::ALL {
+                            ui.selectable_value(&mut layer.colormap, *value, value.label());
+                        }
+                    });
+                    ui.add(egui::Slider::new(&mut layer.opacity, 0.0..=1.0).text("Opacity"));
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut layer.window_center)
+                                .speed(0.01)
+                                .prefix("Window center "),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut layer.window_width)
+                                .speed(0.01)
+                                .prefix("Window width "),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut layer.threshold_min)
+                                .speed(0.01)
+                                .prefix("Thresh min "),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut layer.threshold_max)
+                                .speed(0.01)
+                                .prefix("Thresh max "),
+                        );
+                    });
+                    if !is_base {
+                        egui::ComboBox::from_id_salt(format!(
+                            "volume_overlay_interp_{}_{}",
+                            node_uuid.0, layer_index
+                        ))
+                        .selected_text(match layer.interpolation {
+                            trxviz_core::workflow::Interp::Trilinear => "Trilinear",
+                            trxviz_core::workflow::Interp::Nearest => "Nearest",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut layer.interpolation,
+                                trxviz_core::workflow::Interp::Trilinear,
+                                "Trilinear",
+                            );
+                            ui.selectable_value(
+                                &mut layer.interpolation,
+                                trxviz_core::workflow::Interp::Nearest,
+                                "Nearest",
+                            );
+                        });
+                    }
+                });
+            }
         }
         workflow::WorkflowNodeKind::SurfaceOverlayStack { layers } => {
             ui.small("Ordered surface appearance layers. Layer 0 provides the fallback base color and also styles the first connected scalar input.");
@@ -948,7 +1039,10 @@ pub(crate) fn edit_node_op(
             opacity,
             smooth_sigma,
             min_component_volume_mm3,
+            style,
+            slice_mode,
         } => {
+            use trxviz_core::workflow::{VoxelMaskRenderStyle, VoxelMaskSliceMode};
             ui.horizontal(|ui| {
                 ui.label("Color");
                 let mut rgb = [color[0], color[1], color[2]];
@@ -959,11 +1053,24 @@ pub(crate) fn edit_node_op(
                 }
             });
             ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
-            ui.add(egui::Slider::new(smooth_sigma, 0.0..=3.0).text("Smooth σ (voxels)"));
-            ui.add(
-                egui::Slider::new(&mut min_component_volume_mm3.0, 0.0..=1000.0)
-                    .text("Min component vol (mm³)"),
-            );
+            ui.horizontal(|ui| {
+                ui.label("Style");
+                ui.selectable_value(style, VoxelMaskRenderStyle::VoxelAccurate, "Voxel-accurate");
+                ui.selectable_value(style, VoxelMaskRenderStyle::SmoothMesh, "Smooth mesh");
+            });
+            if matches!(style, VoxelMaskRenderStyle::VoxelAccurate) {
+                ui.horizontal(|ui| {
+                    ui.label("Slice fill");
+                    ui.selectable_value(slice_mode, VoxelMaskSliceMode::Filled, "Filled");
+                    ui.selectable_value(slice_mode, VoxelMaskSliceMode::Outline, "Outline");
+                });
+            } else {
+                ui.add(egui::Slider::new(smooth_sigma, 0.0..=3.0).text("Smooth σ (voxels)"));
+                ui.add(
+                    egui::Slider::new(&mut min_component_volume_mm3.0, 0.0..=1000.0)
+                        .text("Min component vol (mm³)"),
+                );
+            }
         }
         workflow::WorkflowNodeKind::PrepareSimplePlan {
             override_step,
@@ -1084,6 +1191,180 @@ pub(crate) fn edit_node_op(
                 egui::Slider::new(max_reference_points, 1_000..=50_000)
                     .text("Max reference points"),
             );
+        }
+        workflow::WorkflowNodeKind::PreparePyafqPlan {
+            working_dir,
+            bundle_name,
+            to_space,
+            dist_to_waypoint_mm,
+            dist_to_exclusion_mm,
+            dist_to_endpoint_mm,
+            override_min_len_mm,
+            override_max_len_mm,
+        } => {
+            use trxviz_core::workflow::pyafq_bundles::{PYAFQ_BUNDLES, PyafqCategory};
+
+            // Working directory picker.
+            ui.horizontal(|ui| {
+                ui.label("pyAFQ derivatives dir");
+                if ui.button("📂 Browse…").clicked() {
+                    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                        *working_dir = dir.to_string_lossy().into_owned();
+                    }
+                }
+            });
+            if working_dir.is_empty() {
+                ui.small("(no directory selected)");
+            } else {
+                ui.small(working_dir.as_str());
+            }
+
+            // Auto-detect `to_space` from the working dir when blank. Saves
+            // the user from having to know which space token (T1w, subject,
+            // …) the dataset uses.
+            let mut auto_filled_space: Option<String> = None;
+            let mut auto_detect_failed = false;
+            if to_space.is_empty() && !working_dir.is_empty() {
+                match trxviz_core::gpu::plan_prep::pyafq::auto_pick_to_space(std::path::Path::new(
+                    working_dir.as_str(),
+                )) {
+                    Some(picked) => {
+                        *to_space = picked.clone();
+                        auto_filled_space = Some(picked);
+                    }
+                    None => {
+                        auto_detect_failed = true;
+                    }
+                }
+            }
+
+            // Bundle dropdown, grouped by category. Bundles whose ROI files
+            // aren't present in the chosen working dir (under the chosen
+            // `to_space`) are grayed out so the user can see at a glance
+            // what this dataset actually contains.
+            let available: std::collections::HashSet<&'static str> = if working_dir.is_empty() {
+                PYAFQ_BUNDLES.iter().map(|s| s.display_name).collect()
+            } else {
+                trxviz_core::gpu::plan_prep::pyafq::scan_available_bundles(
+                    std::path::Path::new(working_dir.as_str()),
+                    to_space,
+                )
+            };
+            ui.horizontal(|ui| {
+                ui.label("Bundle");
+                let label = if bundle_name.is_empty() {
+                    "(pick a bundle)"
+                } else {
+                    bundle_name.as_str()
+                };
+                egui::ComboBox::from_id_salt(("pyafq_bundle", node_uuid))
+                    .selected_text(label)
+                    .show_ui(ui, |ui| {
+                        ui.label("Default");
+                        for spec in PYAFQ_BUNDLES
+                            .iter()
+                            .filter(|s| s.category == PyafqCategory::Default)
+                        {
+                            let enabled = available.contains(spec.display_name);
+                            ui.add_enabled_ui(enabled, |ui| {
+                                ui.selectable_value(
+                                    bundle_name,
+                                    spec.display_name.to_string(),
+                                    spec.display_name,
+                                );
+                            });
+                        }
+                        ui.separator();
+                        ui.label("Callosal");
+                        for spec in PYAFQ_BUNDLES
+                            .iter()
+                            .filter(|s| s.category == PyafqCategory::Callosal)
+                        {
+                            let enabled = available.contains(spec.display_name);
+                            ui.add_enabled_ui(enabled, |ui| {
+                                ui.selectable_value(
+                                    bundle_name,
+                                    spec.display_name.to_string(),
+                                    spec.display_name,
+                                );
+                            });
+                        }
+                        ui.separator();
+                        ui.label("Pediatric");
+                        for spec in PYAFQ_BUNDLES
+                            .iter()
+                            .filter(|s| s.category == PyafqCategory::Pediatric)
+                        {
+                            let enabled = available.contains(spec.display_name);
+                            ui.add_enabled_ui(enabled, |ui| {
+                                ui.selectable_value(
+                                    bundle_name,
+                                    spec.display_name.to_string(),
+                                    spec.display_name,
+                                );
+                            });
+                        }
+                    });
+            });
+
+            // Space token (rarely changed; keep as a simple text field).
+            // Auto-detection above fills it in when blank; show a caption
+            // so the user knows where the value came from.
+            ui.horizontal(|ui| {
+                ui.label("Space");
+                ui.text_edit_singleline(to_space);
+                if let Some(picked) = &auto_filled_space {
+                    ui.small(format!("(auto-detected: {picked})"));
+                } else if auto_detect_failed {
+                    ui.small("(detect failed — type a space token)");
+                }
+            });
+
+            // Distance tolerances.
+            ui.add(
+                egui::Slider::new(dist_to_waypoint_mm, 0.0..=10.0).text("Waypoint tolerance (mm)"),
+            );
+            ui.add(
+                egui::Slider::new(dist_to_exclusion_mm, 0.0..=5.0).text("Exclusion tolerance (mm)"),
+            );
+            ui.add(
+                egui::Slider::new(dist_to_endpoint_mm, 0.0..=10.0).text("Endpoint tolerance (mm)"),
+            );
+
+            // Length overrides.
+            let bundle_spec = trxviz_core::workflow::pyafq_bundles::lookup(bundle_name);
+            ui.horizontal(|ui| {
+                let mut on = override_min_len_mm.is_some();
+                let default_min = bundle_spec.and_then(|s| s.min_len_mm);
+                if ui.checkbox(&mut on, "Override min len").changed() {
+                    *override_min_len_mm = if on { default_min.or(Some(20.0)) } else { None };
+                }
+                if let Some(v) = override_min_len_mm.as_mut() {
+                    ui.add(egui::DragValue::new(v).range(0.0..=300.0).suffix(" mm"));
+                } else if let Some(d) = default_min {
+                    ui.small(format!("(bundle default: {d:.0} mm)"));
+                } else {
+                    ui.small("(bundle default: tracker)");
+                }
+            });
+            ui.horizontal(|ui| {
+                let mut on = override_max_len_mm.is_some();
+                let default_max = bundle_spec.and_then(|s| s.max_len_mm);
+                if ui.checkbox(&mut on, "Override max len").changed() {
+                    *override_max_len_mm = if on {
+                        default_max.or(Some(250.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(v) = override_max_len_mm.as_mut() {
+                    ui.add(egui::DragValue::new(v).range(0.0..=500.0).suffix(" mm"));
+                } else if let Some(d) = default_max {
+                    ui.small(format!("(bundle default: {d:.0} mm)"));
+                } else {
+                    ui.small("(bundle default: tracker)");
+                }
+            });
         }
         _ => {
             ui.small("This node has no editable parameters yet.");

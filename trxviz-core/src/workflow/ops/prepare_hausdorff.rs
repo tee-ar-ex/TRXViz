@@ -3,15 +3,14 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::error::WorkflowResult;
-use crate::gpu::plan_prep::hausdorff::{HausdorffPlanParams, build_hausdorff_plan};
-use crate::workflow::WorkflowEvalMode;
+use crate::gpu::plan_prep::hausdorff::HausdorffPlanParams;
 use crate::workflow::methods::OpCategory;
-use crate::workflow::types::{CachedHausdorffPlan, WorkflowValue};
+use crate::workflow::types::{HausdorffPlanJob, WorkflowValue};
 use odx_rs::qc::OtsuScope;
 
 use super::super::{
-    EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp, mark_expensive_success,
-    prime_expensive_record, sync_node_state_from_run_record,
+    EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp, prime_expensive_record,
+    sync_node_state_from_run_record,
 };
 
 fn default_tolerance_mm() -> f32 {
@@ -220,15 +219,12 @@ impl WorkflowOp for PrepareHausdorffPlanOp {
             .map(|c| c.fingerprint == fingerprint)
             .unwrap_or(false);
 
-        // Decision tree:
-        //   cache hit + upstream fresh → serve cached (stale=false)
-        //   cache miss / stale + Interactive → serve cached if any with stale=true,
-        //                                       else empty placeholders with stale=true
-        //   cache miss / stale + Settled    → rebuild, cache, return (stale=false)
-        let should_rebuild = !cached_matches || upstream_stale;
-        let rebuild_now = should_rebuild && ctx.eval_mode == WorkflowEvalMode::Settled;
+        // Plan build is off-thread: when stale, push a job onto the scene
+        // plan and let the GUI's worker pool dispatch it. The Finished
+        // arm fills the cache and calls `mark_expensive_success`.
+        let stale = !cached_matches || upstream_stale;
 
-        if rebuild_now {
+        if stale {
             let params = HausdorffPlanParams {
                 tolerance_mm: self.tolerance_mm,
                 seed_tolerance_mm: self.seed_tolerance_mm,
@@ -239,49 +235,19 @@ impl WorkflowOp for PrepareHausdorffPlanOp {
                 max_reference_points: self.max_reference_points as usize,
             };
 
-            let outputs = build_hausdorff_plan(
-                &loaded_odx.scene,
-                &reference_flow.dataset.gpu_data,
-                &selected,
-                ctx.node.label.clone(),
-                &params,
-            );
-
-            let summary = format!(
-                "{}: Otsu = {:.4} ({} samples, {})",
-                fixel_otsu.metric_name,
-                fixel_otsu.threshold,
-                fixel_otsu.n_values,
-                match fixel_otsu.scope {
-                    OtsuScope::AllFixels => "all fixels",
-                    OtsuScope::PrimaryPeak => "primary peak",
-                }
-            );
-
-            ctx.execution_cache.hausdorff_plan_cache.insert(
-                ctx.node.uuid,
-                CachedHausdorffPlan {
-                    fingerprint,
-                    plan: Arc::new(outputs.plan),
-                    seed_mask: outputs.seed_mask,
-                    limiting_mask: outputs.limiting_mask,
-                    no_end_mask: outputs.no_end_mask,
-                    summary: summary.clone(),
-                },
-            );
-
-            let record = ctx
-                .execution_cache
-                .node_runs
-                .entry(ctx.node.uuid)
-                .or_default();
-            mark_expensive_success(record, fingerprint, summary.clone());
-            sync_node_state_from_run_record(ctx.node_state, record);
-            ctx.node_state.summary = summary;
+            ctx.scene_plan.hausdorff_plan_jobs.push(HausdorffPlanJob {
+                node_uuid: ctx.node.uuid,
+                fingerprint,
+                label: ctx.node.label.clone(),
+                odx_scene: loaded_odx.scene.clone(),
+                gpu_data: reference_flow.dataset.gpu_data.clone(),
+                selected,
+                params,
+                fixel_otsu: fixel_otsu.clone(),
+            });
         }
 
         let cache = ctx.execution_cache.hausdorff_plan_cache.get(&ctx.node.uuid);
-        let stale = !cached_matches || upstream_stale;
 
         // No cache yet: emit empty placeholders with stale=true so
         // downstream nodes mark themselves stale too. Once a downstream
@@ -295,6 +261,7 @@ impl WorkflowOp for PrepareHausdorffPlanOp {
                 dims: dims_u32,
                 voxel_to_ras,
                 data: Vec::new(),
+                ..Default::default()
             });
             let empty_plan = Arc::new(crate::workflow::types::TrackingPlan {
                 label: ctx.node.label.clone(),

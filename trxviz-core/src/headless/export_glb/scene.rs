@@ -307,25 +307,56 @@ pub(crate) fn build_glb_scene(
             if volume.opacity <= 0.001 {
                 continue;
             }
-            let Some(nifti) = scene
+            // Try a file-backed match first (NIfTI scene asset).
+            if let Some(nifti) = scene
                 .nifti_files
                 .iter()
-                .find(|nifti| nifti.id == volume.file_id)
-            else {
-                continue;
-            };
-            for axis_index in 0..3 {
-                if !scene.slice_visible[axis_index] {
-                    continue;
+                .find(|nifti| nifti.id == volume.slice_key)
+            {
+                for axis_index in 0..3 {
+                    if !scene.slice_visible[axis_index] {
+                        continue;
+                    }
+                    add_slice_plane_to_glb(
+                        &mut builder,
+                        &nifti.volume,
+                        volume,
+                        axis_index,
+                        scene.slice_indices[axis_index],
+                        nifti.name.as_str(),
+                    )?;
                 }
-                add_slice_plane_to_glb(
-                    &mut builder,
-                    &nifti.volume,
-                    volume,
-                    axis_index,
-                    scene.slice_indices[axis_index],
-                    nifti.name.as_str(),
-                )?;
+                continue;
+            }
+            // Otherwise look for a Composite stack matching this draw's
+            // handle. (InMemory scalar volumes still have no GLB
+            // export path — that's a separate gap.)
+            if let Some(stack) = workflow
+                .runtime
+                .scene_plan
+                .volume_draws
+                .iter()
+                .find_map(|d| match &d.source {
+                    crate::workflow::VolumeBacking::Composite { handle, stack }
+                        if (*handle as usize) == volume.slice_key =>
+                    {
+                        Some(stack.clone())
+                    }
+                    _ => None,
+                })
+            {
+                for axis_index in 0..3 {
+                    if !scene.slice_visible[axis_index] {
+                        continue;
+                    }
+                    super::composite_slice_plane::add_composite_slice_plane_to_glb(
+                        &mut builder,
+                        &stack,
+                        volume,
+                        axis_index,
+                        scene.slice_indices[axis_index],
+                    )?;
+                }
             }
         }
     }

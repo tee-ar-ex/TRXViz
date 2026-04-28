@@ -812,6 +812,189 @@ pub fn build_voxel_mask_mesh(
     Some(BundleMesh { vertices, indices })
 }
 
+/// Build a true-to-voxels boundary-face mesh from a binary voxel mask.
+///
+/// For every "on" voxel, emits a flat-shaded quad on each face that is
+/// adjacent to either an "off" voxel or to the outside of the volume.
+/// Vertices are duplicated per-face (no welding across faces) so cube
+/// edges stay crisp under per-vertex normal interpolation.
+///
+/// Positions are emitted in voxel-index space (a voxel `(i,j,k)` occupies
+/// `[i,j,k]..[i+1,j+1,k+1]`) and then transformed through `voxel_to_ras`,
+/// so the result lives in world space and respects anisotropic / rotated
+/// affines. Normals are transformed by the cofactor (inverse-transpose
+/// upper 3x3) of `voxel_to_ras` so lighting stays correct under shears
+/// and non-uniform scales.
+pub fn build_voxel_mask_boundary_mesh(
+    dims: [u32; 3],
+    voxel_to_ras: glam::Mat4,
+    mask: &[u8],
+    color: [f32; 4],
+) -> Option<BundleMesh> {
+    let nx = dims[0] as usize;
+    let ny = dims[1] as usize;
+    let nz = dims[2] as usize;
+    if nx == 0 || ny == 0 || nz == 0 {
+        return None;
+    }
+    let n = nx * ny * nz;
+    if mask.len() != n {
+        return None;
+    }
+
+    let lin = |x: usize, y: usize, z: usize| x + nx * (y + ny * z);
+    let on = |x: i64, y: i64, z: i64| -> bool {
+        if x < 0 || y < 0 || z < 0 {
+            return false;
+        }
+        let (xu, yu, zu) = (x as usize, y as usize, z as usize);
+        if xu >= nx || yu >= ny || zu >= nz {
+            return false;
+        }
+        mask[lin(xu, yu, zu)] != 0
+    };
+
+    let m3 = glam::Mat3::from_mat4(voxel_to_ras);
+    // Cofactor (inverse-transpose) of the 3x3 — correct normal transform
+    // under anisotropy / rotation / shear.
+    let normal_xform = m3.inverse().transpose();
+
+    // Six faces of a unit voxel cube, each as (offset corners in voxel
+    // space, voxel-space outward normal, neighbor-direction delta to
+    // probe). Vertex ordering is CCW when viewed from the outside.
+    //
+    // A voxel at index (i,j,k) spans [i,i+1] × [j,j+1] × [k,k+1] in
+    // voxel space.
+    struct Face {
+        normal_voxel: glam::Vec3,
+        delta: (i64, i64, i64),
+        // 4 corner offsets relative to (i, j, k), in CCW order from outside.
+        corners: [glam::Vec3; 4],
+    }
+    let faces: [Face; 6] = [
+        // -X face
+        Face {
+            normal_voxel: glam::Vec3::new(-1.0, 0.0, 0.0),
+            delta: (-1, 0, 0),
+            corners: [
+                glam::Vec3::new(0.0, 0.0, 0.0),
+                glam::Vec3::new(0.0, 1.0, 0.0),
+                glam::Vec3::new(0.0, 1.0, 1.0),
+                glam::Vec3::new(0.0, 0.0, 1.0),
+            ],
+        },
+        // +X face
+        Face {
+            normal_voxel: glam::Vec3::new(1.0, 0.0, 0.0),
+            delta: (1, 0, 0),
+            corners: [
+                glam::Vec3::new(1.0, 0.0, 0.0),
+                glam::Vec3::new(1.0, 0.0, 1.0),
+                glam::Vec3::new(1.0, 1.0, 1.0),
+                glam::Vec3::new(1.0, 1.0, 0.0),
+            ],
+        },
+        // -Y face
+        Face {
+            normal_voxel: glam::Vec3::new(0.0, -1.0, 0.0),
+            delta: (0, -1, 0),
+            corners: [
+                glam::Vec3::new(0.0, 0.0, 0.0),
+                glam::Vec3::new(0.0, 0.0, 1.0),
+                glam::Vec3::new(1.0, 0.0, 1.0),
+                glam::Vec3::new(1.0, 0.0, 0.0),
+            ],
+        },
+        // +Y face
+        Face {
+            normal_voxel: glam::Vec3::new(0.0, 1.0, 0.0),
+            delta: (0, 1, 0),
+            corners: [
+                glam::Vec3::new(0.0, 1.0, 0.0),
+                glam::Vec3::new(1.0, 1.0, 0.0),
+                glam::Vec3::new(1.0, 1.0, 1.0),
+                glam::Vec3::new(0.0, 1.0, 1.0),
+            ],
+        },
+        // -Z face
+        Face {
+            normal_voxel: glam::Vec3::new(0.0, 0.0, -1.0),
+            delta: (0, 0, -1),
+            corners: [
+                glam::Vec3::new(0.0, 0.0, 0.0),
+                glam::Vec3::new(1.0, 0.0, 0.0),
+                glam::Vec3::new(1.0, 1.0, 0.0),
+                glam::Vec3::new(0.0, 1.0, 0.0),
+            ],
+        },
+        // +Z face
+        Face {
+            normal_voxel: glam::Vec3::new(0.0, 0.0, 1.0),
+            delta: (0, 0, 1),
+            corners: [
+                glam::Vec3::new(0.0, 0.0, 1.0),
+                glam::Vec3::new(0.0, 1.0, 1.0),
+                glam::Vec3::new(1.0, 1.0, 1.0),
+                glam::Vec3::new(1.0, 0.0, 1.0),
+            ],
+        },
+    ];
+
+    let mut vertices: Vec<BundleMeshVertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    for k in 0..nz {
+        for j in 0..ny {
+            for i in 0..nx {
+                if mask[lin(i, j, k)] == 0 {
+                    continue;
+                }
+                let origin = glam::Vec3::new(i as f32, j as f32, k as f32);
+                for face in &faces {
+                    let nx_i = i as i64 + face.delta.0;
+                    let ny_i = j as i64 + face.delta.1;
+                    let nz_i = k as i64 + face.delta.2;
+                    if on(nx_i, ny_i, nz_i) {
+                        continue;
+                    }
+                    let n_world = normal_xform.mul_vec3(face.normal_voxel).normalize_or_zero();
+                    let normal = if n_world.length_squared() > 0.0 {
+                        n_world.to_array()
+                    } else {
+                        face.normal_voxel.to_array()
+                    };
+
+                    let base = vertices.len() as u32;
+                    for corner in &face.corners {
+                        let p_voxel = origin + *corner;
+                        let p_world = voxel_to_ras.transform_point3(p_voxel);
+                        vertices.push(BundleMeshVertex {
+                            position: p_world.to_array(),
+                            normal,
+                            color,
+                        });
+                    }
+                    // Two triangles, CCW: (0,1,2) and (0,2,3).
+                    indices.extend_from_slice(&[
+                        base,
+                        base + 1,
+                        base + 2,
+                        base,
+                        base + 2,
+                        base + 3,
+                    ]);
+                }
+            }
+        }
+    }
+
+    if indices.is_empty() {
+        return None;
+    }
+
+    Some(BundleMesh { vertices, indices })
+}
+
 pub fn build_streamtube_bundle_mesh(
     positions: &[[f32; 3]],
     colors: &[[f32; 4]],
@@ -1002,8 +1185,8 @@ fn point_inside_segment_tube(
 mod tests {
     use super::{
         BundleMeshVertex, TAUBIN_SMOOTHING_ITERS, apply_taubin_smoothing,
-        build_streamtube_bundle_mesh, component_volume_mm3, connected_components, group_neighbors,
-        welded_vertex_groups,
+        build_streamtube_bundle_mesh, build_voxel_mask_boundary_mesh, component_volume_mm3,
+        connected_components, group_neighbors, welded_vertex_groups,
     };
     use crate::units::Millimeters;
     use glam::Vec3;
@@ -1119,5 +1302,65 @@ mod tests {
                 .iter()
                 .any(|vertex| vertex.color == [0.0, 0.0, 1.0, 1.0])
         );
+    }
+
+    #[test]
+    fn voxel_mask_boundary_mesh_single_voxel_emits_six_faces() {
+        // 4x4x4 mask with one voxel set at (1,2,3). Expect 6 faces, 12
+        // triangles, 24 vertices (no welding across faces).
+        let dims = [4u32, 4u32, 4u32];
+        let mut mask = vec![0u8; 4 * 4 * 4];
+        let i = 1usize + 4 * (2usize + 4 * 3usize);
+        mask[i] = 1;
+
+        let mesh =
+            build_voxel_mask_boundary_mesh(dims, glam::Mat4::IDENTITY, &mask, [1.0, 0.0, 0.0, 1.0])
+                .expect("mesh");
+        assert_eq!(mesh.indices.len(), 6 * 6, "12 triangles × 3 indices");
+        assert_eq!(mesh.vertices.len(), 6 * 4, "4 unique verts per face");
+
+        let mut bbox_min = Vec3::splat(f32::INFINITY);
+        let mut bbox_max = Vec3::splat(f32::NEG_INFINITY);
+        for v in &mesh.vertices {
+            let p = Vec3::from(v.position);
+            bbox_min = bbox_min.min(p);
+            bbox_max = bbox_max.max(p);
+        }
+        assert_eq!(bbox_min, Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(bbox_max, Vec3::new(2.0, 3.0, 4.0));
+    }
+
+    #[test]
+    fn voxel_mask_boundary_mesh_solid_block_culls_interior() {
+        // 3x3x3 fully-solid block: only the 6 outer faces survive,
+        // each face being a 3x3 grid of voxel quads = 9 quads = 18
+        // triangles per outer face, 6 faces total = 54 quads.
+        let dims = [3u32, 3u32, 3u32];
+        let mask = vec![1u8; 3 * 3 * 3];
+        let mesh =
+            build_voxel_mask_boundary_mesh(dims, glam::Mat4::IDENTITY, &mask, [0.0; 4]).unwrap();
+        assert_eq!(mesh.indices.len() / 6, 6 * 9, "54 outward voxel-quads");
+    }
+
+    #[test]
+    fn voxel_mask_boundary_mesh_respects_anisotropic_affine() {
+        // Anisotropic 1x1x3 mm voxel. The +Z face of voxel (0,0,0)
+        // should land 3 mm above the origin in world space.
+        let dims = [2u32, 2u32, 2u32];
+        let mut mask = vec![0u8; 8];
+        mask[0] = 1;
+        let aff = glam::Mat4::from_cols_array(&[
+            1.0, 0.0, 0.0, 0.0, // col 0
+            0.0, 1.0, 0.0, 0.0, // col 1
+            0.0, 0.0, 3.0, 0.0, // col 2
+            0.0, 0.0, 0.0, 1.0, // col 3
+        ]);
+        let mesh = build_voxel_mask_boundary_mesh(dims, aff, &mask, [0.0; 4]).unwrap();
+        let max_z = mesh
+            .vertices
+            .iter()
+            .map(|v| v.position[2])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!((max_z - 3.0).abs() < 1e-5, "got {}", max_z);
     }
 }

@@ -79,6 +79,7 @@ impl WorkflowOp for RoiFromParcelOp {
                 dims: [nx as u32, ny as u32, nz as u32],
                 voxel_to_ras: vol.voxel_to_ras,
                 data,
+                ..Default::default()
             }))
             .into(),
         ])
@@ -129,21 +130,17 @@ impl WorkflowOp for RoiFromVolumeOp {
         &self,
         ctx: &mut EvalCtx<'_, '_>,
     ) -> WorkflowResult<Vec<super::super::EvaluatedValue>> {
-        let vol_id = expect_volume_input(ctx.inputs, self.title())?;
-        let loaded = ctx.volume_assets.get(&vol_id).ok_or_else(|| {
-            crate::error::WorkflowError::Evaluation("Missing volume asset".into())
-        })?;
-        let vol = &loaded.volume;
-        let [nx, ny, nz] = vol.dims;
+        let backing = expect_volume_input(ctx.inputs, self.title())?;
+        let scalars = ctx.scalars_for(&backing)?;
+        let [nx, ny, nz] = scalars.dims;
         let n_voxels = nx * ny * nz;
 
         let mut data = vec![0u8; n_voxels];
-        // NiftiVolume.data is [i][j][k] order: linear index = i + nx*(j + ny*k)
         for k in 0..nz {
             for j in 0..ny {
                 for i in 0..nx {
                     let idx = i + nx * (j + ny * k);
-                    if vol.data[idx] > self.threshold {
+                    if scalars.values[idx] > self.threshold {
                         data[idx] = 1;
                     }
                 }
@@ -153,8 +150,9 @@ impl WorkflowOp for RoiFromVolumeOp {
         Ok(vec![
             WorkflowValue::VoxelMask(Arc::new(VoxelMask {
                 dims: [nx as u32, ny as u32, nz as u32],
-                voxel_to_ras: vol.voxel_to_ras,
+                voxel_to_ras: scalars.voxel_to_ras,
                 data,
+                ..Default::default()
             }))
             .into(),
         ])
@@ -266,6 +264,7 @@ impl WorkflowOp for RoiFromShapeOp {
                 dims,
                 voxel_to_ras,
                 data,
+                ..Default::default()
             }))
             .into(),
         ])

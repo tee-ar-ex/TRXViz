@@ -35,6 +35,8 @@ pub(crate) fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
         WorkflowJobKind::BoundaryField => "boundary field",
         WorkflowJobKind::DipyTractography => "dipy tractography",
         WorkflowJobKind::YehTractography => "yeh tractography",
+        WorkflowJobKind::PrepareHausdorffPlan => "Hausdorff plan",
+        WorkflowJobKind::PreparePyafqPlan => "pyAFQ plan",
     }
 }
 
@@ -135,17 +137,30 @@ fn active_odx_glyph_scene(
 }
 
 fn active_odx_slice_state(app: &crate::app::TrxVizApp) -> Option<(usize, u32)> {
+    // Resolve the slice index in the ODX's own voxel frame from the
+    // shared RAS world offset — the slider's `slice_index` is in the
+    // NIfTI's frame (set by `step_slice`), which uses a different
+    // affine than the ODX. Reading slice_index raw causes the glyphs
+    // to scroll opposite to the slice quad whenever the two affines
+    // have opposing handedness.
+    let scene = app.scene.odx_scene.as_ref()?;
+    let dims = scene.dimensions();
+    let voxel_to_ras = scene.voxel_to_ras();
+    let synth = trxviz_core::data::nifti_data::NiftiVolume {
+        data: Vec::new(),
+        dims: [dims[0] as usize, dims[1] as usize, dims[2] as usize],
+        voxel_to_ras,
+    };
+    let world = app.viewport.slice_world_offsets();
+    let slice_for_axis = |axis_index: usize| -> u32 {
+        synth.nearest_slice_index(axis_index, world[axis_index]) as u32
+    };
+
     if let Some(plan) = active_odx_glyph_plan(app) {
         let viewport_index = plan.slice_axis.viewport_index();
-        return Some((
-            plan.slice_axis.odx_axis(),
-            app.viewport.slice_index(viewport_index) as u32,
-        ));
+        return Some((plan.slice_axis.odx_axis(), slice_for_axis(viewport_index)));
     }
-    app.scene
-        .odx_scene
-        .as_ref()
-        .map(|_| (2usize, app.viewport.slice_index(0) as u32))
+    Some((2usize, slice_for_axis(0)))
 }
 
 fn clamped_active_odx_sh_detail(
@@ -720,6 +735,50 @@ impl crate::app::TrxVizApp {
                                         );
                                     s
                                 }
+                                WorkflowJobOutput::PrepareHausdorffPlan {
+                                    plan,
+                                    seed_mask,
+                                    limiting_mask,
+                                    no_end_mask,
+                                    summary,
+                                } => {
+                                    self.workflow.execution_cache.hausdorff_plan_cache.insert(
+                                        node_uuid,
+                                        trxviz_core::workflow::CachedHausdorffPlan {
+                                            fingerprint,
+                                            plan,
+                                            seed_mask,
+                                            limiting_mask,
+                                            no_end_mask,
+                                            summary: summary.clone(),
+                                        },
+                                    );
+                                    summary
+                                }
+                                WorkflowJobOutput::PreparePyafqPlan {
+                                    plan,
+                                    include_mask,
+                                    exclude_mask,
+                                    start_mask,
+                                    end_mask,
+                                    prob_map,
+                                    summary,
+                                } => {
+                                    self.workflow.execution_cache.pyafq_plan_cache.insert(
+                                        node_uuid,
+                                        trxviz_core::workflow::CachedPyafqPlan {
+                                            fingerprint,
+                                            plan,
+                                            include_mask,
+                                            exclude_mask,
+                                            start_mask,
+                                            end_mask,
+                                            prob_map,
+                                            summary: summary.clone(),
+                                        },
+                                    );
+                                    summary
+                                }
                             };
 
                             if fingerprint_current {
@@ -1041,6 +1100,44 @@ impl crate::app::TrxVizApp {
                     fingerprint,
                     WorkflowJobKind::YehTractography,
                     WorkflowJobPayload::YehTractography { plan },
+                );
+                queued_any = true;
+            }
+        }
+
+        for job in self.workflow.runtime.scene_plan.hausdorff_plan_jobs.clone() {
+            let node_uuid = job.node_uuid;
+            let fingerprint = job.fingerprint;
+            if should_queue_expensive_job(
+                self.workflow.execution_cache.node_runs.get(&node_uuid),
+                fingerprint,
+                &self.workflow.jobs_in_flight,
+                node_uuid,
+            ) {
+                self.queue_workflow_job(
+                    node_uuid,
+                    fingerprint,
+                    WorkflowJobKind::PrepareHausdorffPlan,
+                    WorkflowJobPayload::PrepareHausdorffPlan(job),
+                );
+                queued_any = true;
+            }
+        }
+
+        for job in self.workflow.runtime.scene_plan.pyafq_plan_jobs.clone() {
+            let node_uuid = job.node_uuid;
+            let fingerprint = job.fingerprint;
+            if should_queue_expensive_job(
+                self.workflow.execution_cache.node_runs.get(&node_uuid),
+                fingerprint,
+                &self.workflow.jobs_in_flight,
+                node_uuid,
+            ) {
+                self.queue_workflow_job(
+                    node_uuid,
+                    fingerprint,
+                    WorkflowJobKind::PreparePyafqPlan,
+                    WorkflowJobPayload::PreparePyafqPlan(job),
                 );
                 queued_any = true;
             }
@@ -1488,6 +1585,8 @@ impl crate::app::TrxVizApp {
             }
 
             // Voxel-mask iso-surface meshes reuse the same bundle-mesh pipeline.
+            // Skip the GPU upload when the fingerprint matches the prior frame's,
+            // otherwise N static ROIs re-upload N meshes every frame.
             for draw in &self.workflow.runtime.scene_plan.voxel_mask_mesh_draws {
                 if let Some(cache) = self
                     .workflow
@@ -1496,8 +1595,19 @@ impl crate::app::TrxVizApp {
                     .get(&draw.node_uuid)
                     .filter(|cache| cache.fingerprint == draw.fingerprint)
                 {
+                    if self
+                        .workflow
+                        .uploaded_voxel_mask_fingerprints
+                        .get(&draw.draw_id)
+                        == Some(&draw.fingerprint)
+                    {
+                        continue;
+                    }
                     let one = [(cache.mesh.clone(), draw.label.clone())];
                     mesh_resources.set_bundle_meshes(draw.draw_id, &rs.device, &one);
+                    self.workflow
+                        .uploaded_voxel_mask_fingerprints
+                        .insert(draw.draw_id, draw.fingerprint);
                 }
             }
 
@@ -1507,6 +1617,9 @@ impl crate::app::TrxVizApp {
                 .filter(|id| !active_bundle_ids.contains(id))
             {
                 mesh_resources.clear_bundle_mesh(draw_id);
+                self.workflow
+                    .uploaded_voxel_mask_fingerprints
+                    .remove(&draw_id);
                 if let Some(runtime) = self
                     .workflow
                     .display_runtimes
@@ -1586,29 +1699,145 @@ impl crate::app::TrxVizApp {
             }
         }
 
-        // Upload materialized ODX DPV volumes into AllSliceResources so that
-        // OdxVolumeSelect → VolumeDisplay actually renders.
+        // Upload volumes referenced by VolumeDisplayOp draws into
+        // AllSliceResources so they actually render. Two paths:
+        // - File-backed: ODX DPV materializations (FileId → NiftiVolume)
+        // - InMemory: pyAFQ probability map and other VolumeScalars
+        //   produced upstream; we build a NiftiVolume on the fly.
         {
+            use trxviz_core::renderer::camera::OrbitCamera;
             use trxviz_core::renderer::slice_renderer::{SliceAxis, SliceResources};
-            let plan_source_ids: HashSet<FileId> = self
-                .workflow
-                .runtime
-                .scene_plan
-                .volume_draws
-                .iter()
-                .map(|d| d.source_id)
-                .collect();
+            use trxviz_core::workflow::VolumeBacking;
+            let mut file_keys: HashSet<FileId> = HashSet::new();
+            let mut mem_pending: HashMap<usize, Arc<NiftiVolume>> = HashMap::new();
+            let mut composite_pending: HashMap<
+                usize,
+                Arc<trxviz_core::workflow::CompositeVolumeStack>,
+            > = HashMap::new();
+            for draw in &self.workflow.runtime.scene_plan.volume_draws {
+                match &draw.source {
+                    VolumeBacking::File(id) => {
+                        file_keys.insert(*id);
+                    }
+                    VolumeBacking::InMemory { handle, scalars } => {
+                        mem_pending.entry(*handle as usize).or_insert_with(|| {
+                            Arc::new(NiftiVolume {
+                                data: scalars.values.clone(),
+                                dims: scalars.dims,
+                                voxel_to_ras: scalars.voxel_to_ras,
+                            })
+                        });
+                    }
+                    VolumeBacking::Composite { handle, stack } => {
+                        composite_pending
+                            .entry(*handle as usize)
+                            .or_insert_with(|| stack.clone());
+                    }
+                }
+            }
             // Find a materialization per source_id referenced by the plan.
             let mut pending: HashMap<FileId, (WorkflowNodeUuid, String, Arc<NiftiVolume>)> =
                 HashMap::new();
             for (node_uuid, m) in &self.workflow.execution_cache.odx_dpv_materializations {
-                if plan_source_ids.contains(&m.source_id) {
+                if file_keys.contains(&m.source_id) {
                     pending.insert(
                         m.source_id,
                         (*node_uuid, m.dpv_name.clone(), m.volume.clone()),
                     );
                 }
             }
+
+            // If an in-memory volume is the first thing driving the slice
+            // viewport (no NIfTI loaded, slice indices still at default
+            // [0;0;0]), seed the slice indices and world offsets to the
+            // volume's mid-plane so the slice quads aren't stuck at the
+            // empty boundary. Without this, wiring `VolumeScalars` into
+            // `VolumeDisplay` produces correctly-uploaded textures but
+            // rendered at slice 0 — invisible for any brain-shaped volume.
+            let needs_slice_init = self.scene.nifti_files.is_empty()
+                && self.viewport.slice_indices() == [0; 3]
+                && !mem_pending.is_empty();
+            if needs_slice_init {
+                let already_uploaded: HashSet<usize> = renderer
+                    .callback_resources
+                    .get::<AllSliceResources>()
+                    .map(|all| all.entries.iter().map(|(id, _)| *id).collect())
+                    .unwrap_or_default();
+                if let Some((_, vol)) = mem_pending
+                    .iter()
+                    .find(|(key, _)| !already_uploaded.contains(*key))
+                {
+                    let dims = vol.dims;
+                    let mid = [dims[2] / 2, dims[1] / 2, dims[0] / 2];
+                    self.viewport.set_slice_indices(mid);
+                    let w0 = vol.voxel_to_world(glam::Vec3::new(0.0, 0.0, mid[0] as f32));
+                    let w1 = vol.voxel_to_world(glam::Vec3::new(0.0, mid[1] as f32, 0.0));
+                    let w2 = vol.voxel_to_world(glam::Vec3::new(mid[2] as f32, 0.0, 0.0));
+                    self.viewport.set_slice_world_offsets([w0.z, w1.y, w2.x]);
+                    let no_other_geometry = self.scene.trx_files.is_empty()
+                        && self.scene.gifti_surfaces.is_empty()
+                        && self.scene.odx_scene.is_none();
+                    if no_other_geometry {
+                        let center = vol.voxel_to_world(glam::Vec3::new(
+                            dims[0] as f32 / 2.0,
+                            dims[1] as f32 / 2.0,
+                            dims[2] as f32 / 2.0,
+                        ));
+                        let extent = (vol.voxel_to_world(glam::Vec3::new(
+                            dims[0] as f32,
+                            dims[1] as f32,
+                            dims[2] as f32,
+                        )) - vol.voxel_to_world(glam::Vec3::ZERO))
+                        .length();
+                        self.viewport.set_volume_bounds(center, extent);
+                        *self.viewport.camera_3d_mut() = OrbitCamera::new(center, extent * 0.8);
+                    }
+                }
+            }
+            let mut ensure_uploaded = |key: usize, vol: &NiftiVolume, force: bool| {
+                let exists = renderer
+                    .callback_resources
+                    .get::<AllSliceResources>()
+                    .map(|all| all.entries.iter().any(|(id, _)| *id == key))
+                    .unwrap_or(false);
+                if exists && !force {
+                    return;
+                }
+                let slice_resources =
+                    SliceResources::new(&rs.device, &rs.queue, rs.target_format, vol);
+                let world = self.viewport.slice_world_offsets();
+                slice_resources.update_slice(
+                    &rs.queue,
+                    SliceAxis::Axial,
+                    vol.nearest_slice_index(0, world[0]),
+                    vol,
+                );
+                slice_resources.update_slice(
+                    &rs.queue,
+                    SliceAxis::Coronal,
+                    vol.nearest_slice_index(1, world[1]),
+                    vol,
+                );
+                slice_resources.update_slice(
+                    &rs.queue,
+                    SliceAxis::Sagittal,
+                    vol.nearest_slice_index(2, world[2]),
+                    vol,
+                );
+                use trxviz_core::renderer::slice_renderer::SliceResourceKind;
+                if let Some(all) = renderer.callback_resources.get_mut::<AllSliceResources>() {
+                    if let Some(entry) = all.entries.iter_mut().find(|(id, _)| *id == key) {
+                        *entry = (key, SliceResourceKind::Scalar(slice_resources));
+                    } else {
+                        all.entries
+                            .push((key, SliceResourceKind::Scalar(slice_resources)));
+                    }
+                } else {
+                    renderer.callback_resources.insert(AllSliceResources {
+                        entries: vec![(key, SliceResourceKind::Scalar(slice_resources))],
+                    });
+                }
+            };
             for (source_id, (node_uuid, dpv_name, volume)) in pending {
                 let already = self
                     .workflow
@@ -1616,49 +1845,72 @@ impl crate::app::TrxVizApp {
                     .get(&source_id)
                     .map(|(n, d)| *n == node_uuid && d == &dpv_name)
                     .unwrap_or(false);
-                let exists = renderer
-                    .callback_resources
-                    .get::<AllSliceResources>()
-                    .map(|all| all.entries.iter().any(|(id, _)| *id == source_id))
-                    .unwrap_or(false);
-                if already && exists {
-                    continue;
-                }
-                let vol_ref: &NiftiVolume = &volume;
-                let slice_resources =
-                    SliceResources::new(&rs.device, &rs.queue, rs.target_format, vol_ref);
-                slice_resources.update_slice(
-                    &rs.queue,
-                    SliceAxis::Axial,
-                    self.viewport.slice_index(0),
-                    vol_ref,
-                );
-                slice_resources.update_slice(
-                    &rs.queue,
-                    SliceAxis::Coronal,
-                    self.viewport.slice_index(1),
-                    vol_ref,
-                );
-                slice_resources.update_slice(
-                    &rs.queue,
-                    SliceAxis::Sagittal,
-                    self.viewport.slice_index(2),
-                    vol_ref,
-                );
-                if let Some(all) = renderer.callback_resources.get_mut::<AllSliceResources>() {
-                    if let Some(entry) = all.entries.iter_mut().find(|(id, _)| *id == source_id) {
-                        *entry = (source_id, slice_resources);
-                    } else {
-                        all.entries.push((source_id, slice_resources));
-                    }
-                } else {
-                    renderer.callback_resources.insert(AllSliceResources {
-                        entries: vec![(source_id, slice_resources)],
-                    });
-                }
+                ensure_uploaded(source_id, &volume, !already);
                 self.workflow
                     .uploaded_dpv_by_source
                     .insert(source_id, (node_uuid, dpv_name));
+            }
+            for (key, vol) in mem_pending {
+                ensure_uploaded(key, &vol, false);
+            }
+
+            // Composite stacks each get their own
+            // CompositeSliceResources. We always replace any prior
+            // entry on this `key` because the handle changes whenever
+            // any layer/config does, so a re-upload is exactly what
+            // we want when we get here.
+            use trxviz_core::renderer::slice_composite::CompositeSliceResources;
+            use trxviz_core::renderer::slice_renderer::SliceResourceKind;
+            for (key, stack) in composite_pending {
+                let exists = renderer
+                    .callback_resources
+                    .get::<AllSliceResources>()
+                    .map(|all| all.entries.iter().any(|(id, _)| *id == key))
+                    .unwrap_or(false);
+                if exists {
+                    continue;
+                }
+                let mut composite =
+                    CompositeSliceResources::new(&rs.device, &rs.queue, rs.target_format, &stack);
+                let world = self.viewport.slice_world_offsets();
+                let synth = NiftiVolume {
+                    data: Vec::new(),
+                    dims: stack.dims,
+                    voxel_to_ras: stack.voxel_to_ras,
+                };
+                composite.update_slice(
+                    &rs.device,
+                    &rs.queue,
+                    SliceAxis::Axial,
+                    synth.nearest_slice_index(0, world[0]),
+                    &stack,
+                );
+                composite.update_slice(
+                    &rs.device,
+                    &rs.queue,
+                    SliceAxis::Coronal,
+                    synth.nearest_slice_index(1, world[1]),
+                    &stack,
+                );
+                composite.update_slice(
+                    &rs.device,
+                    &rs.queue,
+                    SliceAxis::Sagittal,
+                    synth.nearest_slice_index(2, world[2]),
+                    &stack,
+                );
+                if let Some(all) = renderer.callback_resources.get_mut::<AllSliceResources>() {
+                    if let Some(entry) = all.entries.iter_mut().find(|(id, _)| *id == key) {
+                        *entry = (key, SliceResourceKind::Composite(composite));
+                    } else {
+                        all.entries
+                            .push((key, SliceResourceKind::Composite(composite)));
+                    }
+                } else {
+                    renderer.callback_resources.insert(AllSliceResources {
+                        entries: vec![(key, SliceResourceKind::Composite(composite))],
+                    });
+                }
             }
         }
         self.workflow.last_resource_sync_revision = self.workflow.last_runtime_revision;
@@ -2028,7 +2280,7 @@ impl crate::app::TrxVizApp {
                 WorkflowAssetDocument::Odx {
                     id,
                     path: asset_path,
-                } => trxviz_core::data::odx_data::OdxScene::open(&asset_path)
+                } => trxviz_core::asset_loader::load_odx_with_reference_affine(&asset_path, None)
                     .map_err(|err| err.to_string())
                     .map(|odx_scene| {
                         let warnings = odx_scene.glyph_warnings().to_vec();
@@ -2036,16 +2288,59 @@ impl crate::app::TrxVizApp {
                             .file_name()
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_else(|| "odx".to_string());
+                        let scene = Arc::new(odx_scene);
+
+                        let fixel_instances = scene.all_fixels();
+                        {
+                            let mut renderer = rs.renderer.write();
+                            if renderer
+                                .callback_resources
+                                .get::<GlyphResources>()
+                                .is_none()
+                            {
+                                renderer
+                                    .callback_resources
+                                    .insert(GlyphResources::new(&rs.device, rs.target_format));
+                            }
+                            if renderer
+                                .callback_resources
+                                .get::<OdxFixelResources>()
+                                .is_none()
+                            {
+                                renderer
+                                    .callback_resources
+                                    .insert(OdxFixelResources::new(&rs.device, rs.target_format));
+                            }
+                            if let Some(fr) =
+                                renderer.callback_resources.get_mut::<OdxFixelResources>()
+                            {
+                                fr.resources_3d.set_fixels(&rs.device, &fixel_instances);
+                                fr.resources_2d.set_fixels(&rs.device, &fixel_instances);
+                            }
+                        }
+
+                        self.workflow.uploaded_odx_glyph_resource_key = None;
+                        self.workflow.uploaded_fixel_3d_fingerprint = 0;
+                        self.workflow.uploaded_fixel_2d_fingerprint = 0;
+                        self.scene.odx_scene = Some(scene.clone());
+
                         self.scene
                             .odx_files
                             .push(trxviz_core::data::loaded_files::LoadedOdx {
                                 id,
                                 name,
                                 path: asset_path,
-                                scene: Arc::new(odx_scene),
+                                scene: scene.clone(),
                                 warnings,
                                 visible: true,
                             });
+
+                        let mut renderer = rs.renderer.write();
+                        self.ensure_active_odx_glyph_resources(
+                            &mut renderer.callback_resources,
+                            &rs.device,
+                            &rs.queue,
+                        );
                     }),
             };
 

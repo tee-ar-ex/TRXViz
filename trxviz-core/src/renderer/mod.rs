@@ -6,6 +6,7 @@ pub mod colormap;
 pub mod fixel_renderer;
 pub mod glyph_renderer;
 pub mod mesh_renderer;
+pub mod slice_composite;
 pub mod slice_renderer;
 pub mod streamline_renderer;
 pub mod viewport;

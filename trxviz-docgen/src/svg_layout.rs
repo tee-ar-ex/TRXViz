@@ -281,6 +281,7 @@ fn push_node(s: &mut String, node: &LaidOutNode) {
     ));
     for (i, kind) in node.inputs.iter().enumerate() {
         let cy = port_y(node.y, i, node.inputs.len());
+        // Pin circle centered on the node edge (matches PinPlacement::Edge).
         s.push_str(&format!(
             "    <circle cx=\"{cx:.1}\" cy=\"{cy:.1}\" r=\"{r}\" fill=\"{fill}\" \
              stroke=\"#1e2129\" stroke-width=\"1\"/>\n",
@@ -292,13 +293,14 @@ fn push_node(s: &mut String, node: &LaidOutNode) {
         s.push_str(&format!(
             "    <text x=\"{tx:.1}\" y=\"{ty:.1}\" fill=\"#b7bdcc\" font-size=\"10\" \
              text-anchor=\"start\" dominant-baseline=\"middle\">{label}</text>\n",
-            tx = node.x + PORT_RADIUS + 6.0,
+            tx = node.x + PORT_RADIUS + 4.0,
             ty = cy,
             label = escape_xml(&label),
         ));
     }
     for (i, kind) in node.outputs.iter().enumerate() {
         let cy = port_y(node.y, i, node.outputs.len());
+        // Pin circle centered on the node edge (matches PinPlacement::Edge).
         s.push_str(&format!(
             "    <circle cx=\"{cx:.1}\" cy=\"{cy:.1}\" r=\"{r}\" fill=\"{fill}\" \
              stroke=\"#1e2129\" stroke-width=\"1\"/>\n",
@@ -310,7 +312,7 @@ fn push_node(s: &mut String, node: &LaidOutNode) {
         s.push_str(&format!(
             "    <text x=\"{tx:.1}\" y=\"{ty:.1}\" fill=\"#b7bdcc\" font-size=\"10\" \
              text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>\n",
-            tx = node.x + NODE_WIDTH - PORT_RADIUS - 6.0,
+            tx = node.x + NODE_WIDTH - PORT_RADIUS - 4.0,
             ty = cy,
             label = escape_xml(&label),
         ));
@@ -347,7 +349,6 @@ fn port_fill(kind: PortKind) -> &'static str {
         PortKind::ParcelSelection => "#ffd94f",
         PortKind::Cifti => "#78b0ff",
         PortKind::SurfaceScalars => "#d68bff",
-        PortKind::VolumeScalars => "#ff9170",
         PortKind::SurfaceAppearance => "#aae291",
         PortKind::BundleSurface => "#8fe0c9",
         PortKind::BoundaryField => "#ffa060",

@@ -341,8 +341,18 @@ impl SliceResources {
     }
 }
 
-/// Wrapper for multiple SliceResources (one per loaded NIfTI volume).
-/// Needed because egui_wgpu::CallbackResources is a TypeMap.
+/// Slice resources are either a scalar 3D-texture path (`File` and
+/// `InMemory` backings) or a composite 2D-texture-per-axis path
+/// (`Composite` backing produced by `VolumeOverlayStackOp`). The
+/// renderer dispatches based on the kind.
+pub enum SliceResourceKind {
+    Scalar(SliceResources),
+    Composite(crate::renderer::slice_composite::CompositeSliceResources),
+}
+
+/// Wrapper for multiple slice resources (one per loaded NIfTI volume
+/// or workflow-produced volume). Needed because
+/// egui_wgpu::CallbackResources is a TypeMap.
 pub struct AllSliceResources {
-    pub entries: Vec<(usize, SliceResources)>, // (file_id, resources)
+    pub entries: Vec<(usize, SliceResourceKind)>, // (slice_key, resources)
 }

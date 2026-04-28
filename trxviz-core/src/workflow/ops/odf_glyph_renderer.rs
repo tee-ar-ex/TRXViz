@@ -1,7 +1,7 @@
 use super::super::{
     EvalCtx, OdfGlyphDrawPlan, PortKind, WorkflowNodeKind, WorkflowOp, default_false,
     default_full_opacity, default_odf_glyph_detail, default_odf_glyph_scale, default_true,
-    expect_odf_field_input, optional_volume_scalars_input,
+    expect_odf_field_input, optional_volume_input,
 };
 use super::super::{GlyphColormap, OpacityGate, SizeGate, WorkflowSliceViewKind};
 use crate::workflow::methods::OpCategory;
@@ -51,11 +51,7 @@ impl WorkflowOp for OdfGlyphRendererOp {
     }
 
     fn input_ports(&self) -> &'static [PortKind] {
-        &[
-            PortKind::OdfField,
-            PortKind::VolumeScalars,
-            PortKind::VolumeScalars,
-        ]
+        &[PortKind::OdfField, PortKind::Volume, PortKind::Volume]
     }
 
     fn output_ports(&self) -> &'static [PortKind] {
@@ -71,8 +67,16 @@ impl WorkflowOp for OdfGlyphRendererOp {
         ctx: &mut EvalCtx<'_, '_>,
     ) -> crate::error::WorkflowResult<Vec<super::super::EvaluatedValue>> {
         let field = expect_odf_field_input(ctx.inputs, self.title())?;
-        let opacity_scalars = optional_volume_scalars_input(ctx.inputs, 1);
-        let size_scalars = optional_volume_scalars_input(ctx.inputs, 2);
+        let opacity_backing = optional_volume_input(ctx.inputs, 1);
+        let size_backing = optional_volume_input(ctx.inputs, 2);
+        let opacity_scalars = match &opacity_backing {
+            Some(b) => Some(ctx.scalars_for(b)?.into_owned()),
+            None => None,
+        };
+        let size_scalars = match &size_backing {
+            Some(b) => Some(ctx.scalars_for(b)?.into_owned()),
+            None => None,
+        };
         ctx.scene_plan.odf_glyph_draws.push(OdfGlyphDrawPlan {
             node_uuid: ctx.node.uuid,
             field,

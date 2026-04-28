@@ -1,12 +1,13 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::data::bundle_mesh::build_voxel_mask_mesh;
+use crate::data::bundle_mesh::{build_voxel_mask_boundary_mesh, build_voxel_mask_mesh};
 use crate::error::WorkflowResult;
 use crate::units::Millimeters;
 use crate::workflow::methods::OpCategory;
 use crate::workflow::types::{
-    CachedVoxelMaskMesh, VoxelMask, VoxelMaskMeshDrawPlan, WorkflowValue,
+    CachedVoxelMaskMesh, VoxelMask, VoxelMaskMeshDrawPlan, VoxelMaskRenderStyle,
+    VoxelMaskSliceMode, WorkflowValue,
 };
 
 use super::super::{EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp};
@@ -23,6 +24,12 @@ fn default_smooth_sigma() -> f32 {
 fn default_min_component_volume_mm3() -> Millimeters {
     Millimeters(0.0)
 }
+fn default_render_style() -> VoxelMaskRenderStyle {
+    VoxelMaskRenderStyle::VoxelAccurate
+}
+fn default_slice_mode() -> VoxelMaskSliceMode {
+    VoxelMaskSliceMode::Outline
+}
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VoxelMaskDisplayOp {
@@ -34,6 +41,10 @@ pub struct VoxelMaskDisplayOp {
     pub smooth_sigma: f32,
     #[serde(default = "default_min_component_volume_mm3")]
     pub min_component_volume_mm3: Millimeters,
+    #[serde(default = "default_render_style")]
+    pub style: VoxelMaskRenderStyle,
+    #[serde(default = "default_slice_mode")]
+    pub slice_mode: VoxelMaskSliceMode,
 }
 
 impl Default for VoxelMaskDisplayOp {
@@ -43,27 +54,30 @@ impl Default for VoxelMaskDisplayOp {
             opacity: default_opacity(),
             smooth_sigma: default_smooth_sigma(),
             min_component_volume_mm3: default_min_component_volume_mm3(),
+            style: default_render_style(),
+            slice_mode: default_slice_mode(),
         }
     }
 }
 
 impl VoxelMaskDisplayOp {
-    fn fingerprint(&self, mask: &VoxelMask) -> u64 {
+    /// O(1) fingerprint: identity of the upstream `Arc<VoxelMask>` plus
+    /// the display params that affect the cached mesh. The stride-sample
+    /// content hash this replaces was costing ~35K bytes per ROI per
+    /// frame — pure waste, since `Arc<VoxelMask>` only swaps when the
+    /// upstream op rebuilds, and the fingerprint is just there to skip
+    /// re-running marching cubes when nothing has changed.
+    fn fingerprint(&self, mask: &Arc<VoxelMask>) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        mask.dims.hash(&mut h);
-        for c in mask.voxel_to_ras.to_cols_array() {
-            c.to_bits().hash(&mut h);
-        }
-        mask.data.len().hash(&mut h);
-        let stride = (mask.data.len() / 256).max(1);
-        for i in (0..mask.data.len()).step_by(stride) {
-            mask.data[i].hash(&mut h);
-        }
+        (Arc::as_ptr(mask) as usize).hash(&mut h);
         for c in self.color {
             c.to_bits().hash(&mut h);
         }
-        self.smooth_sigma.to_bits().hash(&mut h);
-        self.min_component_volume_mm3.0.to_bits().hash(&mut h);
+        self.style.hash(&mut h);
+        if matches!(self.style, VoxelMaskRenderStyle::SmoothMesh) {
+            self.smooth_sigma.to_bits().hash(&mut h);
+            self.min_component_volume_mm3.0.to_bits().hash(&mut h);
+        }
         h.finish()
     }
 }
@@ -125,14 +139,22 @@ impl WorkflowOp for VoxelMaskDisplayOp {
                     *ctx.next_draw_id += 1;
                     d
                 };
-                let new_mesh = build_voxel_mask_mesh(
-                    mask.dims,
-                    mask.voxel_to_ras,
-                    &mask.data,
-                    self.color,
-                    self.smooth_sigma,
-                    self.min_component_volume_mm3,
-                );
+                let new_mesh = match self.style {
+                    VoxelMaskRenderStyle::VoxelAccurate => build_voxel_mask_boundary_mesh(
+                        mask.dims,
+                        mask.voxel_to_ras,
+                        &mask.data,
+                        self.color,
+                    ),
+                    VoxelMaskRenderStyle::SmoothMesh => build_voxel_mask_mesh(
+                        mask.dims,
+                        mask.voxel_to_ras,
+                        &mask.data,
+                        self.color,
+                        self.smooth_sigma,
+                        self.min_component_volume_mm3,
+                    ),
+                };
                 if let Some(mesh) = &new_mesh {
                     log::debug!(
                         "voxel_mask_display '{}': built mesh verts={} tris={}",
@@ -181,6 +203,9 @@ impl WorkflowOp for VoxelMaskDisplayOp {
                     fingerprint,
                     color: self.color,
                     opacity: self.opacity,
+                    style: self.style,
+                    slice_mode: self.slice_mode,
+                    voxel_mask: Arc::clone(&mask),
                 });
         }
 
@@ -195,6 +220,8 @@ impl From<VoxelMaskDisplayOp> for WorkflowNodeKind {
             opacity: op.opacity,
             smooth_sigma: op.smooth_sigma,
             min_component_volume_mm3: op.min_component_volume_mm3,
+            style: op.style,
+            slice_mode: op.slice_mode,
         }
     }
 }

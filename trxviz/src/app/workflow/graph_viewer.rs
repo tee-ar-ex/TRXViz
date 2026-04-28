@@ -247,15 +247,11 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
         snarl: &mut Snarl<WorkflowNode>,
     ) -> impl egui_snarl::ui::SnarlPin + 'static {
         let port = snarl[pin.id.node].op.outputs()[pin.id.output];
-        ui.horizontal(|ui| {
-            ui.label(output_port_label(
-                &snarl[pin.id.node].op,
-                pin.id.output,
-                port,
-            ));
-            // Reserve space so the pin circle doesn't overlap the trailing label glyphs.
-            ui.add_space(18.0);
-        });
+        ui.label(output_port_label(
+            &snarl[pin.id.node].op,
+            pin.id.output,
+            port,
+        ));
         pin_info_for_port(port)
     }
 
@@ -462,6 +458,13 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 PurifibreOp::default().into(),
                 measured_node_sizes,
             );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                SampleVolumeAlongStreamlineOp::default().into(),
+                measured_node_sizes,
+            );
             add_node_button(ui, snarl, pos, MergeOp.into(), measured_node_sizes);
             add_node_button(
                 ui,
@@ -591,6 +594,13 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
+                VolumeOverlayStackOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
                 SurfaceDisplayOp::default().into(),
                 measured_node_sizes,
             );
@@ -710,6 +720,13 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 snarl,
                 pos,
                 PrepareHausdorffPlanOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                PreparePyafqPlanOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
@@ -851,6 +868,7 @@ fn add_node_button(
     measured_node_sizes: &HashMap<WorkflowNodeUuid, NodeSize>,
 ) {
     if ui.button(op.title()).clicked() {
+        let op = auto_color_op(op, snarl);
         let node = WorkflowNode {
             uuid: WorkflowNodeUuid(0),
             label: op.title().to_string(),
@@ -859,6 +877,57 @@ fn add_node_button(
         let insert_pos = find_nearest_free_node_position(snarl, pos, &node, measured_node_sizes);
         snarl.insert_node(insert_pos, node);
         ui.close();
+    }
+}
+
+/// Distinct ROI colors so multiple `VoxelMaskDisplay` nodes don't all show
+/// up in the same orange. Cycles through a 12-entry qualitative palette
+/// indexed by the count of existing `VoxelMaskDisplay` nodes — covers a
+/// typical pyAFQ Plan layout (4 mask outputs × 1–2 plan nodes) with no
+/// collisions and degrades gracefully past 12.
+const VOXEL_MASK_PALETTE: &[[f32; 4]] = &[
+    [0.85, 0.55, 0.25, 1.0],
+    [0.30, 0.55, 0.85, 1.0],
+    [0.45, 0.75, 0.40, 1.0],
+    [0.85, 0.30, 0.30, 1.0],
+    [0.65, 0.40, 0.75, 1.0],
+    [0.60, 0.45, 0.30, 1.0],
+    [0.85, 0.55, 0.75, 1.0],
+    [0.55, 0.55, 0.55, 1.0],
+    [0.90, 0.80, 0.30, 1.0],
+    [0.30, 0.75, 0.75, 1.0],
+    [0.70, 0.85, 0.30, 1.0],
+    [0.85, 0.30, 0.70, 1.0],
+];
+
+/// If `op` is a `VoxelMaskDisplay` with the default color, replace the
+/// color with the next palette entry based on how many such nodes already
+/// exist. Anything else passes through unchanged.
+fn auto_color_op(op: WorkflowNodeKind, snarl: &Snarl<WorkflowNode>) -> WorkflowNodeKind {
+    match op {
+        WorkflowNodeKind::VoxelMaskDisplay {
+            color: _,
+            opacity,
+            smooth_sigma,
+            min_component_volume_mm3,
+            style,
+            slice_mode,
+        } => {
+            let existing = snarl
+                .node_ids()
+                .filter(|(_, node)| matches!(node.op, WorkflowNodeKind::VoxelMaskDisplay { .. }))
+                .count();
+            let color = VOXEL_MASK_PALETTE[existing % VOXEL_MASK_PALETTE.len()];
+            WorkflowNodeKind::VoxelMaskDisplay {
+                color,
+                opacity,
+                smooth_sigma,
+                min_component_volume_mm3,
+                style,
+                slice_mode,
+            }
+        }
+        other => other,
     }
 }
 
@@ -960,7 +1029,6 @@ fn pin_info_for_port(port: PortKind) -> PinInfo {
         PortKind::ParcelSelection => egui::Color32::from_rgb(255, 217, 79),
         PortKind::Cifti => egui::Color32::from_rgb(120, 176, 255),
         PortKind::SurfaceScalars => egui::Color32::from_rgb(214, 139, 255),
-        PortKind::VolumeScalars => egui::Color32::from_rgb(255, 145, 112),
         PortKind::SurfaceAppearance => egui::Color32::from_rgb(170, 226, 145),
         PortKind::BundleSurface => egui::Color32::from_rgb(143, 224, 201),
         PortKind::BoundaryField => egui::Color32::from_rgb(255, 160, 96),
@@ -1104,22 +1172,9 @@ mod tests {
     fn odf_glyph_renderer_volume_inputs_have_specific_labels() {
         let node: WorkflowNodeKind = OdfGlyphRendererOp::default().into();
         assert_eq!(
-            input_port_label(&node, 1, PortKind::VolumeScalars),
+            input_port_label(&node, 1, PortKind::Volume),
             "Opacity Scalars"
         );
-        assert_eq!(
-            input_port_label(&node, 2, PortKind::VolumeScalars),
-            "Size Scalars"
-        );
-    }
-
-    #[test]
-    fn odx_volume_select_outputs_have_specific_labels() {
-        let node: WorkflowNodeKind = OdxVolumeSelectOp::default().into();
-        assert_eq!(output_port_label(&node, 0, PortKind::Volume), "Volume");
-        assert_eq!(
-            output_port_label(&node, 1, PortKind::VolumeScalars),
-            "Volume Scalars"
-        );
+        assert_eq!(input_port_label(&node, 2, PortKind::Volume), "Size Scalars");
     }
 }

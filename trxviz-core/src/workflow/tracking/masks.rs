@@ -54,13 +54,16 @@ impl<'a> PostFilterSet<'a> {
         {
             return Some(AttemptOutcome::RejectEnd);
         }
-        if let Some(PostFilter::Hausdorff {
-            reference_points_ras,
-            max_mm,
-        }) = self.post_filter
-            && !streamline_passes_hausdorff(streamline, reference_points_ras, *max_mm)
-        {
-            return Some(AttemptOutcome::RejectHausdorff);
+        match self.post_filter {
+            Some(PostFilter::Hausdorff {
+                reference_points_ras,
+                max_mm,
+            }) => {
+                if !streamline_passes_hausdorff(streamline, reference_points_ras, *max_mm) {
+                    return Some(AttemptOutcome::RejectHausdorff);
+                }
+            }
+            None => {}
         }
         None
     }

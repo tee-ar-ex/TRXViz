@@ -5,7 +5,7 @@ use trxviz_core::renderer::background_renderer::BackgroundResources;
 use trxviz_core::renderer::fixel_renderer::FixelResources;
 use trxviz_core::renderer::glyph_renderer::GlyphResources;
 use trxviz_core::renderer::mesh_renderer::{MeshDrawStyle, MeshResources};
-use trxviz_core::renderer::slice_renderer::AllSliceResources;
+use trxviz_core::renderer::slice_renderer::{AllSliceResources, SliceAxis, SliceResourceKind};
 use trxviz_core::renderer::streamline_renderer::AllStreamlineResources;
 use trxviz_core::renderer::viewport::ViewportIndex;
 
@@ -43,7 +43,7 @@ impl OdxFixelResources {
 
 #[derive(Clone)]
 pub(super) struct VolumeDrawInfo {
-    pub file_id: usize,
+    pub slice_key: usize,
     pub window_center: f32,
     pub window_width: f32,
     pub colormap: u32,
@@ -155,16 +155,21 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
         }
         if let Some(all) = callback_resources.get_mut::<AllSliceResources>() {
             for vd in &self.volume_draws {
-                if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.file_id) {
-                    sr.update_uniforms(
-                        queue,
-                        0,
-                        self.view_proj,
-                        vd.window_center,
-                        vd.window_width,
-                        vd.colormap,
-                        vd.opacity,
-                    );
+                if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.slice_key) {
+                    match sr {
+                        SliceResourceKind::Scalar(s) => s.update_uniforms(
+                            queue,
+                            0,
+                            self.view_proj,
+                            vd.window_center,
+                            vd.window_width,
+                            vd.colormap,
+                            vd.opacity,
+                        ),
+                        SliceResourceKind::Composite(c) => {
+                            c.update_uniforms(queue, 0, self.view_proj, vd.opacity);
+                        }
+                    }
                 }
             }
         }
@@ -312,19 +317,43 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
         if let Some(all) = callback_resources.get::<AllSliceResources>() {
             let viewport_3d: usize = ViewportIndex::Perspective3D.into();
             for vd in &self.volume_draws {
-                if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.file_id) {
-                    render_pass.set_pipeline(&sr.pipeline);
-                    render_pass.set_bind_group(0, sr.bind_group(viewport_3d), &[]);
-                    render_pass.set_index_buffer(
-                        sr.quad_index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint16,
-                    );
-                    for i in 0..3 {
-                        if !self.slice_visible[i] {
-                            continue;
+                if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.slice_key) {
+                    match sr {
+                        SliceResourceKind::Scalar(s) => {
+                            render_pass.set_pipeline(&s.pipeline);
+                            render_pass.set_bind_group(0, s.bind_group(viewport_3d), &[]);
+                            render_pass.set_index_buffer(
+                                s.quad_index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            for i in 0..3 {
+                                if !self.slice_visible[i] {
+                                    continue;
+                                }
+                                render_pass.set_vertex_buffer(0, s.quad_buffers[i].slice(..));
+                                render_pass.draw_indexed(0..6, 0, 0..1);
+                            }
                         }
-                        render_pass.set_vertex_buffer(0, sr.quad_buffers[i].slice(..));
-                        render_pass.draw_indexed(0..6, 0, 0..1);
+                        SliceResourceKind::Composite(c) => {
+                            render_pass.set_pipeline(&c.pipeline);
+                            render_pass.set_index_buffer(
+                                c.quad_index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            for i in 0..3 {
+                                if !self.slice_visible[i] {
+                                    continue;
+                                }
+                                let axis = match i {
+                                    0 => SliceAxis::Axial,
+                                    1 => SliceAxis::Coronal,
+                                    _ => SliceAxis::Sagittal,
+                                };
+                                render_pass.set_bind_group(0, c.bind_group(viewport_3d, axis), &[]);
+                                render_pass.set_vertex_buffer(0, c.quad_buffers[i].slice(..));
+                                render_pass.draw_indexed(0..6, 0, 0..1);
+                            }
+                        }
                     }
                 }
             }
@@ -464,16 +493,24 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
         };
         if let Some(all) = callback_resources.get_mut::<AllSliceResources>() {
             for vd in &self.volume_draws {
-                if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.file_id) {
-                    sr.update_uniforms(
-                        queue,
-                        self.viewport.into(),
-                        self.view_proj,
-                        vd.window_center,
-                        vd.window_width,
-                        vd.colormap,
-                        vd.opacity,
-                    );
+                if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.slice_key) {
+                    match sr {
+                        SliceResourceKind::Scalar(s) => s.update_uniforms(
+                            queue,
+                            self.viewport.into(),
+                            self.view_proj,
+                            vd.window_center,
+                            vd.window_width,
+                            vd.colormap,
+                            vd.opacity,
+                        ),
+                        SliceResourceKind::Composite(c) => c.update_uniforms(
+                            queue,
+                            self.viewport.into(),
+                            self.view_proj,
+                            vd.opacity,
+                        ),
+                    }
                 }
             }
         }
@@ -621,15 +658,40 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
 
         if let Some(all) = callback_resources.get::<AllSliceResources>() {
             for vd in &self.volume_draws {
-                if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.file_id) {
-                    render_pass.set_pipeline(&sr.pipeline);
-                    render_pass.set_bind_group(0, sr.bind_group(self.viewport.into()), &[]);
-                    render_pass.set_index_buffer(
-                        sr.quad_index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint16,
-                    );
-                    render_pass.set_vertex_buffer(0, sr.quad_buffers[self.quad_index].slice(..));
-                    render_pass.draw_indexed(0..6, 0, 0..1);
+                if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.slice_key) {
+                    let axis = match self.quad_index {
+                        0 => SliceAxis::Axial,
+                        1 => SliceAxis::Coronal,
+                        _ => SliceAxis::Sagittal,
+                    };
+                    match sr {
+                        SliceResourceKind::Scalar(s) => {
+                            render_pass.set_pipeline(&s.pipeline);
+                            render_pass.set_bind_group(0, s.bind_group(self.viewport.into()), &[]);
+                            render_pass.set_index_buffer(
+                                s.quad_index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            render_pass
+                                .set_vertex_buffer(0, s.quad_buffers[self.quad_index].slice(..));
+                            render_pass.draw_indexed(0..6, 0, 0..1);
+                        }
+                        SliceResourceKind::Composite(c) => {
+                            render_pass.set_pipeline(&c.pipeline);
+                            render_pass.set_bind_group(
+                                0,
+                                c.bind_group(self.viewport.into(), axis),
+                                &[],
+                            );
+                            render_pass.set_index_buffer(
+                                c.quad_index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            render_pass
+                                .set_vertex_buffer(0, c.quad_buffers[self.quad_index].slice(..));
+                            render_pass.draw_indexed(0..6, 0, 0..1);
+                        }
+                    }
                 }
             }
         }

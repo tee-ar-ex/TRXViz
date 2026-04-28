@@ -15,6 +15,7 @@ struct Uniforms {
     post_params: vec4<f32>,
     color_params: vec4<f32>, // x=colormap u32-as-f32, y=scalar_min, z=scalar_max, w=reserved
     opacity_gate: vec4<f32>, // x=range_min, y=range_max, z=below, w=above
+    style_params: vec4<f32>, // x=directional∈[0,1], yzw=reserved
 }
 
 // Piecewise-linear opacity gate. Below `range_min` → `below`; above
@@ -118,12 +119,22 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
     let lm = select(1.0, uniforms.post_params.w, uniforms.post_params.w > 0.0);
     let eff_len = in.length * lm;
-    let along = in.direction * eff_len * in.quad_pos.x;
+    // `directional` ∈ [0, 1]: 0 ⇒ bidirectional line through the voxel
+    // centre (quad_pos.x ∈ [−1, 1]); 1 ⇒ half-arrow starting at the
+    // centre and extending along the peak (quad_pos.x ∈ [0, 1]). For
+    // asymmetric ODFs (full-basis descoteaux SH) each peak has a true
+    // forward direction, so the half-arrow makes the asymmetry visible.
+    let directional = clamp(uniforms.style_params.x, 0.0, 1.0);
+    let qx = mix(in.quad_pos.x, in.quad_pos.x * 0.5 + 0.5, directional);
+    let along = in.direction * eff_len * qx;
     let world = in.center + along;
 
+    let start_t = mix(-1.0, 0.0, directional);
+    let end_t = 1.0;
     let clip = uniforms.view_proj * vec4<f32>(world, 1.0);
-    let clip_end = uniforms.view_proj * vec4<f32>(in.center + in.direction * eff_len, 1.0);
-    let clip_start = uniforms.view_proj * vec4<f32>(in.center - in.direction * eff_len, 1.0);
+    let clip_end = uniforms.view_proj * vec4<f32>(in.center + in.direction * eff_len * end_t, 1.0);
+    let clip_start =
+        uniforms.view_proj * vec4<f32>(in.center + in.direction * eff_len * start_t, 1.0);
 
     let ndc_a = clip_start.xy / clip_start.w;
     let ndc_b = clip_end.xy / clip_end.w;
