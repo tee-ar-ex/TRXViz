@@ -1,16 +1,16 @@
 //! GPU tractography pipelines for Dipy-style ODF trackers.
 //!
 //! Split by concern:
-//!   - [`shared`] — input prep (`DipyGpuInputs`, `prepare_dipy_inputs`),
+//!   - `shared` — input prep (`DipyGpuInputs`, `prepare_dipy_inputs`),
 //!     FOD precompute, post-hoc filter helpers, streamline assembly,
 //!     shared bind-group-layout entries, and the two constants used by
 //!     both paths.
-//!   - [`readback`] — `map_slices_blocking` + GPU readback timeout. GPU
+//!   - `readback` — `map_slices_blocking` + GPU readback timeout. GPU
 //!     failures return an error rather than hanging the worker thread
 //!     on an un-callbacked `map_async` — see PR 1 bug #5.
-//!   - [`prob`] — the probabilistic path (PMF-on-sphere sampling in the
+//!   - `prob` — the probabilistic path (PMF-on-sphere sampling in the
 //!     shader).
-//!   - [`ptt`] — the PTT path (Parallel Transport Tractography; probe
+//!   - `ptt` — the PTT path (Parallel Transport Tractography; probe
 //!     arcs with rejection sampling).
 //!
 //! `run_gpu_dipy` is the public entry point; it dispatches on

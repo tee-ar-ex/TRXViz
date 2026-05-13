@@ -3,10 +3,11 @@
 //!
 //! Given a docs root (typically `docs/`), emits:
 //!
-//! - `reference/ops/<tag>.md` — one page per [`WorkflowOp`] impl with
-//!   ports, parameters, description, and (when citations are present)
-//!   the non-endorsement admonition + `[@key]` citation list resolved
-//!   by mkdocs-bibtex.
+//! - `reference/ops/<tag>.md` — one page per
+//!   [`WorkflowOp`](trxviz_core::workflow::WorkflowOp) impl with ports,
+//!   parameters, description, and (when citations are present) the
+//!   non-endorsement admonition + `[@key]` citation list resolved by
+//!   mkdocs-bibtex.
 //! - `reference/ops/index.md` — landing page grouping ops by
 //!   [`OpCategory`].
 //! - `examples/<slug>.svg` + `examples/<slug>.md` — curated workflow

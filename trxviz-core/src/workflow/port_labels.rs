@@ -10,8 +10,9 @@
 //!   "Filtered", not two identical "Streamline" labels).
 //!
 //! Shared between the GUI (egui-snarl renders the same strings next to
-//! each pin) and the docs generator (SVG workflow diagrams). Keep the
-//! two call sites in lockstep by routing both through this module.
+//! each pin), the docs SVG generator (`trxviz-docgen::svg_layout`), and
+//! the per-op reference markdown pages (`trxviz-docgen::op_pages`).
+//! Keep all call sites in lockstep by routing them through this module.
 
 use super::PortKind;
 use super::ops::WorkflowNodeKind;
@@ -119,5 +120,36 @@ pub fn output_port_label(
             _ => port_name(port).to_string(),
         },
         _ => port_name(port).to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workflow::ops::WorkflowNodeKind;
+
+    #[test]
+    fn port_name_uses_human_labels() {
+        assert_eq!(port_name(PortKind::Cifti), "CIFTI");
+        assert_eq!(port_name(PortKind::ParcelSelection), "Parcel Set");
+        assert_eq!(port_name(PortKind::SurfaceScalars), "Surface Scalars");
+        assert_eq!(port_name(PortKind::OdxCatalog), "ODX Catalog");
+    }
+
+    #[test]
+    fn purifibre_outputs_have_distinct_labels() {
+        let kind = WorkflowNodeKind::Purifibre {
+            trim_fraction: 0.0,
+            puri_fraction: 0.0,
+            spherical_smoothing_deg: 0.0,
+        };
+        assert_eq!(
+            output_port_label(&kind, 0, PortKind::Streamline),
+            "Scored (all)",
+        );
+        assert_eq!(
+            output_port_label(&kind, 1, PortKind::Streamline),
+            "Filtered",
+        );
     }
 }

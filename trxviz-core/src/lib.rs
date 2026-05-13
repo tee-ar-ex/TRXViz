@@ -12,6 +12,8 @@ pub mod gpu;
 pub mod headless;
 /// Scene lighting presets and parameters shared by render paths.
 pub mod lighting;
+/// Deterministic distinct-colour generator for many-category visualisations.
+pub mod palette;
 /// Renderer-facing GPU resources, cameras, and draw-path infrastructure.
 pub mod renderer;
 /// Shared scene and asset state used by GUI and headless execution.

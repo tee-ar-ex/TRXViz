@@ -443,18 +443,6 @@ impl TrxGpuData {
     fn compute_group_colors(&self) -> Vec<[f32; 4]> {
         let mut colors = vec![[0.5f32, 0.5, 0.5, 1.0]; self.nb_vertices];
 
-        // Fallback palette when group name is not in the reference dict.
-        let palette: &[[f32; 4]] = &[
-            [1.0, 0.2, 0.2, 1.0], // red
-            [0.2, 0.7, 1.0, 1.0], // blue
-            [0.2, 1.0, 0.3, 1.0], // green
-            [1.0, 0.8, 0.1, 1.0], // yellow
-            [1.0, 0.4, 0.8, 1.0], // pink
-            [0.6, 0.3, 1.0, 1.0], // purple
-            [1.0, 0.6, 0.2, 1.0], // orange
-            [0.3, 1.0, 0.8, 1.0], // cyan
-        ];
-
         for (gi, (name, members)) in self.groups.iter().enumerate() {
             let color = self
                 .group_colors
@@ -462,7 +450,7 @@ impl TrxGpuData {
                 .copied()
                 .flatten()
                 .or_else(|| group_name_color(name))
-                .unwrap_or(palette[gi % palette.len()]);
+                .unwrap_or_else(|| crate::palette::distinct_color_index(gi));
             for &streamline_idx in members {
                 let si = streamline_idx.0 as usize;
                 if si + 1 < self.offsets.len() {

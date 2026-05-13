@@ -72,7 +72,8 @@ pub(crate) use evaluate::{
     expect_surface_input, optional_volume_input, resolve_selected_labels, summarize_value,
     volume_scalars_from_nifti_volume,
 };
-pub(crate) use op::{EvalCtx, WorkflowOp};
+pub(crate) use op::EvalCtx;
+pub use op::WorkflowOp;
 pub use ops::{
     AddEndRegionOp, AddGroupsFromParcellationOp, AddLimitingOp, AddNoEndOp, AddRoaOp, AddRoiOp,
     AddTermOp, BoundaryGlyphDisplayOp, BundleSurfaceBuildOp, BundleSurfaceDisplayOp, CiftiSourceOp,

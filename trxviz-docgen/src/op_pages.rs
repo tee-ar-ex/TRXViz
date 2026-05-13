@@ -9,8 +9,8 @@
 //! least one citation key, and again on the index — matching the plan's
 //! "disclaimer everywhere citations appear" requirement.
 
-use trxviz_core::workflow::PortKind;
 use trxviz_core::workflow::methods::{NON_ENDORSEMENT_NOTICE, OpCategory, OpDocInfo};
+use trxviz_core::workflow::port_labels::{input_port_label, output_port_label};
 
 pub fn render_op_page(info: &OpDocInfo) -> String {
     let mut s = String::new();
@@ -133,7 +133,10 @@ fn push_ports_table(s: &mut String, info: &OpDocInfo) {
                 s.push_str("| _Input_ | — | _none_ |\n");
             } else {
                 for (i, port) in inputs.iter().enumerate() {
-                    s.push_str(&format!("| Input | {i} | `{}` |\n", port_label(*port)));
+                    s.push_str(&format!(
+                        "| Input | {i} | `{}` |\n",
+                        input_port_label(&info.node_kind, i, *port)
+                    ));
                 }
             }
         }
@@ -147,31 +150,13 @@ fn push_ports_table(s: &mut String, info: &OpDocInfo) {
         s.push_str("| _Output_ | — | _none (terminal node)_ |\n");
     } else {
         for (i, port) in info.output_ports.iter().enumerate() {
-            s.push_str(&format!("| Output | {i} | `{}` |\n", port_label(*port)));
+            s.push_str(&format!(
+                "| Output | {i} | `{}` |\n",
+                output_port_label(&info.node_kind, i, *port)
+            ));
         }
     }
     s.push('\n');
-}
-
-fn port_label(port: PortKind) -> &'static str {
-    match port {
-        PortKind::Streamline => "Streamline",
-        PortKind::Volume => "Volume",
-        PortKind::Cifti => "Cifti",
-        PortKind::Surface => "Surface",
-        PortKind::Parcellation => "Parcellation",
-        PortKind::ParcelSelection => "ParcelSelection",
-        PortKind::SurfaceScalars => "SurfaceScalars",
-        PortKind::SurfaceAppearance => "SurfaceAppearance",
-        PortKind::BundleSurface => "BundleSurface",
-        PortKind::BoundaryField => "BoundaryField",
-        PortKind::Fixels => "Fixels",
-        PortKind::FixelScalars => "FixelScalars",
-        PortKind::OdfField => "OdfField",
-        PortKind::OdxCatalog => "OdxCatalog",
-        PortKind::VoxelMask => "VoxelMask",
-        PortKind::TrackingPlan => "TrackingPlan",
-    }
 }
 
 /// Wrap `text` at word boundaries into lines of at most `width`

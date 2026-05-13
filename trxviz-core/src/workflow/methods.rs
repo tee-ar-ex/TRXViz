@@ -1,17 +1,18 @@
 //! Runtime methods-boilerplate generation primitives.
 //!
 //! Ops opt in to the methods-boilerplate system through three
-//! default-impl methods on [`WorkflowOp`](super::op::WorkflowOp):
+//! default-impl methods on [`WorkflowOp`](super::WorkflowOp):
 //!
-//! - [`WorkflowOp::citation_keys`] — BibTeX keys into
-//!   `trxviz-core/data/citations.bib` that this op contributes when it
-//!   appears in a workflow.
-//! - [`WorkflowOp::boilerplate`] — a single sentence, with the op's
-//!   parameter values interpolated, written in past tense and suitable
-//!   for inclusion in a paper's Methods section. Use Pandoc `[@key]`
-//!   citation syntax.
-//! - [`WorkflowOp::describe`] — a parameter-free short description
-//!   used by the per-op reference documentation.
+//! - [`WorkflowOp::citation_keys`](super::WorkflowOp::citation_keys) —
+//!   BibTeX keys into `trxviz-core/data/citations.bib` that this op
+//!   contributes when it appears in a workflow.
+//! - [`WorkflowOp::boilerplate`](super::WorkflowOp::boilerplate) — a
+//!   single sentence, with the op's parameter values interpolated,
+//!   written in past tense and suitable for inclusion in a paper's
+//!   Methods section. Use Pandoc `[@key]` citation syntax.
+//! - [`WorkflowOp::describe`](super::WorkflowOp::describe) — a
+//!   parameter-free short description used by the per-op reference
+//!   documentation.
 //!
 //! The assembly that walks a [`WorkflowDocument`](super::types::WorkflowDocument)
 //! and emits a final `methods.md` + `references.bib` pair lives in
@@ -45,7 +46,7 @@ contributed to, or endorsed TRXViz.";
 /// too flat.
 ///
 /// The default for an op is [`OpCategory::Other`]; ops override
-/// [`WorkflowOp::category`](super::op::WorkflowOp::category) to pick
+/// [`WorkflowOp::category`](super::WorkflowOp::category) to pick
 /// a more specific bucket.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum OpCategory {
@@ -140,7 +141,7 @@ pub struct MethodsReport {
 
 /// Per-op information captured for documentation generation. Populated
 /// once by [`all_op_doc_info`] against a default instance of every
-/// [`WorkflowOp`](super::op::WorkflowOp) implementation; the
+/// [`WorkflowOp`](super::WorkflowOp) implementation; the
 /// `trxviz-docgen` crate walks the returned vec to emit the `docs/
 /// reference/ops/` tree.
 ///
@@ -167,6 +168,11 @@ pub struct OpDocInfo {
     pub input_ports: Option<&'static [super::PortKind]>,
     /// Output ports (always static).
     pub output_ports: &'static [super::PortKind],
+    /// A representative `WorkflowNodeKind` value for this op, used by
+    /// the docs generator to resolve per-op port label overrides via
+    /// [`super::port_labels`]. For ops with dynamic ports
+    /// (`SurfaceOverlayStack`) this carries the default-instance shape.
+    pub node_kind: super::ops::WorkflowNodeKind,
     /// Top-level parameter fields of the op struct and their
     /// default-instance values, reflected via `serde_json`. Empty for
     /// unit-struct ops (e.g. `Merge`, `AddRoi`). Values are emitted as
@@ -224,7 +230,7 @@ fn reflect_parameters(kind: &super::ops::WorkflowNodeKind) -> Vec<OpParameter> {
 /// builds.
 ///
 /// New ops must be added both here and in
-/// [`super::ops::validate_registry`]; a test in this module diffs the
+/// `super::ops::validate_registry`; a test in this module diffs the
 /// two to catch drift.
 pub fn all_op_doc_info() -> Vec<OpDocInfo> {
     use super::op::WorkflowOp;
@@ -253,6 +259,7 @@ pub fn all_op_doc_info() -> Vec<OpDocInfo> {
             input_ports: Some(op.input_ports()),
             output_ports: op.output_ports(),
             parameters: reflect_parameters(&kind),
+            node_kind: kind,
         }
     }
 
@@ -564,6 +571,7 @@ pub fn all_op_doc_info() -> Vec<OpDocInfo> {
         input_ports: None,
         output_ports: overlay.output_ports(),
         parameters: reflect_parameters(&overlay_kind),
+        node_kind: overlay_kind,
     });
     let surf = SurfaceDisplayOp::default();
     v.push(describe(

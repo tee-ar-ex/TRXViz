@@ -48,11 +48,11 @@ That makes project files the best handoff format between:
 
 When you add a CIFTI asset, TRXViz seeds a structure-aware branch:
 
-`CiftiSource` -> `CiftiStructure(left)`  
-`CiftiSource` -> `CiftiStructure(right)`  
-`CiftiSource` -> `CiftiStructure(subcortical)`
+`CIFTI Source` -> `CIFTI Left Cortex`  
+`CIFTI Source` -> `CIFTI Right Cortex`  
+`CIFTI Source` -> `CIFTI Subcortex`
 
-The cortical outputs are intended to connect into `SurfaceOverlayStack` nodes on loaded GIFTI
+The cortical outputs are intended to connect into `Surface Overlay Stack` nodes on loaded GIFTI
 surfaces. That keeps the scalar data separate from the target geometry and lets the same surface
 receive CIFTI overlays, streamline-derived overlays, or both.
 

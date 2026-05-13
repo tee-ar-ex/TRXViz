@@ -420,17 +420,7 @@ pub fn bundle_surface_solid_color(flow: &StreamlineFlow, label: &str, per_group:
 }
 
 fn pleasant_bundle_color(label: &str) -> [f32; 4] {
-    const PALETTE: [[f32; 4]; 8] = [
-        [0.165, 0.455, 0.702, 1.0],
-        [0.922, 0.467, 0.208, 1.0],
-        [0.239, 0.698, 0.412, 1.0],
-        [0.753, 0.353, 0.431, 1.0],
-        [0.639, 0.471, 0.878, 1.0],
-        [0.816, 0.686, 0.267, 1.0],
-        [0.247, 0.651, 0.710, 1.0],
-        [0.855, 0.400, 0.310, 1.0],
-    ];
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     label.hash(&mut hasher);
-    PALETTE[(hasher.finish() as usize) % PALETTE.len()]
+    crate::palette::distinct_color_hash(hasher.finish())
 }
