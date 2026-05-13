@@ -106,7 +106,10 @@ mod tests {
         let dg = (a[1] - b[1]).abs();
         let db = (a[2] - b[2]).abs();
         let max_delta = dr.max(dg).max(db);
-        assert!(max_delta > 0.2, "adjacent colors too similar: {a:?} vs {b:?}");
+        assert!(
+            max_delta > 0.2,
+            "adjacent colors too similar: {a:?} vs {b:?}"
+        );
     }
 
     #[test]
