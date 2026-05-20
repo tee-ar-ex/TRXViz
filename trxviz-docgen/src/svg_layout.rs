@@ -347,6 +347,7 @@ fn port_fill(kind: PortKind) -> &'static str {
         PortKind::Surface => "#91ffa1",
         PortKind::Parcellation => "#ff6c91",
         PortKind::ParcelSelection => "#ffd94f",
+        PortKind::GroupSelection => "#ffe89a",
         PortKind::Cifti => "#78b0ff",
         PortKind::SurfaceScalars => "#d68bff",
         PortKind::SurfaceAppearance => "#aae291",

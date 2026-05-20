@@ -367,9 +367,13 @@ impl MeshResources {
             contents: bytemuck::cast_slice(&vec![0.0f32; surface.vertices.len()]),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
+        let initial_colors: Vec<[f32; 4]> = match surface.vertex_colors.as_ref() {
+            Some(c) if c.len() == surface.vertices.len() => c.clone(),
+            _ => vec![[0.7f32, 0.7, 0.7, 1.0]; surface.vertices.len()],
+        };
         let color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("gifti_surface_colors"),
-            contents: bytemuck::cast_slice(&vec![[0.7f32, 0.7, 0.7, 1.0]; surface.vertices.len()]),
+            contents: bytemuck::cast_slice(&initial_colors),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 

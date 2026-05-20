@@ -241,25 +241,38 @@ impl EvalCtx<'_, '_> {
         self.inputs.iter().flatten().any(|value| value.stale)
     }
 
-    /// Yield the `VolumeScalars` view of a `VolumeBacking`. For `InMemory`
-    /// the underlying `Arc` is borrowed; for `File` the loaded NIfTI is
-    /// converted via `volume_scalars_from_nifti_volume` (clones the voxel
-    /// buffer). Errors if the asset isn't loaded.
-    pub fn scalars_for<'b>(
-        &'b self,
-        backing: &'b super::VolumeBacking,
-    ) -> WorkflowResult<Cow<'b, crate::data::cifti::VolumeScalars>> {
+    /// Yield the `VolumeScalars` view of a `VolumeBacking` as a shared
+    /// `Arc`. `InMemory` clones its existing `Arc` (cheap). `File`
+    /// materializes the `VolumeScalars` from the loaded NIfTI on first
+    /// access and memoizes the result in
+    /// `execution_cache.volume_scalars_cache` keyed by `FileId`, so
+    /// subsequent evaluations — including the per-frame Interactive
+    /// passes driven by render-only edits — reuse the same buffer
+    /// instead of rescanning + cloning every voxel. Errors if the
+    /// asset isn't loaded, or if the backing is `Composite` (which
+    /// can't be sampled as a single scalar volume).
+    pub fn scalars_for(
+        &mut self,
+        backing: &super::VolumeBacking,
+    ) -> WorkflowResult<std::sync::Arc<crate::data::cifti::VolumeScalars>> {
         match backing {
-            super::VolumeBacking::InMemory { scalars, .. } => Ok(Cow::Borrowed(scalars.as_ref())),
+            super::VolumeBacking::InMemory { scalars, .. } => Ok(scalars.clone()),
             super::VolumeBacking::File(id) => {
+                if let Some(cached) = self.execution_cache.volume_scalars_cache.get(id) {
+                    return Ok(cached.clone());
+                }
                 let loaded = self.volume_assets.get(id).ok_or_else(|| {
                     crate::error::WorkflowError::Evaluation(format!("Missing volume asset {id}"))
                 })?;
-                Ok(Cow::Owned(super::volume_scalars_from_nifti_volume(
+                let scalars = std::sync::Arc::new(super::volume_scalars_from_nifti_volume(
                     &loaded.volume,
                     String::new(),
                     *id,
-                )))
+                ));
+                self.execution_cache
+                    .volume_scalars_cache
+                    .insert(*id, scalars.clone());
+                Ok(scalars)
             }
             super::VolumeBacking::Composite { .. } => Err(crate::error::WorkflowError::Evaluation(
                 "Composite volume (from Volume Overlay Stack) can't be sampled as \

@@ -26,6 +26,7 @@ pub fn port_name(port: PortKind) -> &'static str {
         PortKind::Surface => "Surface",
         PortKind::Parcellation => "Parcellation",
         PortKind::ParcelSelection => "Parcel Set",
+        PortKind::GroupSelection => "Group Set",
         PortKind::Cifti => "CIFTI",
         PortKind::SurfaceScalars => "Surface Scalars",
         PortKind::SurfaceAppearance => "Surface Appearance",

@@ -242,7 +242,7 @@ mod tests {
             id: 7,
             path: PathBuf::from("subject.odx"),
         };
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None, false);
         assert_graph_has_no_overlaps(&document);
 
         let changed = set_default_odx_fixel_3d_visibility(&mut document, 7, false);
@@ -258,7 +258,7 @@ mod tests {
             id: 9,
             path: PathBuf::from("subject.odx"),
         };
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None, false);
         assert_graph_has_no_overlaps(&document);
 
         let changed = set_default_odx_fixel_3d_visibility(&mut document, 9, true);
@@ -310,7 +310,7 @@ mod tests {
             id: 10,
             path: PathBuf::from("subject.odx"),
         };
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None, false);
 
         let changed = set_default_odx_fixel_dpf(
             &mut document,
@@ -349,7 +349,7 @@ mod tests {
             id: 15,
             path: PathBuf::from("subject.odx"),
         };
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None, false);
 
         let changed = set_default_odx_fixel_dpf(&mut document, 15, &[]);
 
@@ -375,7 +375,7 @@ mod tests {
             id: 11,
             path: PathBuf::from("subject.odx"),
         };
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None, false);
 
         let changed = set_default_odx_volume_dpv(
             &mut document,
@@ -394,7 +394,7 @@ mod tests {
             id: 12,
             path: PathBuf::from("subject.odx"),
         };
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None, false);
 
         let changed = set_default_odx_volume_dpv(
             &mut document,
@@ -413,7 +413,7 @@ mod tests {
             id: 13,
             path: PathBuf::from("subject.odx"),
         };
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None, false);
         let changed = set_default_odx_volume_dpv(&mut document, 13, &["qa".to_string()]);
         assert!(changed);
         assert_eq!(odx_volume_dpv_name(&document, 13).as_deref(), Some("qa"));
@@ -435,7 +435,7 @@ mod tests {
             id: 14,
             path: PathBuf::from("subject.odx"),
         };
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None, false);
 
         let changed = set_default_odx_volume_dpv(&mut document, 14, &[]);
 

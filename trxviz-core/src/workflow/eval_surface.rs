@@ -19,6 +19,16 @@ pub(crate) fn compose_surface_appearance(
             color[3] = base.opacity.clamp(0.0, 1.0);
         }
     }
+    // Baked-in per-vertex colours (e.g. ufixels' sheet shells) override the
+    // layer base colour. Scalar overlays applied below still alpha-blend on
+    // top, so the user can layer projection maps over the baked colours.
+    if let Some(baked) = surface.data.vertex_colors.as_ref() {
+        if baked.len() == vertex_rgba.len() {
+            for (dst, src) in vertex_rgba.iter_mut().zip(baked.iter()) {
+                *dst = *src;
+            }
+        }
+    }
     let mut legend_labels = Vec::new();
     for (layer_index, layer) in layers.iter().enumerate() {
         if !layer.enabled {

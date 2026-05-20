@@ -32,8 +32,9 @@ pub use evaluate::{evaluate_scene_plan, evaluate_scene_plan_with_mode, save_stre
 pub use fingerprint::{
     workflow_boundary_plan_fingerprint, workflow_bundle_display_fingerprint,
     workflow_bundle_plan_fingerprint, workflow_reactive_streamline_fingerprint,
-    workflow_streamline_fingerprint, workflow_surface_overlay_fingerprint,
-    workflow_surface_projection_fingerprint, workflow_surface_query_fingerprint,
+    workflow_sample_volume_along_streamline_fingerprint, workflow_streamline_fingerprint,
+    workflow_surface_overlay_fingerprint, workflow_surface_projection_fingerprint,
+    workflow_surface_query_fingerprint, workflow_triangle_fundus_fingerprint,
 };
 pub use graph::{GraphPos, GraphRect, InPort, OutPort, Wire, WorkflowGraph, WorkflowNodeEntry};
 pub use jobs::{
@@ -69,7 +70,8 @@ pub(crate) use evaluate::{evaluate_derived_streamline_plan, expect_streamline_in
 pub(crate) use evaluate::{
     expect_fixel_scalars_input, expect_fixels_input, expect_odf_field_input,
     expect_odx_catalog_input, expect_parcel_selection_input, expect_parcellation_input,
-    expect_surface_input, optional_volume_input, resolve_selected_labels, summarize_value,
+    expect_surface_input, optional_group_selection_input, optional_volume_input,
+    resolve_selected_labels, summarize_value,
     volume_scalars_from_nifti_volume,
 };
 pub(crate) use op::EvalCtx;
@@ -79,7 +81,8 @@ pub use ops::{
     AddTermOp, BoundaryGlyphDisplayOp, BundleSurfaceBuildOp, BundleSurfaceDisplayOp, CiftiSourceOp,
     CiftiStructureOp, ColorByDirectionOp, ColorByDpsOp, ColorByDpvOp, ColorByFixelScalarsOp,
     ColorByGroupOp, DipyTractographyOp, Fixel2DDisplayOp, Fixel3DDisplayOp, GroupSelectOp,
-    LimitStreamlinesOp, MergeOp, OdfGlyphRendererOp, OdxFixelScalarSelectOp, OdxSourceOp,
+    LimitStreamlinesOp, MergeOp, MetaGroupSelectOp, OdfGlyphRendererOp, OdxFixelScalarSelectOp,
+    OdxSourceOp,
     OdxVolumeSelectOp, ParcelCropOp, ParcelEndOp, ParcelRoaOp, ParcelRoiOp, ParcelSelectOp,
     ParcelSurfaceBuildOp, ParcellationDisplayOp, ParcellationSourceOp, PrepareHausdorffPlanOp,
     PreparePyafqPlanOp, PrepareSimplePlanOp, PurifibreOp, RandomSubsetOp, RemoveDuplicatesOp,
@@ -87,7 +90,7 @@ pub use ops::{
     SaveStreamlinesOp, SphereQueryOp, StreamlineDirectionFieldOp, StreamlineDisplayOp,
     StreamlineSourceOp, SurfaceDepthQueryOp, SurfaceDisplayOp, SurfaceOverlayStackOp,
     SurfaceProjectionDensityOp, SurfaceProjectionMeanDpsOp, SurfaceSourceOp, TipPruneOp,
-    UniformColorOp, VolumeDisplayOp, VolumeOverlayStackOp, VolumeSourceOp, VoxelMaskDisplayOp,
-    WorkflowNodeKind, YehTractographyOp,
+    TriangleFundusOp, UniformColorOp, VolumeDisplayOp, VolumeOverlayStackOp, VolumeSourceOp,
+    VoxelMaskDisplayOp, WorkflowNodeKind, YehTractographyOp,
 };
 pub(crate) use types::{EvaluatedValue, WorkflowValue};

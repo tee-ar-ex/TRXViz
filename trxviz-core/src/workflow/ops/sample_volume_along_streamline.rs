@@ -22,6 +22,7 @@ use crate::workflow::types::{StreamlineDataset, StreamlineFlow};
 use super::super::{
     EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue,
     expect_streamline_input, optional_volume_input,
+    workflow_sample_volume_along_streamline_fingerprint,
 };
 
 fn default_dps_name() -> String {
@@ -83,11 +84,36 @@ impl WorkflowOp for SampleVolumeAlongStreamlineOp {
                 self.title()
             ))
         })?;
-        let scalars = ctx.scalars_for(&backing)?;
 
-        let scored_dataset = attach_volume_dps(&flow.dataset, scalars.as_ref(), &self.dps_name);
+        // Reuse the cached derived dataset when nothing relevant changed.
+        // Trilinearly sampling every vertex of every streamline and
+        // deep-cloning `TrxGpuData` is expensive, and the new Arc would
+        // otherwise change the downstream `Arc::as_ptr` hash on every
+        // Interactive frame, busting tube/bundle caches downstream.
+        let fingerprint = workflow_sample_volume_along_streamline_fingerprint(
+            &flow,
+            &self.dps_name,
+            &backing,
+        );
+        let dataset = match ctx
+            .execution_cache
+            .sample_volume_along_streamline_cache
+            .get(&ctx.node.uuid)
+        {
+            Some((cached_fp, ds)) if *cached_fp == fingerprint => ds.clone(),
+            _ => {
+                let scalars = ctx.scalars_for(&backing)?;
+                let scored = attach_volume_dps(&flow.dataset, scalars.as_ref(), &self.dps_name);
+                let ds = std::sync::Arc::new(scored);
+                ctx.execution_cache
+                    .sample_volume_along_streamline_cache
+                    .insert(ctx.node.uuid, (fingerprint, ds.clone()));
+                ds
+            }
+        };
+
         let scored_flow = StreamlineFlow {
-            dataset: std::sync::Arc::new(scored_dataset),
+            dataset,
             ..flow
         };
 

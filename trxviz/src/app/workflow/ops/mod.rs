@@ -96,8 +96,47 @@ pub(crate) fn edit_node_op(
                 ui.add(egui::DragValue::new(seed).speed(1.0).prefix("Seed "));
             }
         }
+        workflow::WorkflowNodeKind::TriangleFundus {
+            show_triangles,
+            show_normals,
+            normal_len_mm,
+            stride,
+            render_as_tubes,
+            tube_radius_mm,
+        } => {
+            ui.checkbox(show_triangles, "Show triangles");
+            ui.checkbox(show_normals, "Show apex normals");
+            ui.add(
+                egui::Slider::new(normal_len_mm, 0.5..=12.0).text("Normal length (mm)"),
+            );
+            ui.add(egui::Slider::new(stride, 1..=50).text("Streamline stride"));
+            ui.checkbox(render_as_tubes, "Render as cylinders");
+            if *render_as_tubes {
+                ui.add(
+                    egui::Slider::new(tube_radius_mm, 0.05..=2.0)
+                        .text("Cylinder radius (mm)"),
+                );
+            }
+            ui.small(
+                "Self-displaying: renders each streamline's u-fiber \
+                 triangle + apex normal directly. Triangle edges keep \
+                 each streamline's group colour; apex normals (centred \
+                 on the apex) form a bright 'apex_normals' group. Turn \
+                 off triangles and render normals as cylinders to see \
+                 the apex field.",
+            );
+        }
         workflow::WorkflowNodeKind::GroupSelect { groups } => {
             ui.label("Comma-separated group names");
+            show_group_select_editor(ui, groups, ctx.available_groups);
+        }
+        workflow::WorkflowNodeKind::MetaGroupSelect { groups } => {
+            ui.label("Shared group selection");
+            ui.small(
+                "Wire this node's output into multiple Group Select nodes to keep their \
+                 selections in lock-step. The streamline input is only used to populate \
+                 the autocomplete below.",
+            );
             show_group_select_editor(ui, groups, ctx.available_groups);
         }
         workflow::WorkflowNodeKind::RandomSubset { limit, seed } => {

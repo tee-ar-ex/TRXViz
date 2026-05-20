@@ -227,12 +227,12 @@ fn make_odx_glyph_resource_key(
     let mut opacity_hasher = DefaultHasher::new();
     hash_volume_scalars(
         &mut opacity_hasher,
-        plan.and_then(|draw| draw.opacity_scalars.as_ref()),
+        plan.and_then(|draw| draw.opacity_scalars.as_deref()),
     );
     let mut size_hasher = DefaultHasher::new();
     hash_volume_scalars(
         &mut size_hasher,
-        plan.and_then(|draw| draw.size_scalars.as_ref()),
+        plan.and_then(|draw| draw.size_scalars.as_deref()),
     );
     Some(OdxGlyphResourceKey {
         scene_ptr: Arc::as_ptr(scene) as usize,
@@ -271,11 +271,11 @@ fn sample_odx_gate_buffers(
     };
     let opacity = plan
         .opacity_scalars
-        .as_ref()
+        .as_deref()
         .map(|volume| sample_volume_scalars_for_glyphs(instances, Some(volume)));
     let size = plan
         .size_scalars
-        .as_ref()
+        .as_deref()
         .map(|volume| sample_volume_scalars_for_glyphs(instances, Some(volume)));
     (opacity, size)
 }
@@ -1390,7 +1390,6 @@ impl crate::app::TrxVizApp {
                     };
                     resource.update_tube_geometry(&rs.device, &cache.vertices, &cache.indices);
                 }
-
                 if let Some(entry) = all.entries.iter_mut().find(|(id, _)| *id == draw.draw_id) {
                     *entry = (draw.draw_id, resource);
                 } else {

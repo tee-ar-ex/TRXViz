@@ -289,6 +289,16 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                     format!("Groups: {groups_csv}")
                 }
             }
+            WorkflowNodeKind::MetaGroupSelect { groups } => {
+                let groups_csv = groups.to_csv();
+                if groups_csv.trim().is_empty() {
+                    "Shared: all groups".to_string()
+                } else if groups_csv.trim() == "__none__" {
+                    "Shared: no groups".to_string()
+                } else {
+                    format!("Shared: {groups_csv}")
+                }
+            }
             WorkflowNodeKind::RandomSubset { limit, seed } => {
                 format!("Keep {limit} streamlines, seed {seed}")
             }
@@ -413,7 +423,21 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
+                TriangleFundusOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
                 GroupSelectOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                MetaGroupSelectOp::default().into(),
                 measured_node_sizes,
             );
             add_node_button(
@@ -1009,6 +1033,7 @@ fn pin_info_for_port(port: PortKind) -> PinInfo {
         PortKind::Surface => egui::Color32::from_rgb(145, 255, 161),
         PortKind::Parcellation => egui::Color32::from_rgb(255, 108, 145),
         PortKind::ParcelSelection => egui::Color32::from_rgb(255, 217, 79),
+        PortKind::GroupSelection => egui::Color32::from_rgb(255, 232, 154),
         PortKind::Cifti => egui::Color32::from_rgb(120, 176, 255),
         PortKind::SurfaceScalars => egui::Color32::from_rgb(214, 139, 255),
         PortKind::SurfaceAppearance => egui::Color32::from_rgb(170, 226, 145),

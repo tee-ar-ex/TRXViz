@@ -9,12 +9,19 @@ use roxmltree::{Document, Node};
 
 const NIFTI_INTENT_POINTSET: i32 = 1008;
 const NIFTI_INTENT_TRIANGLE: i32 = 1009;
+const NIFTI_INTENT_RGB_VECTOR: i32 = 2003;
+const NIFTI_INTENT_RGBA_VECTOR: i32 = 2004;
 
 #[derive(Clone)]
 pub struct GiftiSurfaceData {
     pub vertices: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub indices: Vec<u32>,
+    /// Baked-in per-vertex colour (linear RGBA, 4 floats per vertex), if the
+    /// source GIFTI carried a `NIFTI_INTENT_RGB_VECTOR` (Nx3, alpha defaults
+    /// to 1.0) or `NIFTI_INTENT_RGBA_VECTOR` (Nx4) `DataArray`. Used by ufixels'
+    /// sheet-surface export to colour each shell to match its bundle.
+    pub vertex_colors: Option<Vec<[f32; 4]>>,
     pub bbox_min: Vec3,
     pub bbox_max: Vec3,
 }
@@ -34,6 +41,7 @@ impl GiftiSurfaceData {
 
         let mut pointset: Option<Vec<[f32; 3]>> = None;
         let mut triangles: Option<Vec<[u32; 3]>> = None;
+        let mut vertex_colors_raw: Option<(Vec<f32>, usize)> = None;
 
         for da in doc.descendants().filter(|n| n.has_tag_name("DataArray")) {
             let intent = parse_intent(
@@ -41,7 +49,11 @@ impl GiftiSurfaceData {
                     .ok_or_else(|| anyhow::anyhow!("DataArray missing Intent attribute"))?,
             )?;
 
-            if intent != NIFTI_INTENT_POINTSET && intent != NIFTI_INTENT_TRIANGLE {
+            if intent != NIFTI_INTENT_POINTSET
+                && intent != NIFTI_INTENT_TRIANGLE
+                && intent != NIFTI_INTENT_RGB_VECTOR
+                && intent != NIFTI_INTENT_RGBA_VECTOR
+            {
                 continue;
             }
 
@@ -61,54 +73,76 @@ impl GiftiSurfaceData {
             let dims = parse_dims(da)?;
             let values = parse_data_values(da, datatype, encoding, endian)?;
 
-            if intent == NIFTI_INTENT_POINTSET {
-                if dims.len() < 2 {
-                    bail!("POINTSET DataArray has invalid dimensions");
-                }
-                let nrows = dims[0];
-                let ncols = dims[1];
-                if ncols != 3 {
-                    bail!("POINTSET DataArray must be Nx3, got {} columns", ncols);
-                }
-                let reordered = reorder_2d(&values, nrows, ncols, row_major)
-                    .context("Failed to reorder POINTSET values")?;
-                let mut verts = Vec::with_capacity(nrows);
-                for r in 0..nrows {
-                    let base = r * 3;
-                    verts.push([reordered[base], reordered[base + 1], reordered[base + 2]]);
-                }
-                let c_ras = parse_c_ras_meta(da);
-                if c_ras != [0.0, 0.0, 0.0] {
-                    for p in &mut verts {
-                        p[0] += c_ras[0];
-                        p[1] += c_ras[1];
-                        p[2] += c_ras[2];
+            match intent {
+                NIFTI_INTENT_POINTSET => {
+                    if dims.len() < 2 {
+                        bail!("POINTSET DataArray has invalid dimensions");
                     }
-                }
-                pointset = Some(verts);
-            } else {
-                if dims.len() < 2 {
-                    bail!("TRIANGLE DataArray has invalid dimensions");
-                }
-                let nrows = dims[0];
-                let ncols = dims[1];
-                if ncols != 3 {
-                    bail!("TRIANGLE DataArray must be Nx3, got {} columns", ncols);
-                }
-                let reordered = reorder_2d(&values, nrows, ncols, row_major)
-                    .context("Failed to reorder TRIANGLE values")?;
-                let mut tris = Vec::with_capacity(nrows);
-                for r in 0..nrows {
-                    let base = r * 3;
-                    let a = reordered[base] as i64;
-                    let b = reordered[base + 1] as i64;
-                    let c = reordered[base + 2] as i64;
-                    if a < 0 || b < 0 || c < 0 {
-                        bail!("TRIANGLE DataArray contains negative indices");
+                    let nrows = dims[0];
+                    let ncols = dims[1];
+                    if ncols != 3 {
+                        bail!("POINTSET DataArray must be Nx3, got {} columns", ncols);
                     }
-                    tris.push([a as u32, b as u32, c as u32]);
+                    let reordered = reorder_2d(&values, nrows, ncols, row_major)
+                        .context("Failed to reorder POINTSET values")?;
+                    let mut verts = Vec::with_capacity(nrows);
+                    for r in 0..nrows {
+                        let base = r * 3;
+                        verts.push([reordered[base], reordered[base + 1], reordered[base + 2]]);
+                    }
+                    let c_ras = parse_c_ras_meta(da);
+                    if c_ras != [0.0, 0.0, 0.0] {
+                        for p in &mut verts {
+                            p[0] += c_ras[0];
+                            p[1] += c_ras[1];
+                            p[2] += c_ras[2];
+                        }
+                    }
+                    pointset = Some(verts);
                 }
-                triangles = Some(tris);
+                NIFTI_INTENT_TRIANGLE => {
+                    if dims.len() < 2 {
+                        bail!("TRIANGLE DataArray has invalid dimensions");
+                    }
+                    let nrows = dims[0];
+                    let ncols = dims[1];
+                    if ncols != 3 {
+                        bail!("TRIANGLE DataArray must be Nx3, got {} columns", ncols);
+                    }
+                    let reordered = reorder_2d(&values, nrows, ncols, row_major)
+                        .context("Failed to reorder TRIANGLE values")?;
+                    let mut tris = Vec::with_capacity(nrows);
+                    for r in 0..nrows {
+                        let base = r * 3;
+                        let a = reordered[base] as i64;
+                        let b = reordered[base + 1] as i64;
+                        let c = reordered[base + 2] as i64;
+                        if a < 0 || b < 0 || c < 0 {
+                            bail!("TRIANGLE DataArray contains negative indices");
+                        }
+                        tris.push([a as u32, b as u32, c as u32]);
+                    }
+                    triangles = Some(tris);
+                }
+                NIFTI_INTENT_RGB_VECTOR | NIFTI_INTENT_RGBA_VECTOR => {
+                    let want_components = if intent == NIFTI_INTENT_RGB_VECTOR { 3 } else { 4 };
+                    if dims.len() < 2 {
+                        bail!("RGB(A) vector DataArray has invalid dimensions");
+                    }
+                    let nrows = dims[0];
+                    let ncols = dims[1];
+                    if ncols != want_components {
+                        bail!(
+                            "RGB(A) vector DataArray must be Nx{}, got Nx{}",
+                            want_components,
+                            ncols
+                        );
+                    }
+                    let reordered = reorder_2d(&values, nrows, ncols, row_major)
+                        .context("Failed to reorder RGB(A) values")?;
+                    vertex_colors_raw = Some((reordered, want_components));
+                }
+                _ => {}
             }
         }
 
@@ -140,10 +174,38 @@ impl GiftiSurfaceData {
             bbox_max = bbox_max.max(v);
         }
 
+        let vertex_colors = match vertex_colors_raw {
+            Some((flat, components)) => {
+                let nv = vertices.len();
+                if flat.len() != nv * components {
+                    eprintln!(
+                        "Ignoring RGB(A) array: {} values for {} vertices x {} components",
+                        flat.len(),
+                        nv,
+                        components
+                    );
+                    None
+                } else {
+                    let mut out = Vec::with_capacity(nv);
+                    for i in 0..nv {
+                        let base = i * components;
+                        let r = flat[base];
+                        let g = flat[base + 1];
+                        let b = flat[base + 2];
+                        let a = if components == 4 { flat[base + 3] } else { 1.0 };
+                        out.push([r, g, b, a]);
+                    }
+                    Some(out)
+                }
+            }
+            None => None,
+        };
+
         Ok(Self {
             vertices,
             normals,
             indices,
+            vertex_colors,
             bbox_min,
             bbox_max,
         })
@@ -178,7 +240,12 @@ fn parse_intent(intent: &str) -> anyhow::Result<i32> {
     match intent {
         "NIFTI_INTENT_POINTSET" => Ok(NIFTI_INTENT_POINTSET),
         "NIFTI_INTENT_TRIANGLE" => Ok(NIFTI_INTENT_TRIANGLE),
-        _ => bail!("Unsupported DataArray intent: {intent}"),
+        "NIFTI_INTENT_RGB_VECTOR" => Ok(NIFTI_INTENT_RGB_VECTOR),
+        "NIFTI_INTENT_RGBA_VECTOR" => Ok(NIFTI_INTENT_RGBA_VECTOR),
+        // Anything else is silently passed through — the loop body filters
+        // by the numeric code, so unrecognised names just produce a
+        // skipped DataArray rather than a parse failure.
+        _ => Ok(0),
     }
 }
 

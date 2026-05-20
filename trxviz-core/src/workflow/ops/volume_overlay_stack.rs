@@ -72,8 +72,8 @@ impl WorkflowOp for VolumeOverlayStackOp {
                     value: WorkflowValue::Volume(backing),
                     ..
                 }) => {
-                    let scalars = ctx.scalars_for(&backing)?.into_owned();
-                    layer_scalars.push(Some(Arc::new(scalars)));
+                    let scalars = ctx.scalars_for(&backing)?;
+                    layer_scalars.push(Some(scalars));
                 }
                 _ => layer_scalars.push(None),
             }

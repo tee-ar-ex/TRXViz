@@ -116,6 +116,13 @@ pub(super) fn load_asset_args_state(
         };
         let imported = !matches!(source.backing, StreamlineBacking::Native(_));
         let id = apply_loaded_trx(&mut scene, path.clone(), source, None);
+        let trx_asset = scene.trx_files.iter().find(|asset| asset.id == id);
+        let limit = trx_asset
+            .map(|asset| asset.data.nb_streamlines.min(30_000))
+            .unwrap_or(30_000);
+        let has_groups = trx_asset
+            .map(|asset| !asset.data.groups.is_empty())
+            .unwrap_or(false);
         register_asset_default_nodes(
             &mut workflow.document,
             WorkflowAssetDocument::Streamlines {
@@ -123,14 +130,8 @@ pub(super) fn load_asset_args_state(
                 path: path.clone(),
                 imported,
             },
-            Some(
-                scene
-                    .trx_files
-                    .iter()
-                    .find(|asset| asset.id == id)
-                    .map(|asset| asset.data.nb_streamlines.min(30_000))
-                    .unwrap_or(30_000),
-            ),
+            Some(limit),
+            has_groups,
         );
     }
 
@@ -146,6 +147,7 @@ pub(super) fn load_asset_args_state(
                 path: path.clone(),
             },
             None,
+            false,
         );
     }
 
@@ -161,6 +163,7 @@ pub(super) fn load_asset_args_state(
                 path: path.clone(),
             },
             None,
+            false,
         );
     }
 
@@ -178,6 +181,7 @@ pub(super) fn load_asset_args_state(
                 label_table_path,
             },
             None,
+            false,
         );
     }
 
@@ -250,6 +254,7 @@ pub(super) fn load_asset_args_state(
                 path: path.clone(),
             },
             None,
+            false,
         );
         let _ = set_default_odx_fixel_3d_visibility(
             &mut workflow.document,
@@ -271,10 +276,17 @@ fn register_asset_default_nodes(
     document: &mut crate::workflow::WorkflowDocument,
     asset: WorkflowAssetDocument,
     streamline_limit: Option<usize>,
+    streamline_has_groups: bool,
 ) {
     document.assets.push(asset.clone());
     let pos = crate::workflow::suggest_asset_branch_origin(document);
-    let _ = add_default_nodes_for_asset(document, &asset, pos, streamline_limit);
+    let _ = add_default_nodes_for_asset(
+        document,
+        &asset,
+        pos,
+        streamline_limit,
+        streamline_has_groups,
+    );
 }
 
 fn allocate_file_id(scene: &mut HeadlessScene, explicit_id: Option<FileId>) -> FileId {

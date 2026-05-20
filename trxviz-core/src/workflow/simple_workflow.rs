@@ -337,7 +337,7 @@ mod tests {
             imported: false,
         };
         document.assets.push(asset.clone());
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, Some(10_000));
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, Some(10_000), false);
 
         let editability = classify_workflow_editability(&document);
         let binding = editability.bindings.streamline.get(&1).copied();
@@ -353,7 +353,7 @@ mod tests {
             path: PathBuf::from("surface.gii"),
         };
         document.assets.push(asset.clone());
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None, false);
 
         let editability = classify_workflow_editability(&document);
         let binding = editability.bindings.surface.get(&7).copied();
@@ -376,7 +376,7 @@ mod tests {
         };
         document.assets.push(streamline.clone());
         document.assets.push(cifti);
-        add_default_nodes_for_asset(&mut document, &streamline, GraphPos::ZERO, Some(10_000));
+        add_default_nodes_for_asset(&mut document, &streamline, GraphPos::ZERO, Some(10_000), false);
 
         let editability = classify_workflow_editability(&document);
         assert!(editability.bindings.streamline.contains_key(&1));
@@ -394,7 +394,7 @@ mod tests {
             path: PathBuf::from("volume.nii.gz"),
         };
         document.assets.push(asset.clone());
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None, false);
 
         let source = document
             .graph

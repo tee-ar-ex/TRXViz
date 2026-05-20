@@ -253,6 +253,19 @@ pub(crate) fn expect_parcel_selection_input(
     }
 }
 
+pub(crate) fn optional_group_selection_input(
+    inputs: &[Option<EvaluatedValue>],
+    index: usize,
+) -> Option<crate::workflow::GroupFilter> {
+    match inputs.get(index).cloned().flatten() {
+        Some(EvaluatedValue {
+            value: WorkflowValue::GroupSelection(filter),
+            ..
+        }) => Some(filter),
+        _ => None,
+    }
+}
+
 pub(crate) fn resolve_selected_labels(
     labels: &ParcelIdSet,
     parcellation: &ParcellationVolume,

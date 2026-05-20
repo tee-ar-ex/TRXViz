@@ -25,6 +25,7 @@ impl super::TrxVizApp {
         asset: WorkflowAssetDocument,
         add_default_nodes: bool,
         streamline_limit: Option<usize>,
+        streamline_has_groups: bool,
     ) {
         self.workflow.document.assets.push(asset.clone());
         if add_default_nodes {
@@ -34,6 +35,7 @@ impl super::TrxVizApp {
                 &asset,
                 pos,
                 streamline_limit,
+                streamline_has_groups,
             );
             self.workflow.selection = Some(branch.primary_selection);
             self.workflow.document.selection = self.workflow.selection;
@@ -85,6 +87,7 @@ impl super::TrxVizApp {
             warnings,
         } = source;
         let imported = matches!(backing, StreamlineBacking::Imported(_));
+        let has_groups = !data.groups.is_empty();
         let is_first = self.scene.trx_files.is_empty()
             && self.scene.nifti_files.is_empty()
             && self.scene.gifti_surfaces.is_empty();
@@ -156,7 +159,7 @@ impl super::TrxVizApp {
                 path: path.clone(),
                 imported,
             };
-            self.register_workflow_asset(asset, true, Some(max_streamlines));
+            self.register_workflow_asset(asset, true, Some(max_streamlines), has_groups);
         }
         self.error_msg = None;
         self.status_msg = None;
@@ -320,6 +323,7 @@ impl super::TrxVizApp {
                 },
                 true,
                 None,
+                false,
             );
         }
         if first_nifti {
@@ -416,6 +420,7 @@ impl super::TrxVizApp {
                 },
                 true,
                 None,
+                false,
             );
         }
         if let Some((center, extent)) = initial_surface_view {
@@ -454,6 +459,7 @@ impl super::TrxVizApp {
                 WorkflowAssetDocument::Cifti { id, path, intent },
                 true,
                 None,
+                false,
             );
         }
         self.error_msg = None;
@@ -499,6 +505,7 @@ impl super::TrxVizApp {
                 },
                 true,
                 None,
+                false,
             );
         }
         self.error_msg = None;
@@ -654,7 +661,7 @@ impl super::TrxVizApp {
             .map(|s| s.to_string())
             .collect();
         let dpv_names: Vec<String> = scene.dpv_names().iter().map(|s| s.to_string()).collect();
-        self.register_workflow_asset(WorkflowAssetDocument::Odx { id, path }, true, None);
+        self.register_workflow_asset(WorkflowAssetDocument::Odx { id, path }, true, None, false);
         let mut workflow_changed = workflow::set_default_odx_fixel_3d_visibility(
             &mut self.workflow.document,
             id,

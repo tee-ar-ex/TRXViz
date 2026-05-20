@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use super::super::{
     EvalCtx, GroupFilter, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue,
-    expect_streamline_input,
+    expect_streamline_input, optional_group_selection_input,
 };
 use crate::workflow::methods::OpCategory;
 
@@ -30,7 +30,7 @@ impl WorkflowOp for GroupSelectOp {
     }
 
     fn input_ports(&self) -> &'static [PortKind] {
-        &[PortKind::Streamline]
+        &[PortKind::Streamline, PortKind::GroupSelection]
     }
 
     fn output_ports(&self) -> &'static [PortKind] {
@@ -46,7 +46,9 @@ impl WorkflowOp for GroupSelectOp {
         ctx: &mut EvalCtx<'_, '_>,
     ) -> crate::error::WorkflowResult<Vec<super::super::EvaluatedValue>> {
         let flow = expect_streamline_input(ctx.inputs, self.title())?;
-        match &self.groups {
+        let override_filter = optional_group_selection_input(ctx.inputs, 1);
+        let groups = override_filter.as_ref().unwrap_or(&self.groups);
+        match groups {
             GroupFilter::All => Ok(vec![WorkflowValue::Streamline(flow).into()]),
             GroupFilter::None => Ok(vec![
                 WorkflowValue::Streamline(super::super::StreamlineFlow {

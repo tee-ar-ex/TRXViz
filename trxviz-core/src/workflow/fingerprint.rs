@@ -108,6 +108,31 @@ pub fn workflow_reactive_streamline_fingerprint(plan: &ReactiveStreamlinePlan) -
     hasher.finish()
 }
 
+/// Content fingerprint for the self-displaying `TriangleFundusOp`'s
+/// derived geometry. Captures everything that changes the *built*
+/// triangle/normal dataset: the input flow plus the geometry params.
+/// Render-only params (`render_as_tubes`, `tube_radius_mm`) are
+/// deliberately excluded — they don't change the dataset, only the
+/// draw plan, and are already covered by
+/// `workflow_streamline_fingerprint` which gates the tube job.
+/// Keeping the cached dataset stable across frames is what stops the
+/// `Arc::as_ptr` draw fingerprint from churning (the cylinder lockup).
+pub fn workflow_triangle_fundus_fingerprint(
+    flow: &StreamlineFlow,
+    show_triangles: bool,
+    show_normals: bool,
+    normal_len_mm: f32,
+    stride: usize,
+) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    show_triangles.hash(&mut hasher);
+    show_normals.hash(&mut hasher);
+    normal_len_mm.to_bits().hash(&mut hasher);
+    stride.hash(&mut hasher);
+    hash_flow(flow, &mut hasher);
+    hasher.finish()
+}
+
 pub fn workflow_surface_query_fingerprint(
     flow: &StreamlineFlow,
     surface_id: FileId,
@@ -176,6 +201,24 @@ pub fn workflow_bundle_plan_fingerprint(plan: &BundleSurfacePlan) -> u64 {
     // opacity is excluded: it is a render-only parameter (GPU uniform) and does not
     // affect mesh geometry, so opacity changes must not trigger a mesh rebuild.
     hash_flow(&plan.flow, &mut hasher);
+    hasher.finish()
+}
+
+/// Content fingerprint for `SampleVolumeAlongStreamline`'s derived
+/// streamline dataset. Captures everything that changes the per-streamline
+/// mean values: the input flow, the DPS field name written to the output,
+/// and the volume backing identity. Used to keep the output `Arc` stable
+/// across Interactive evaluations so downstream `hash_flow` pointers don't
+/// churn and re-trigger tube/bundle rebuilds.
+pub fn workflow_sample_volume_along_streamline_fingerprint(
+    flow: &StreamlineFlow,
+    dps_name: &str,
+    backing: &VolumeBacking,
+) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    dps_name.hash(&mut hasher);
+    backing.slice_key().hash(&mut hasher);
+    hash_flow(flow, &mut hasher);
     hasher.finish()
 }
 

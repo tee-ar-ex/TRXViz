@@ -15,7 +15,8 @@ pub(crate) use super::eval_inputs::{
     expect_fixel_scalars_input, expect_fixels_input, expect_odf_field_input,
     expect_odx_catalog_input, expect_parcel_selection_input, expect_parcellation_input,
     expect_streamline_input, expect_surface_appearance_input, expect_surface_input,
-    optional_volume_input, resolve_selected_labels, volume_scalars_from_nifti_volume,
+    optional_group_selection_input, optional_volume_input, resolve_selected_labels,
+    volume_scalars_from_nifti_volume,
 };
 pub use super::eval_streamlines::save_streamline_plan;
 pub(crate) use super::eval_streamlines::{
@@ -145,6 +146,27 @@ pub fn evaluate_scene_plan_with_mode(
             &mut node_state,
         );
 
+        // Fall back to the node's streamline *input* for the autocomplete
+        // group list when the output isn't itself a streamline flow. This
+        // lets ops like MetaGroupSelect (which emits a GroupSelection)
+        // still populate the inspector's group-name suggestions from the
+        // upstream TRX wired into their streamline input.
+        let input_streamline_groups: Vec<String> = input_values
+            .iter()
+            .flatten()
+            .find_map(|v| match &v.value {
+                WorkflowValue::Streamline(flow) => Some(
+                    flow.dataset
+                        .gpu_data
+                        .groups
+                        .iter()
+                        .map(|(name, _)| name.clone())
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+
         match result {
             Ok(outputs) if !outputs.is_empty() => {
                 let first = &outputs[0];
@@ -185,6 +207,10 @@ pub fn evaluate_scene_plan_with_mode(
                 node_state.summary = node.op.title().to_string();
                 node_state.error = Some(error.to_string());
             }
+        }
+
+        if node_state.available_streamline_groups.is_empty() {
+            node_state.available_streamline_groups = input_streamline_groups;
         }
 
         runtime.node_state.insert(node.uuid, node_state);

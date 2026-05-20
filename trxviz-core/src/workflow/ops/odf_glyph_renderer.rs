@@ -70,11 +70,11 @@ impl WorkflowOp for OdfGlyphRendererOp {
         let opacity_backing = optional_volume_input(ctx.inputs, 1);
         let size_backing = optional_volume_input(ctx.inputs, 2);
         let opacity_scalars = match &opacity_backing {
-            Some(b) => Some(ctx.scalars_for(b)?.into_owned()),
+            Some(b) => Some(ctx.scalars_for(b)?),
             None => None,
         };
         let size_scalars = match &size_backing {
-            Some(b) => Some(ctx.scalars_for(b)?.into_owned()),
+            Some(b) => Some(ctx.scalars_for(b)?),
             None => None,
         };
         ctx.scene_plan.odf_glyph_draws.push(OdfGlyphDrawPlan {

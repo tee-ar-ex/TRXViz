@@ -99,6 +99,7 @@ pub fn add_default_nodes_for_asset(
     asset: &WorkflowAssetDocument,
     pos: GraphPos,
     streamline_limit: Option<usize>,
+    streamline_has_groups: bool,
 ) -> SeededWorkflowBranch {
     match asset {
         WorkflowAssetDocument::Streamlines { id, .. } => {
@@ -113,7 +114,11 @@ pub fn add_default_nodes_for_asset(
                 .into(),
                 pos,
             );
-            let color = make_node(document, ColorByDirectionOp.into(), pos);
+            let color = if streamline_has_groups {
+                make_node(document, ColorByGroupOp.into(), pos)
+            } else {
+                make_node(document, ColorByDirectionOp.into(), pos)
+            };
             let display = make_node(document, StreamlineDisplayOp::default().into(), pos);
             connect_chain(document, source, group);
             connect_chain(document, group, limit);
@@ -373,7 +378,7 @@ mod tests {
             path: PathBuf::from("tracks.trx"),
             imported: false,
         };
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, Some(10_000));
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, Some(10_000), false);
         assert_graph_has_no_overlaps(&document);
     }
 
@@ -384,7 +389,7 @@ mod tests {
             id: 2,
             path: PathBuf::from("subject.L.midthickness.surf.gii"),
         };
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None, false);
         assert_graph_has_no_overlaps(&document);
     }
 
@@ -396,7 +401,7 @@ mod tests {
             path: PathBuf::from("subject.dscalar.nii"),
             intent: CiftiIntent::DenseScalar,
         };
-        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None);
+        add_default_nodes_for_asset(&mut document, &asset, GraphPos::ZERO, None, false);
         assert_graph_has_no_overlaps(&document);
     }
 }

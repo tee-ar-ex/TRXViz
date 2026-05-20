@@ -163,6 +163,18 @@ pub(crate) fn group_name_color(name: &str) -> Option<[f32; 4]> {
     }
 }
 
+/// Parse `sheet_NNNN` or `super_NNNN` (with exactly four digits, N > 0) into
+/// the integer `N`. Returns `None` for `sheet_unassigned` or any other name.
+fn parse_sheet_or_super_index(name: &str) -> Option<u32> {
+    let rest = name
+        .strip_prefix("sheet_")
+        .or_else(|| name.strip_prefix("super_"))?;
+    if rest.len() != 4 {
+        return None;
+    }
+    rest.parse::<u32>().ok().filter(|&n| n > 0)
+}
+
 impl TrxGpuData {
     /// Build from raw positions and offsets only (no per-vertex/streamline metadata).
     /// Used to package synthetic tractography output into the standard data type.
@@ -450,6 +462,15 @@ impl TrxGpuData {
                 .copied()
                 .flatten()
                 .or_else(|| group_name_color(name))
+                .or_else(|| {
+                    // ufixels emits `sheet_NNNN` / `super_NNNN`. Resolve their
+                    // colour from the integer N rather than enumeration index
+                    // `gi` so that downstream consumers (e.g. companion GIFTI
+                    // shells from ufixels) can match colours by name without
+                    // depending on TRX zip iteration order.
+                    parse_sheet_or_super_index(name)
+                        .map(|n| crate::palette::distinct_color_index(n.saturating_sub(1) as usize))
+                })
                 .unwrap_or_else(|| crate::palette::distinct_color_index(gi));
             for &streamline_idx in members {
                 let si = streamline_idx.0 as usize;

@@ -74,6 +74,13 @@ pub(crate) fn summarize_value(value: &WorkflowValue) -> String {
         WorkflowValue::ParcelSelection(selection) => {
             format!("{} parcel labels", selection.labels.len())
         }
+        WorkflowValue::GroupSelection(filter) => match filter {
+            crate::workflow::GroupFilter::All => "All groups".to_string(),
+            crate::workflow::GroupFilter::None => "No groups".to_string(),
+            crate::workflow::GroupFilter::Selected(labels) => {
+                format!("{} group selection", labels.len())
+            }
+        },
         WorkflowValue::SurfaceScalars(projection) => {
             format!("Surface scalars ({} values)", projection.values.len())
         }

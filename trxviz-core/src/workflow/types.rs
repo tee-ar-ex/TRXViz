@@ -227,6 +227,10 @@ pub fn default_full_opacity() -> f32 {
     1.0
 }
 
+pub fn default_fundus_tube_radius() -> f32 {
+    0.4
+}
+
 pub fn default_fixel_slab_thickness_mm() -> Millimeters {
     Millimeters(1.0)
 }
@@ -698,6 +702,38 @@ pub struct WorkflowExecutionCache {
     /// Reusing the cached Arc when the underlying `gpu_data`
     /// pointer is unchanged keeps fingerprints stable.
     pub streamline_source_datasets: HashMap<WorkflowNodeUuid, Arc<StreamlineDataset>>,
+    /// Self-displaying `TriangleFundusOp` derives a *new*
+    /// `StreamlineDataset` from its input each eval. Like
+    /// `streamline_source_datasets`, a fresh `Arc::new` per frame
+    /// would churn the `Arc::as_ptr`-keyed draw fingerprint and
+    /// re-run the (expensive) tube-geometry job every frame — the
+    /// cylinder GUI lockup. Cache the built dataset keyed by a
+    /// content fingerprint (input flow + params) so the Arc — and
+    /// thus the draw fingerprint — is stable until something
+    /// genuinely changes.
+    pub triangle_fundus_datasets:
+        HashMap<WorkflowNodeUuid, (u64, Arc<StreamlineDataset>)>,
+    /// `SampleVolumeAlongStreamline` derives a new `StreamlineDataset`
+    /// each eval (clones `TrxGpuData`, trilinearly samples every vertex,
+    /// writes a DPS field). A fresh `Arc::new` per frame would churn the
+    /// `Arc::as_ptr`-keyed downstream `hash_flow` and invalidate
+    /// tube-geometry / bundle-surface caches every render. Cache the
+    /// built dataset keyed by a content fingerprint (input flow +
+    /// dps_name + volume identity) so the Arc — and thus downstream
+    /// fingerprints — stays stable until something genuinely changes.
+    pub sample_volume_along_streamline_cache:
+        HashMap<WorkflowNodeUuid, (u64, Arc<StreamlineDataset>)>,
+    /// Memoized `VolumeScalars` view of each loaded NIfTI, keyed by
+    /// `FileId`. Building a `VolumeScalars` from a `NiftiVolume`
+    /// requires scanning every voxel for min/max and cloning the entire
+    /// voxel buffer (see `volume_scalars_from_nifti_volume`). Without
+    /// this cache, every Volume-consuming op (`OdfGlyphRenderer`,
+    /// `SampleVolumeAlongStreamline`, `RoiFromVolume`,
+    /// `VolumeOverlayStack`) repeated that work on every workflow
+    /// evaluation — i.e. every frame during an Interactive slider
+    /// drag — which made the editor visibly slow once a NIfTI was
+    /// wired into any of those ops.
+    pub volume_scalars_cache: HashMap<FileId, Arc<VolumeScalars>>,
 }
 
 #[derive(Clone)]
@@ -910,8 +946,8 @@ pub struct OdfGlyphDrawPlan {
     pub opacity_gate: OpacityGate,
     pub size_gate: SizeGate,
     pub detail: u32,
-    pub opacity_scalars: Option<VolumeScalars>,
-    pub size_scalars: Option<VolumeScalars>,
+    pub opacity_scalars: Option<Arc<VolumeScalars>>,
+    pub size_scalars: Option<Arc<VolumeScalars>>,
     pub visible: bool,
 }
 
@@ -1360,6 +1396,7 @@ pub(crate) enum WorkflowValue {
     Surface(FileId),
     Parcellation(FileId),
     ParcelSelection(ParcelSelection),
+    GroupSelection(GroupFilter),
     SurfaceScalars(SurfaceScalars),
     SurfaceAppearance(SurfaceAppearance),
     BundleSurface(BundleSurfacePlan),
@@ -1880,6 +1917,7 @@ pub enum PortKind {
     Surface,
     Parcellation,
     ParcelSelection,
+    GroupSelection,
     SurfaceScalars,
     SurfaceAppearance,
     BundleSurface,

@@ -145,7 +145,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var alpha = uniforms.color.a;
     if uniforms.vertex_color_enabled == 1u {
         base_rgb = in.vertex_color.rgb;
-        alpha = in.vertex_color.a;
+        alpha = uniforms.color.a * in.vertex_color.a;
     }
     if uniforms.scalar_enabled == 1u {
         let denom = max(uniforms.scalar_max - uniforms.scalar_min, 1e-6);

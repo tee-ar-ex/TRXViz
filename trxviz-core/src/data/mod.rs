@@ -1,5 +1,6 @@
 pub mod bundle_mesh;
 pub mod cifti;
+pub mod fundus_triangle;
 pub mod gifti_data;
 pub mod loaded_files;
 pub mod nifti_data;

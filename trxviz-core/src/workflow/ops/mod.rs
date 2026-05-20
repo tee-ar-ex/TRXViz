@@ -12,6 +12,8 @@ mod fixel_display;
 mod group_select;
 mod limit_streamlines;
 mod merge;
+mod triangle_fundus;
+mod meta_group_select;
 mod odf_glyph_renderer;
 mod odx_select;
 mod odx_source;
@@ -63,6 +65,8 @@ pub use fixel_display::{Fixel2DDisplayOp, Fixel3DDisplayOp};
 pub use group_select::GroupSelectOp;
 pub use limit_streamlines::LimitStreamlinesOp;
 pub use merge::MergeOp;
+pub use triangle_fundus::TriangleFundusOp;
+pub use meta_group_select::MetaGroupSelectOp;
 pub use odf_glyph_renderer::OdfGlyphRendererOp;
 pub use odx_select::{OdxFixelScalarSelectOp, OdxVolumeSelectOp};
 pub use odx_source::OdxSourceOp;
@@ -106,6 +110,7 @@ use super::{
     default_bundle_surface_min_component_volume_mm3, default_bundle_surface_outline_thickness,
     default_enabled, default_false, default_fixel_colormap, default_fixel_length_scale,
     default_fixel_line_width, default_fixel_slab_thickness_mm, default_full_opacity,
+    default_fundus_tube_radius,
     default_odf_glyph_detail, default_odf_glyph_scale, default_surface_overlay_layers,
     default_true, default_workflow_slice_view_kind,
 };
@@ -145,6 +150,9 @@ pub enum WorkflowNodeKind {
         seed: u64,
     },
     GroupSelect {
+        groups: GroupFilter,
+    },
+    MetaGroupSelect {
         groups: GroupFilter,
     },
     RandomSubset {
@@ -243,6 +251,18 @@ pub enum WorkflowNodeKind {
         tube_sides: u32,
         slab_half_width_mm: Millimeters,
         opacity: f32,
+    },
+    TriangleFundus {
+        #[serde(default = "default_enabled")]
+        show_triangles: bool,
+        #[serde(default = "default_enabled")]
+        show_normals: bool,
+        normal_len_mm: f32,
+        stride: usize,
+        #[serde(default)]
+        render_as_tubes: bool,
+        #[serde(default = "default_fundus_tube_radius")]
+        tube_radius_mm: f32,
     },
     VolumeDisplay {
         colormap: VolumeColormap,
@@ -590,8 +610,32 @@ macro_rules! with_workflow_op {
                 };
                 $body
             }
+            WorkflowNodeKind::TriangleFundus {
+                show_triangles,
+                show_normals,
+                normal_len_mm,
+                stride,
+                render_as_tubes,
+                tube_radius_mm,
+            } => {
+                let $op = triangle_fundus::TriangleFundusOp {
+                    show_triangles: *show_triangles,
+                    show_normals: *show_normals,
+                    normal_len_mm: *normal_len_mm,
+                    stride: *stride,
+                    render_as_tubes: *render_as_tubes,
+                    tube_radius_mm: *tube_radius_mm,
+                };
+                $body
+            }
             WorkflowNodeKind::GroupSelect { groups } => {
                 let $op = group_select::GroupSelectOp {
+                    groups: groups.clone(),
+                };
+                $body
+            }
+            WorkflowNodeKind::MetaGroupSelect { groups } => {
+                let $op = meta_group_select::MetaGroupSelectOp {
                     groups: groups.clone(),
                 };
                 $body
@@ -1271,6 +1315,10 @@ pub(super) fn validate_registry() -> WorkflowResult<()> {
         }
         .tag(),
         group_select::GroupSelectOp {
+            groups: super::GroupFilter::All,
+        }
+        .tag(),
+        meta_group_select::MetaGroupSelectOp {
             groups: super::GroupFilter::All,
         }
         .tag(),

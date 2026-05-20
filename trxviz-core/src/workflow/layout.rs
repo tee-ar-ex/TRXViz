@@ -484,6 +484,7 @@ fn port_kind_label(port: super::PortKind) -> &'static str {
         super::PortKind::Surface => "Surface",
         super::PortKind::Parcellation => "Parcellation",
         super::PortKind::ParcelSelection => "Parcel Set",
+        super::PortKind::GroupSelection => "Group Set",
         super::PortKind::Cifti => "CIFTI",
         super::PortKind::SurfaceScalars => "Surface Scalars",
         super::PortKind::SurfaceAppearance => "Surface Appearance",
