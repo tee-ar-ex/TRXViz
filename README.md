@@ -2,8 +2,9 @@
 
 A cross-platform desktop application for visualizing [TRX](https://github.com/tee-ar-ex/trx-spec)
 brain tractography files with NIfTI-1 background volumes, GIFTI surfaces, and CIFTI scalar data.
-Includes a headless CLI for producing renders as part of data-processing pipelines on compute
-nodes with no display.
+It also visualizes ODX orientation files — ODF glyphs, fixels, and fixel scalars — and can run
+tractography directly from ODF/fixel data, including GPU-accelerated tracking. Includes a headless
+CLI for producing renders as part of data-processing pipelines on compute nodes with no display.
 
 Built with Rust, [egui](https://github.com/emilk/egui), and [wgpu](https://wgpu.rs/) for GPU-accelerated rendering.
 
@@ -22,6 +23,8 @@ Built with Rust, [egui](https://github.com/emilk/egui), and [wgpu](https://wgpu.
 ## Features
 
 - **4-viewport layout** — 3D perspective view with axial, coronal, and sagittal slice views
+- **ODX visualization** — load ODX orientation files and display ODF glyphs, fixel lines (3D and on-slice), and color fixels by per-fixel scalars
+- **Tractography** — track streamlines directly from ODF or fixel data: Dipy/GPUStreamlines ODF tracking (probabilistic or GPU PTT) and Yeh-style fixel tracking
 - **CIFTI support** — load `.dscalar.nii`, `.dtseries.nii`, `.dlabel.nii`, and `.pscalar.nii`
 - **GPU-accelerated rendering** via wgpu (Metal on macOS, Vulkan/DX12 on Linux/Windows)
 - **Workflow editor** — node graph for building and reusing visualization pipelines
@@ -103,7 +106,7 @@ If that happens, use a machine that permits the app or build from source locally
 
 ## Building
 
-Requires [Rust](https://rustup.rs/) 1.88+.
+Requires [Rust](https://rustup.rs/) 1.85+ (the minimum for edition 2024).
 
 ```bash
 # Build everything

@@ -4,6 +4,7 @@ pub use crate::error::{WorkflowError, WorkflowResult};
 
 pub(super) mod cpu_dipy;
 pub(super) mod cpu_yeh;
+pub mod draw;
 mod eval_inputs;
 mod eval_streamlines;
 mod eval_surface;
@@ -56,6 +57,7 @@ pub use seed_odx::*;
 pub use simple_workflow::*;
 pub use types::*;
 
+pub use draw::{DrawList, DrawPrimitive, UploadCache, UploadSlot};
 pub use op::{ContentHash, Diagnostic, DiagnosticSeverity, FingerprintCtx, ValidateCtx};
 pub use ops::fingerprint as fingerprint_op;
 pub use ops::pyafq_bundles;

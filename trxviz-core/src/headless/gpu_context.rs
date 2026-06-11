@@ -42,10 +42,7 @@ pub(super) fn active_fixel_draw_3d(
     workflow
         .runtime
         .scene_plan
-        .fixel_3d_draws
-        .iter()
-        .find(|plan| plan.visible)
-        .or_else(|| workflow.runtime.scene_plan.fixel_3d_draws.first())
+        .active_fixel_draw(crate::workflow::FixelView::ThreeD)
 }
 
 pub(super) fn active_fixel_draw_2d(
@@ -54,10 +51,7 @@ pub(super) fn active_fixel_draw_2d(
     workflow
         .runtime
         .scene_plan
-        .fixel_2d_draws
-        .iter()
-        .find(|plan| plan.visible)
-        .or_else(|| workflow.runtime.scene_plan.fixel_2d_draws.first())
+        .active_fixel_draw(crate::workflow::FixelView::TwoD)
 }
 
 pub(super) fn create_gpu_context() -> anyhow::Result<GpuContext> {
@@ -209,7 +203,12 @@ pub(super) fn build_gpu_resources(
         streamlines.entries.push((draw.draw_id, resource));
     }
 
-    for draw in &workflow.runtime.scene_plan.voxel_mask_mesh_draws {
+    for draw in workflow
+        .runtime
+        .scene_plan
+        .draws
+        .of_type::<crate::workflow::VoxelMaskMeshDrawPlan>()
+    {
         if let Some(cache) = workflow
             .execution_cache
             .voxel_mask_mesh_cache
@@ -224,7 +223,12 @@ pub(super) fn build_gpu_resources(
         }
     }
 
-    for draw in &workflow.runtime.scene_plan.bundle_draws {
+    for draw in workflow
+        .runtime
+        .scene_plan
+        .draws
+        .of_type::<crate::workflow::BundleDrawPlan>()
+    {
         let fingerprint = workflow_bundle_display_fingerprint(
             draw,
             draw.boundary_field_node_uuid.and_then(|uuid| {

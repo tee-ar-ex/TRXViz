@@ -1,6 +1,8 @@
 use glam::Vec3;
 
-use crate::app::helpers::{intersect_edge_with_slice, tri_axis_value};
+use crate::app::helpers::{
+    intersect_edge_with_slice, intersect_edge_with_slice_t, tri_axis_value,
+};
 
 impl crate::app::TrxVizApp {
     /// Draw anatomical orientation labels (R/L/A/P/S/I) on a slice view.
@@ -256,13 +258,22 @@ impl crate::app::TrxVizApp {
                 continue;
             }
 
-            let color = egui::Color32::from_rgba_unmultiplied(
-                (draw.outline_color[0].clamp(0.0, 1.0) * 255.0) as u8,
-                (draw.outline_color[1].clamp(0.0, 1.0) * 255.0) as u8,
-                (draw.outline_color[2].clamp(0.0, 1.0) * 255.0) as u8,
-                (draw.opacity.clamp(0.0, 1.0) * 255.0) as u8,
-            );
-            let stroke = egui::Stroke::new(draw.outline_thickness.clamp(0.25, 8.0), color);
+            let fallback_rgba = [
+                draw.outline_color[0],
+                draw.outline_color[1],
+                draw.outline_color[2],
+                1.0,
+            ];
+            // Per-vertex colors (linear RGBA) carried by the GIFTI, if
+            // they cover every vertex. When present, each cross-section
+            // segment is colored to match the 3D surface; otherwise the
+            // single `outline_color` is used.
+            let vertex_colors = surface
+                .data
+                .vertex_colors
+                .as_deref()
+                .filter(|vc| vc.len() == surface.data.vertices.len());
+            let thickness = draw.outline_thickness.clamp(0.25, 8.0);
 
             for tri in surface.data.indices.chunks_exact(3) {
                 let ia = tri[0] as usize;
@@ -282,29 +293,40 @@ impl crate::app::TrxVizApp {
                     continue;
                 }
 
-                let mut pts = Vec::with_capacity(3);
-                for (p0, p1) in [(a, b), (b, c), (c, a)] {
-                    if let Some(p) = intersect_edge_with_slice(p0, p1, axis_index, slice_pos, eps) {
-                        if !pts
-                            .iter()
-                            .any(|q: &glam::Vec3| (*q - p).length_squared() <= eps * eps)
-                        {
-                            pts.push(p);
-                        }
+                // Each intersection point carries an interpolated color.
+                let mut pts: Vec<(glam::Vec3, [f32; 4])> = Vec::with_capacity(3);
+                for ((p0, p1), (i0, i1)) in
+                    [((a, b), (ia, ib)), ((b, c), (ib, ic)), ((c, a), (ic, ia))]
+                {
+                    let Some((p, t)) =
+                        intersect_edge_with_slice_t(p0, p1, axis_index, slice_pos, eps)
+                    else {
+                        continue;
+                    };
+                    if pts
+                        .iter()
+                        .any(|(q, _)| (*q - p).length_squared() <= eps * eps)
+                    {
+                        continue;
                     }
+                    let col = match vertex_colors {
+                        Some(vc) => lerp_rgba(vc[i0], vc[i1], t),
+                        None => fallback_rgba,
+                    };
+                    pts.push((p, col));
                 }
                 if pts.len() < 2 {
                     continue;
                 }
                 // For rare 3-point cases (vertex on plane), keep the longest segment.
-                let (p0, p1) = if pts.len() == 2 {
+                let (e0, e1) = if pts.len() == 2 {
                     (pts[0], pts[1])
                 } else {
                     let mut best = (pts[0], pts[1]);
-                    let mut best_d2 = (pts[1] - pts[0]).length_squared();
+                    let mut best_d2 = (pts[1].0 - pts[0].0).length_squared();
                     for i in 0..pts.len() {
                         for j in (i + 1)..pts.len() {
-                            let d2 = (pts[j] - pts[i]).length_squared();
+                            let d2 = (pts[j].0 - pts[i].0).length_squared();
                             if d2 > best_d2 {
                                 best = (pts[i], pts[j]);
                                 best_d2 = d2;
@@ -314,7 +336,23 @@ impl crate::app::TrxVizApp {
                     best
                 };
 
-                painter.line_segment([project(p0), project(p1)], stroke);
+                // Segment color = mean of the two endpoint colors.
+                // Per-vertex colors are linear and need an sRGB convert
+                // for egui; the `outline_color` fallback is already in
+                // display space.
+                let seg = [
+                    0.5 * (e0.1[0] + e1.1[0]),
+                    0.5 * (e0.1[1] + e1.1[1]),
+                    0.5 * (e0.1[2] + e1.1[2]),
+                    0.5 * (e0.1[3] + e1.1[3]),
+                ];
+                let stroke_color = if vertex_colors.is_some() {
+                    color32_from_linear(seg, draw.opacity)
+                } else {
+                    color32_from_display(seg, draw.opacity)
+                };
+                let stroke = egui::Stroke::new(thickness, stroke_color);
+                painter.line_segment([project(e0.0), project(e1.0)], stroke);
             }
         }
     }
@@ -327,7 +365,15 @@ impl crate::app::TrxVizApp {
         view_proj: glam::Mat4,
         slice_pos: f32,
     ) {
-        if self.workflow.runtime.scene_plan.bundle_draws.is_empty() {
+        if self
+            .workflow
+            .runtime
+            .scene_plan
+            .draws
+            .of_type::<trxviz_core::workflow::BundleDrawPlan>()
+            .next()
+            .is_none()
+        {
             return;
         }
 
@@ -344,7 +390,13 @@ impl crate::app::TrxVizApp {
             )
         };
 
-        for draw in &self.workflow.runtime.scene_plan.bundle_draws {
+        for draw in self
+            .workflow
+            .runtime
+            .scene_plan
+            .draws
+            .of_type::<trxviz_core::workflow::BundleDrawPlan>()
+        {
             if draw.opacity <= 0.01 {
                 continue;
             }
@@ -473,8 +525,10 @@ impl crate::app::TrxVizApp {
             .workflow
             .runtime
             .scene_plan
-            .voxel_mask_mesh_draws
-            .is_empty()
+            .draws
+            .of_type::<trxviz_core::workflow::VoxelMaskMeshDrawPlan>()
+            .next()
+            .is_none()
         {
             return;
         }
@@ -504,7 +558,13 @@ impl crate::app::TrxVizApp {
             _ => 0usize, // X
         };
 
-        for draw in &self.workflow.runtime.scene_plan.voxel_mask_mesh_draws {
+        for draw in self
+            .workflow
+            .runtime
+            .scene_plan
+            .draws
+            .of_type::<trxviz_core::workflow::VoxelMaskMeshDrawPlan>()
+        {
             if draw.opacity <= 0.01 {
                 continue;
             }
@@ -688,6 +748,48 @@ impl crate::app::TrxVizApp {
             }
         }
     }
+}
+
+/// Component-wise linear interpolation of two RGBA colors.
+fn lerp_rgba(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
+    let t = t.clamp(0.0, 1.0);
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+        a[3] + (b[3] - a[3]) * t,
+    ]
+}
+
+/// `egui::Color32` from a linear-RGBA color (per-vertex surface colors
+/// are stored linear; egui expects sRGB). Alpha is scaled by `opacity`.
+fn color32_from_linear(rgba: [f32; 4], opacity: f32) -> egui::Color32 {
+    let s = |c: f32| -> u8 {
+        let c = c.clamp(0.0, 1.0);
+        let srgb = if c <= 0.003_130_8 {
+            12.92 * c
+        } else {
+            1.055 * c.powf(1.0 / 2.4) - 0.055
+        };
+        (srgb * 255.0) as u8
+    };
+    egui::Color32::from_rgba_unmultiplied(
+        s(rgba[0]),
+        s(rgba[1]),
+        s(rgba[2]),
+        (rgba[3].clamp(0.0, 1.0) * opacity.clamp(0.0, 1.0) * 255.0) as u8,
+    )
+}
+
+/// `egui::Color32` from an already-display-space RGBA color (the
+/// user-picked `outline_color` fallback). Alpha scaled by `opacity`.
+fn color32_from_display(rgba: [f32; 4], opacity: f32) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(
+        (rgba[0].clamp(0.0, 1.0) * 255.0) as u8,
+        (rgba[1].clamp(0.0, 1.0) * 255.0) as u8,
+        (rgba[2].clamp(0.0, 1.0) * 255.0) as u8,
+        (rgba[3].clamp(0.0, 1.0) * opacity.clamp(0.0, 1.0) * 255.0) as u8,
+    )
 }
 
 /// Voxel-accurate 2D overlay: for every "on" voxel whose world-space

@@ -50,7 +50,12 @@ pub(crate) fn compute_scene_bounds(
         }
     }
 
-    for draw in &workflow.runtime.scene_plan.bundle_draws {
+    for draw in workflow
+        .runtime
+        .scene_plan
+        .draws
+        .of_type::<crate::workflow::BundleDrawPlan>()
+    {
         let fingerprint = workflow_bundle_display_fingerprint(
             draw,
             draw.boundary_field_node_uuid.and_then(|uuid| {
@@ -222,7 +227,12 @@ pub(crate) fn build_glb_scene(
         }
     }
 
-    for draw in &workflow.runtime.scene_plan.bundle_draws {
+    for draw in workflow
+        .runtime
+        .scene_plan
+        .draws
+        .of_type::<crate::workflow::BundleDrawPlan>()
+    {
         let fingerprint = workflow_bundle_display_fingerprint(
             draw,
             draw.boundary_field_node_uuid.and_then(|uuid| {

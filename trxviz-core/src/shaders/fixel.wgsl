@@ -110,6 +110,7 @@ fn sample_palette(mode: u32, t: f32) -> vec3<f32> {
     if mode == 2u { return palette_plasma(t); }
     if mode == 3u { return palette_viridis(t); }
     if mode == 4u { return palette_inferno(t); }
+    if mode == 5u { return vec3<f32>(t, t, t); }  // grayscale (e.g. sulc-shaded wireframe)
     return palette_bwr(t);
 }
 

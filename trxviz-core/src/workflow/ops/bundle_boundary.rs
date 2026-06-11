@@ -1,6 +1,7 @@
 use super::super::{
     BoundaryFieldPlan, BoundaryGlyphDrawPlan, BundleDrawPlan, BundleSurfaceBuildMode,
-    BundleSurfaceColorMode, BundleSurfacePlan, EvalCtx, PortKind, StreamlineDisplayRuntime,
+    BundleSurfaceColorMode, BundleSurfacePlan, DrawPrimitive, EvalCtx, PortKind,
+    StreamlineDisplayRuntime,
     WorkflowNodeKind, WorkflowOp, default_boundary_field_normalization,
     default_boundary_field_sphere_lod, default_boundary_field_voxel_size_mm,
     default_boundary_glyph_color_mode, default_boundary_glyph_density_3d_step,
@@ -310,8 +311,24 @@ impl WorkflowOp for BundleSurfaceDisplayOp {
                 resolved_color_mode.label()
             )
         };
-        ctx.scene_plan.bundle_draws.push(draw);
+        ctx.scene_plan.draws.push(draw);
         Ok(Vec::new())
+    }
+}
+
+// Bundle surfaces fingerprint and skip via the backend's
+// `workflow_bundle_display_fingerprint` + `display_runtimes`/`node_runs`
+// machinery (it folds in a separate boundary-field cache), so — unlike a
+// `u64`-fingerprinted plan — the trait impl is a bare storage/downcast
+// marker. This is the case that proved fingerprinting can't be a trait
+// method.
+impl DrawPrimitive for BundleDrawPlan {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn DrawPrimitive> {
+        Box::new(self.clone())
     }
 }
 

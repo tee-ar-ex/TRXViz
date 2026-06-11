@@ -829,7 +829,7 @@ pub struct SceneFramePlan {
     pub surface_draws: Vec<SurfaceDrawPlan>,
     pub stage_surface_draws: Vec<SurfaceDrawPlan>,
     pub bundle_surface_plans: Vec<BundleSurfacePlan>,
-    pub bundle_draws: Vec<BundleDrawPlan>,
+    // BundleDrawPlan now lives in `draws` (the DrawPrimitive registry).
     pub parcellation_draws: Vec<ParcellationDrawPlan>,
     pub boundary_field_plans: Vec<BoundaryFieldPlan>,
     pub boundary_glyph_draws: Vec<BoundaryGlyphDrawPlan>,
@@ -844,12 +844,17 @@ pub struct SceneFramePlan {
     /// without this, the retain() sweep would silently drop their
     /// upstream field and leave them forever stale.
     pub boundary_fields_in_use: std::collections::HashSet<WorkflowNodeUuid>,
-    pub fixel_3d_draws: Vec<FixelDrawPlan>,
-    pub fixel_2d_draws: Vec<FixelDrawPlan>,
+    /// Generic draw-primitive registry (see [`super::draw`]). Fixel
+    /// draws (3D and on-slice) live here instead of bespoke
+    /// `fixel_*_draws` fields; other draw kinds are migrating over one at
+    /// a time. Display ops push during evaluation; the render backends
+    /// read back via `draws.of_type::<T>()`.
+    pub draws: super::draw::DrawList,
     pub odf_glyph_draws: Vec<OdfGlyphDrawPlan>,
     pub dipy_tractography_plans: Vec<DipyTractographyPlan>,
     pub yeh_tractography_plans: Vec<YehTractographyPlan>,
-    pub voxel_mask_mesh_draws: Vec<VoxelMaskMeshDrawPlan>,
+    // VoxelMaskMeshDrawPlan now lives in `draws` (the DrawPrimitive
+    // registry) rather than a bespoke field.
     pub hausdorff_plan_jobs: Vec<HausdorffPlanJob>,
     pub pyafq_plan_jobs: Vec<PyafqPlanJob>,
 }
@@ -911,9 +916,23 @@ pub struct CachedVoxelMaskMesh {
     pub draw_id: FileId,
 }
 
+/// Which viewport a [`FixelDrawPlan`] targets. Distinguishes the two
+/// fixel display ops now that both share the registry instead of
+/// separate `fixel_3d_draws` / `fixel_2d_draws` fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FixelView {
+    /// Full 3D fixel arrows.
+    ThreeD,
+    /// Fixels clipped to a slice slab (2D overlay).
+    TwoD,
+}
+
 #[derive(Clone)]
 pub struct FixelDrawPlan {
     pub node_uuid: WorkflowNodeUuid,
+    /// Viewport this draw targets; selects which GPU fixel resources the
+    /// backend uploads into (3D vs on-slice).
+    pub view: FixelView,
     pub field: crate::data::odx_data::FixelField,
     pub line_width: f32,
     pub length_scale: f32,
@@ -929,6 +948,30 @@ pub struct FixelDrawPlan {
     /// below the tracking-Otsu band fade to `below` alpha so the user
     /// sees which fixels feed tracking vs which are sub-threshold.
     pub opacity_gate: OpacityGate,
+}
+
+impl SceneFramePlan {
+    /// The fixel draw that should drive `view`'s GPU upload: the first
+    /// visible one of that view, else the first present. Centralizes what
+    /// were three identical copies in the GUI viewer, the GUI job-sync
+    /// loop, and the headless renderer. Kept next to the plan types it
+    /// queries so the scene-plan API stays discoverable from `types.rs`.
+    pub fn active_fixel_draw(&self, view: FixelView) -> Option<&FixelDrawPlan> {
+        self.draws
+            .of_type::<FixelDrawPlan>()
+            .find(|p| p.view == view && p.visible)
+            .or_else(|| self.draws.of_type::<FixelDrawPlan>().find(|p| p.view == view))
+    }
+
+    /// Whether any fixel draw was emitted this frame (either view).
+    pub fn has_fixel_draws(&self) -> bool {
+        self.draws.of_type::<FixelDrawPlan>().next().is_some()
+    }
+
+    /// Whether any emitted fixel draw is visible (either view).
+    pub fn any_fixel_visible(&self) -> bool {
+        self.draws.of_type::<FixelDrawPlan>().any(|p| p.visible)
+    }
 }
 
 #[derive(Clone)]
@@ -962,17 +1005,14 @@ impl Default for SceneFramePlan {
             surface_draws: Vec::new(),
             stage_surface_draws: Vec::new(),
             bundle_surface_plans: Vec::new(),
-            bundle_draws: Vec::new(),
             boundary_fields_in_use: std::collections::HashSet::new(),
             parcellation_draws: Vec::new(),
             boundary_field_plans: Vec::new(),
             boundary_glyph_draws: Vec::new(),
-            fixel_3d_draws: Vec::new(),
-            fixel_2d_draws: Vec::new(),
+            draws: super::draw::DrawList::default(),
             odf_glyph_draws: Vec::new(),
             dipy_tractography_plans: Vec::new(),
             yeh_tractography_plans: Vec::new(),
-            voxel_mask_mesh_draws: Vec::new(),
             hausdorff_plan_jobs: Vec::new(),
             pyafq_plan_jobs: Vec::new(),
         }

@@ -92,10 +92,7 @@ fn active_fixel_draw_3d(
     app.workflow
         .runtime
         .scene_plan
-        .fixel_3d_draws
-        .iter()
-        .find(|plan| plan.visible)
-        .or_else(|| app.workflow.runtime.scene_plan.fixel_3d_draws.first())
+        .active_fixel_draw(trxviz_core::workflow::FixelView::ThreeD)
 }
 
 fn active_fixel_draw_2d(
@@ -104,10 +101,7 @@ fn active_fixel_draw_2d(
     app.workflow
         .runtime
         .scene_plan
-        .fixel_2d_draws
-        .iter()
-        .find(|plan| plan.visible)
-        .or_else(|| app.workflow.runtime.scene_plan.fixel_2d_draws.first())
+        .active_fixel_draw(trxviz_core::workflow::FixelView::TwoD)
 }
 
 impl super::super::TrxVizApp {
@@ -1267,8 +1261,8 @@ impl super::super::TrxVizApp {
             .workflow
             .runtime
             .scene_plan
-            .bundle_draws
-            .iter()
+            .draws
+            .of_type::<trxviz_core::workflow::BundleDrawPlan>()
             .map(|draw| BundleDrawInfo {
                 file_id: draw.draw_id,
                 opacity: draw.opacity,
@@ -1277,8 +1271,8 @@ impl super::super::TrxVizApp {
                 self.workflow
                     .runtime
                     .scene_plan
-                    .voxel_mask_mesh_draws
-                    .iter()
+                    .draws
+                    .of_type::<trxviz_core::workflow::VoxelMaskMeshDrawPlan>()
                     .map(|draw| BundleDrawInfo {
                         file_id: draw.draw_id,
                         opacity: draw.opacity,
@@ -1301,25 +1295,10 @@ impl super::super::TrxVizApp {
             .iter()
             .find(|p| p.visible)
             .or_else(|| self.workflow.runtime.scene_plan.odf_glyph_draws.first());
-        let odx_glyphs_active = odf_draw
-            .map(|p| p.visible)
-            .unwrap_or(self.scene.odx_scene.is_some());
+        let odx_glyphs_active = odf_draw.is_some_and(|p| p.visible);
         let fixel_3d_draw = active_fixel_draw_3d(self);
         let fixel_2d_draw = active_fixel_draw_2d(self);
-        let odx_fixels_active = self
-            .workflow
-            .runtime
-            .scene_plan
-            .fixel_3d_draws
-            .iter()
-            .any(|p| p.visible)
-            || self
-                .workflow
-                .runtime
-                .scene_plan
-                .fixel_2d_draws
-                .iter()
-                .any(|p| p.visible)
+        let odx_fixels_active = self.workflow.runtime.scene_plan.any_fixel_visible()
             || self.scene.odx_scene.is_some();
         ViewerRenderData {
             surfaces: SurfaceFrameData {

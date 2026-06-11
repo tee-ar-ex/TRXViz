@@ -84,8 +84,8 @@ pub(super) fn build_render_data(
         let mut out = workflow
             .runtime
             .scene_plan
-            .bundle_draws
-            .iter()
+            .draws
+            .of_type::<crate::workflow::BundleDrawPlan>()
             .map(|draw| BundleDrawInfo {
                 file_id: draw.draw_id,
                 opacity: draw.opacity,
@@ -97,8 +97,8 @@ pub(super) fn build_render_data(
             workflow
                 .runtime
                 .scene_plan
-                .voxel_mask_mesh_draws
-                .iter()
+                .draws
+                .of_type::<crate::workflow::VoxelMaskMeshDrawPlan>()
                 .map(|draw| BundleDrawInfo {
                     file_id: draw.draw_id,
                     opacity: draw.opacity,
@@ -157,8 +157,7 @@ pub(super) fn build_render_data(
             .unwrap_or(1),
         odx_visible: scene.odx_scene.is_some()
             || !workflow.runtime.scene_plan.odf_glyph_draws.is_empty()
-            || !workflow.runtime.scene_plan.fixel_3d_draws.is_empty()
-            || !workflow.runtime.scene_plan.fixel_2d_draws.is_empty(),
+            || workflow.runtime.scene_plan.has_fixel_draws(),
         odx_fixel_3d_visible: fixel_3d_draw.map(|p| p.visible).unwrap_or(true)
             && !(odx_has_glyph_field && odx_glyphs_active),
         odx_fixel_2d_visible: fixel_2d_draw
