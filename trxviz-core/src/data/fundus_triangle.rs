@@ -128,11 +128,7 @@ pub fn fit_streamline_triangle(points: &[Vec3]) -> Option<FundusTriangle> {
     }
     // Solve M·[a,b,c]ᵀ = [Σu²v, Σuv, Σv]ᵀ,
     // M = [[Σu⁴,Σu³,Σu²],[Σu³,Σu²,Σu],[Σu²,Σu,n]].
-    let m = [
-        [s_u4, s_u3, s_u2],
-        [s_u3, s_u2, s_u],
-        [s_u2, s_u, n],
-    ];
+    let m = [[s_u4, s_u3, s_u2], [s_u3, s_u2, s_u], [s_u2, s_u, n]];
     let rhs = [s_u2v, s_uv, s_v];
     let coef = solve_3x3(m, rhs)?;
     let (a, b, c) = (coef[0], coef[1], coef[2]);
@@ -183,11 +179,7 @@ pub fn fit_streamline_triangle(points: &[Vec3]) -> Option<FundusTriangle> {
 /// in a few sweeps for 3×3). Returns (eigenvalues,
 /// eigenvectors-as-columns of `v`).
 fn jacobi_eigen_symmetric_3x3(mut a: [[f64; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) {
-    let mut v = [
-        [1.0_f64, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ];
+    let mut v = [[1.0_f64, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     for _sweep in 0..24 {
         let off = a[0][1].abs() + a[0][2].abs() + a[1][2].abs();
         if off < 1e-15 {
@@ -278,10 +270,7 @@ mod tests {
         let us = [
             -2.0_f32, -1.5, -1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0, 1.5, 2.0,
         ];
-        let pts: Vec<Vec3> = us
-            .iter()
-            .map(|&u| origin + ua * u + va * (u * u))
-            .collect();
+        let pts: Vec<Vec3> = us.iter().map(|&u| origin + ua * u + va * (u * u)).collect();
         let t = fit_streamline_triangle(&pts).expect("fit");
         assert!(
             (t.apex - origin).length() < 1e-2,

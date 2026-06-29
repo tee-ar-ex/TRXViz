@@ -1289,8 +1289,8 @@ impl super::super::TrxVizApp {
         let odx_glyphs_active = odf_draw.is_some_and(|p| p.visible);
         let fixel_3d_draw = active_fixel_draw_3d(self);
         let fixel_2d_draw = active_fixel_draw_2d(self);
-        let odx_fixels_active = self.workflow.runtime.scene_plan.any_fixel_visible()
-            || self.scene.odx_scene.is_some();
+        let odx_fixels_active =
+            self.workflow.runtime.scene_plan.any_fixel_visible() || self.scene.odx_scene.is_some();
         ViewerRenderData {
             surfaces: SurfaceFrameData {
                 surface_draws,

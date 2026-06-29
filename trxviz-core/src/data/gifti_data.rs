@@ -125,7 +125,11 @@ impl GiftiSurfaceData {
                     triangles = Some(tris);
                 }
                 NIFTI_INTENT_RGB_VECTOR | NIFTI_INTENT_RGBA_VECTOR => {
-                    let want_components = if intent == NIFTI_INTENT_RGB_VECTOR { 3 } else { 4 };
+                    let want_components = if intent == NIFTI_INTENT_RGB_VECTOR {
+                        3
+                    } else {
+                        4
+                    };
                     if dims.len() < 2 {
                         bail!("RGB(A) vector DataArray has invalid dimensions");
                     }

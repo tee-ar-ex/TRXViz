@@ -197,16 +197,16 @@ impl WorkflowOp for VoxelMaskDisplayOp {
 
         if mesh_opt.is_some() {
             ctx.scene_plan.draws.push(VoxelMaskMeshDrawPlan {
-                    node_uuid: ctx.node.uuid,
-                    draw_id,
-                    label: ctx.node.label.clone(),
-                    fingerprint,
-                    color: self.color,
-                    opacity: self.opacity,
-                    style: self.style,
-                    slice_mode: self.slice_mode,
-                    voxel_mask: Arc::clone(&mask),
-                });
+                node_uuid: ctx.node.uuid,
+                draw_id,
+                label: ctx.node.label.clone(),
+                fingerprint,
+                color: self.color,
+                opacity: self.opacity,
+                style: self.style,
+                slice_mode: self.slice_mode,
+                voxel_mask: Arc::clone(&mask),
+            });
         }
 
         Ok(Vec::new())

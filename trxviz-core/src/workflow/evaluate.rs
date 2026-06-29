@@ -342,7 +342,8 @@ fn fold_volume_draws_into_composite(
     for draw in scene_plan.draws.of_type::<VolumeDrawPlan>() {
         // If any layer's scalars can't be resolved (missing asset), bail
         // and leave the draws untouched rather than silently dropping data.
-        let Some(scalars) = resolve_volume_scalars(&draw.source, volume_map, execution_cache) else {
+        let Some(scalars) = resolve_volume_scalars(&draw.source, volume_map, execution_cache)
+        else {
             return;
         };
         let interpolation = if matches!(scalars.kind, crate::data::cifti::ScalarKind::Label) {

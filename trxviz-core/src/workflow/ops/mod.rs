@@ -12,7 +12,6 @@ mod fixel_display;
 mod group_select;
 mod limit_streamlines;
 mod merge;
-mod triangle_fundus;
 mod meta_group_select;
 mod odf_glyph_renderer;
 mod odx_select;
@@ -41,6 +40,7 @@ mod surface_projection;
 mod surface_source;
 mod tip_prune;
 mod tracking_params;
+mod triangle_fundus;
 mod uniform_color;
 mod volume_display;
 mod volume_overlay_stack;
@@ -65,7 +65,6 @@ pub use fixel_display::{Fixel2DDisplayOp, Fixel3DDisplayOp};
 pub use group_select::GroupSelectOp;
 pub use limit_streamlines::LimitStreamlinesOp;
 pub use merge::MergeOp;
-pub use triangle_fundus::TriangleFundusOp;
 pub use meta_group_select::MetaGroupSelectOp;
 pub use odf_glyph_renderer::OdfGlyphRendererOp;
 pub use odx_select::{OdxFixelScalarSelectOp, OdxVolumeSelectOp};
@@ -92,6 +91,7 @@ pub use surface_display::{SurfaceDisplayOp, SurfaceOverlayStackOp};
 pub use surface_projection::{SurfaceProjectionDensityOp, SurfaceProjectionMeanDpsOp};
 pub use surface_source::SurfaceSourceOp;
 pub use tip_prune::TipPruneOp;
+pub use triangle_fundus::TriangleFundusOp;
 pub use uniform_color::UniformColorOp;
 pub use volume_display::VolumeDisplayOp;
 pub use volume_overlay_stack::VolumeOverlayStackOp;
@@ -110,9 +110,8 @@ use super::{
     default_bundle_surface_min_component_volume_mm3, default_bundle_surface_outline_thickness,
     default_enabled, default_false, default_fixel_colormap, default_fixel_length_scale,
     default_fixel_line_width, default_fixel_slab_thickness_mm, default_full_opacity,
-    default_fundus_tube_radius,
-    default_odf_glyph_detail, default_odf_glyph_scale, default_surface_overlay_layers,
-    default_true, default_workflow_slice_view_kind,
+    default_fundus_tube_radius, default_odf_glyph_detail, default_odf_glyph_scale,
+    default_surface_overlay_layers, default_true, default_workflow_slice_view_kind,
 };
 use crate::data::cifti::CiftiStructure;
 use crate::data::loaded_files::{FileId, VolumeColormap};

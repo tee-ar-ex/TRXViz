@@ -106,16 +106,11 @@ pub(crate) fn edit_node_op(
         } => {
             ui.checkbox(show_triangles, "Show triangles");
             ui.checkbox(show_normals, "Show apex normals");
-            ui.add(
-                egui::Slider::new(normal_len_mm, 0.5..=12.0).text("Normal length (mm)"),
-            );
+            ui.add(egui::Slider::new(normal_len_mm, 0.5..=12.0).text("Normal length (mm)"));
             ui.add(egui::Slider::new(stride, 1..=50).text("Streamline stride"));
             ui.checkbox(render_as_tubes, "Render as cylinders");
             if *render_as_tubes {
-                ui.add(
-                    egui::Slider::new(tube_radius_mm, 0.05..=2.0)
-                        .text("Cylinder radius (mm)"),
-                );
+                ui.add(egui::Slider::new(tube_radius_mm, 0.05..=2.0).text("Cylinder radius (mm)"));
             }
             ui.small(
                 "Self-displaying: renders each streamline's u-fiber \

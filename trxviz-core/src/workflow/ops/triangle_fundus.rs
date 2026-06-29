@@ -126,22 +126,24 @@ impl WorkflowOp for TriangleFundusOp {
                 let mut groups: std::collections::HashMap<String, Vec<StreamlineIndex>> =
                     std::collections::HashMap::new();
 
-                let mut push_seg =
-                    |positions: &mut Vec<[f32; 3]>,
-                     offsets: &mut Vec<u32>,
-                     a: glam::Vec3,
-                     b: glam::Vec3,
-                     group: &str,
-                     groups: &mut std::collections::HashMap<String, Vec<StreamlineIndex>>| {
-                        let idx = (offsets.len() - 1) as u32;
-                        positions.push([a.x, a.y, a.z]);
-                        positions.push([b.x, b.y, b.z]);
-                        offsets.push(positions.len() as u32);
-                        groups
-                            .entry(group.to_string())
-                            .or_default()
-                            .push(StreamlineIndex(idx));
-                    };
+                let mut push_seg = |positions: &mut Vec<[f32; 3]>,
+                                    offsets: &mut Vec<u32>,
+                                    a: glam::Vec3,
+                                    b: glam::Vec3,
+                                    group: &str,
+                                    groups: &mut std::collections::HashMap<
+                    String,
+                    Vec<StreamlineIndex>,
+                >| {
+                    let idx = (offsets.len() - 1) as u32;
+                    positions.push([a.x, a.y, a.z]);
+                    positions.push([b.x, b.y, b.z]);
+                    offsets.push(positions.len() as u32);
+                    groups
+                        .entry(group.to_string())
+                        .or_default()
+                        .push(StreamlineIndex(idx));
+                };
 
                 for s in (0..src.nb_streamlines).step_by(stride) {
                     let start = src.offsets[s] as usize;

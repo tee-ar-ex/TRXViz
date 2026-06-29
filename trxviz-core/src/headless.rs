@@ -400,36 +400,28 @@ mod tests {
         scene.slice_visible = [true, true, true];
 
         let mut workflow = HeadlessWorkflowState::default();
-        workflow
-            .runtime
-            .scene_plan
-            .draws
-            .push(make_test_fixel_draw(
-                &odx_scene,
-                WorkflowNodeUuid(101),
-                crate::workflow::FixelView::ThreeD,
-                0.125,
-                0.4,
-                Millimeters(8.0),
-                true,
-                3,
-                (10.0, 20.0),
-            ));
-        workflow
-            .runtime
-            .scene_plan
-            .draws
-            .push(make_test_fixel_draw(
-                &odx_scene,
-                WorkflowNodeUuid(202),
-                crate::workflow::FixelView::TwoD,
-                0.5,
-                0.9,
-                Millimeters(14.0),
-                true,
-                4,
-                (30.0, 40.0),
-            ));
+        workflow.runtime.scene_plan.draws.push(make_test_fixel_draw(
+            &odx_scene,
+            WorkflowNodeUuid(101),
+            crate::workflow::FixelView::ThreeD,
+            0.125,
+            0.4,
+            Millimeters(8.0),
+            true,
+            3,
+            (10.0, 20.0),
+        ));
+        workflow.runtime.scene_plan.draws.push(make_test_fixel_draw(
+            &odx_scene,
+            WorkflowNodeUuid(202),
+            crate::workflow::FixelView::TwoD,
+            0.5,
+            0.9,
+            Millimeters(14.0),
+            true,
+            4,
+            (30.0, 40.0),
+        ));
 
         let render_data = build_render_data(&scene, &workflow, HeadlessView::View3D);
 

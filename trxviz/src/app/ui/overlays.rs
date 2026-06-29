@@ -1,8 +1,6 @@
 use glam::Vec3;
 
-use crate::app::helpers::{
-    intersect_edge_with_slice, intersect_edge_with_slice_t, tri_axis_value,
-};
+use crate::app::helpers::{intersect_edge_with_slice, intersect_edge_with_slice_t, tri_axis_value};
 
 impl crate::app::TrxVizApp {
     /// Draw anatomical orientation labels (R/L/A/P/S/I) on a slice view.

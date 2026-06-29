@@ -115,11 +115,17 @@ pub(super) fn build_render_data(
             .of_type::<crate::workflow::BoundaryGlyphDrawPlan>()
             .find(|draw| draw.visible)
     };
-    let odx_has_glyph_field = workflow.runtime.scene_plan.active_odf_glyph_draw()
+    let odx_has_glyph_field = workflow
+        .runtime
+        .scene_plan
+        .active_odf_glyph_draw()
         .map(|plan| plan.field.scene.has_glyph_field())
         .or_else(|| scene.odx_scene.as_ref().map(|odx| odx.has_glyph_field()))
         .unwrap_or(false);
-    let odx_glyphs_active = workflow.runtime.scene_plan.active_odf_glyph_draw()
+    let odx_glyphs_active = workflow
+        .runtime
+        .scene_plan
+        .active_odf_glyph_draw()
         .map(|p| p.visible)
         .unwrap_or(scene.odx_scene.is_some());
     let fixel_3d_draw = active_fixel_draw_3d(workflow);
@@ -198,10 +204,16 @@ pub(super) fn build_render_data(
                 ]
             })
             .unwrap_or([0.0, 0.0, 1.0, 1.0]),
-        odf_glyph_opacity: workflow.runtime.scene_plan.active_odf_glyph_draw()
+        odf_glyph_opacity: workflow
+            .runtime
+            .scene_plan
+            .active_odf_glyph_draw()
             .map(|p| p.opacity)
             .unwrap_or(1.0),
-        odf_glyph_gloss: workflow.runtime.scene_plan.active_odf_glyph_draw()
+        odf_glyph_gloss: workflow
+            .runtime
+            .scene_plan
+            .active_odf_glyph_draw()
             .map(|p| p.gloss)
             .unwrap_or(0.0),
     }

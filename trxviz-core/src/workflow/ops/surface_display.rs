@@ -1,10 +1,10 @@
 use super::super::{
     DEFAULT_SURFACE_COLOR, DEFAULT_SURFACE_OPACITY, DrawPrimitive, EvalCtx, PortKind,
     SurfaceDisplaySpace, SurfaceDrawPlan, SurfaceOverlayLayerConfig, WorkflowNodeKind, WorkflowOp,
-    WorkflowValue,
-    compose_surface_appearance, default_surface_overlay_layers, expect_surface_appearance_input,
-    expect_surface_input, mark_expensive_success, surface_display_model_matrix,
-    sync_node_state_from_run_record, workflow_surface_overlay_fingerprint,
+    WorkflowValue, compose_surface_appearance, default_surface_overlay_layers,
+    expect_surface_appearance_input, expect_surface_input, mark_expensive_success,
+    surface_display_model_matrix, sync_node_state_from_run_record,
+    workflow_surface_overlay_fingerprint,
 };
 use crate::data::cifti::SurfaceScalars;
 use crate::renderer::mesh_renderer::SurfaceColormap;

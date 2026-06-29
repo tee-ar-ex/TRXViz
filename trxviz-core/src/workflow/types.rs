@@ -711,8 +711,7 @@ pub struct WorkflowExecutionCache {
     /// content fingerprint (input flow + params) so the Arc — and
     /// thus the draw fingerprint — is stable until something
     /// genuinely changes.
-    pub triangle_fundus_datasets:
-        HashMap<WorkflowNodeUuid, (u64, Arc<StreamlineDataset>)>,
+    pub triangle_fundus_datasets: HashMap<WorkflowNodeUuid, (u64, Arc<StreamlineDataset>)>,
     /// `SampleVolumeAlongStreamline` derives a new `StreamlineDataset`
     /// each eval (clones `TrxGpuData`, trilinearly samples every vertex,
     /// writes a DPS field). A fresh `Arc::new` per frame would churn the
@@ -958,7 +957,11 @@ impl SceneFramePlan {
         self.draws
             .of_type::<FixelDrawPlan>()
             .find(|p| p.view == view && p.visible)
-            .or_else(|| self.draws.of_type::<FixelDrawPlan>().find(|p| p.view == view))
+            .or_else(|| {
+                self.draws
+                    .of_type::<FixelDrawPlan>()
+                    .find(|p| p.view == view)
+            })
     }
 
     /// Whether any fixel draw was emitted this frame (either view).

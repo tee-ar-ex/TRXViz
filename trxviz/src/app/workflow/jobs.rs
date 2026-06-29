@@ -1444,7 +1444,12 @@ impl crate::app::TrxVizApp {
             .retain(|uuid, _| active_boundary_field_ids.contains(uuid));
 
         if let Some(glyph_resources) = renderer.callback_resources.get_mut::<GlyphResources>() {
-            if let Some(draw) = self.workflow.runtime.scene_plan.active_boundary_glyph_draw() {
+            if let Some(draw) = self
+                .workflow
+                .runtime
+                .scene_plan
+                .active_boundary_glyph_draw()
+            {
                 if let Some(cache) = self
                     .workflow
                     .execution_cache
@@ -1573,11 +1578,13 @@ impl crate::app::TrxVizApp {
                     .get(&draw.node_uuid)
                     .filter(|cache| cache.fingerprint == draw.fingerprint)
                 {
-                    let slot = trxviz_core::workflow::UploadSlot::new(
-                        "voxel_mask",
-                        draw.draw_id as u64,
-                    );
-                    if self.workflow.upload_cache.is_current(slot, draw.fingerprint) {
+                    let slot =
+                        trxviz_core::workflow::UploadSlot::new("voxel_mask", draw.draw_id as u64);
+                    if self
+                        .workflow
+                        .upload_cache
+                        .is_current(slot, draw.fingerprint)
+                    {
                         continue;
                     }
                     let one = [(cache.mesh.clone(), draw.label.clone())];
@@ -1592,9 +1599,12 @@ impl crate::app::TrxVizApp {
                 .filter(|id| !active_bundle_ids.contains(id))
             {
                 mesh_resources.clear_bundle_mesh(draw_id);
-                self.workflow.upload_cache.forget(
-                    trxviz_core::workflow::UploadSlot::new("voxel_mask", draw_id as u64),
-                );
+                self.workflow
+                    .upload_cache
+                    .forget(trxviz_core::workflow::UploadSlot::new(
+                        "voxel_mask",
+                        draw_id as u64,
+                    ));
                 if let Some(runtime) = self
                     .workflow
                     .display_runtimes

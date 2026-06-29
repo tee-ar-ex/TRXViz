@@ -90,11 +90,8 @@ impl WorkflowOp for SampleVolumeAlongStreamlineOp {
         // deep-cloning `TrxGpuData` is expensive, and the new Arc would
         // otherwise change the downstream `Arc::as_ptr` hash on every
         // Interactive frame, busting tube/bundle caches downstream.
-        let fingerprint = workflow_sample_volume_along_streamline_fingerprint(
-            &flow,
-            &self.dps_name,
-            &backing,
-        );
+        let fingerprint =
+            workflow_sample_volume_along_streamline_fingerprint(&flow, &self.dps_name, &backing);
         let dataset = match ctx
             .execution_cache
             .sample_volume_along_streamline_cache
@@ -112,10 +109,7 @@ impl WorkflowOp for SampleVolumeAlongStreamlineOp {
             }
         };
 
-        let scored_flow = StreamlineFlow {
-            dataset,
-            ..flow
-        };
+        let scored_flow = StreamlineFlow { dataset, ..flow };
 
         Ok(vec![EvaluatedValue {
             value: WorkflowValue::Streamline(scored_flow),

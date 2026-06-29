@@ -1,8 +1,7 @@
 use super::super::{
     BoundaryFieldPlan, BoundaryGlyphDrawPlan, BundleDrawPlan, BundleSurfaceBuildMode,
     BundleSurfaceColorMode, BundleSurfacePlan, DrawPrimitive, EvalCtx, PortKind,
-    StreamlineDisplayRuntime,
-    WorkflowNodeKind, WorkflowOp, default_boundary_field_normalization,
+    StreamlineDisplayRuntime, WorkflowNodeKind, WorkflowOp, default_boundary_field_normalization,
     default_boundary_field_sphere_lod, default_boundary_field_voxel_size_mm,
     default_boundary_glyph_color_mode, default_boundary_glyph_density_3d_step,
     default_boundary_glyph_min_contacts, default_boundary_glyph_scale,
@@ -429,11 +428,13 @@ impl WorkflowOp for ParcelSurfaceBuildOp {
         ctx: &mut EvalCtx<'_, '_>,
     ) -> crate::error::WorkflowResult<Vec<super::super::EvaluatedValue>> {
         let parcel_selection = expect_parcel_selection_input(ctx.inputs, self.title())?;
-        ctx.scene_plan.draws.push(super::super::ParcellationDrawPlan {
-            source_id: parcel_selection.source_id,
-            labels: parcel_selection.labels,
-            opacity: 0.9,
-        });
+        ctx.scene_plan
+            .draws
+            .push(super::super::ParcellationDrawPlan {
+                source_id: parcel_selection.source_id,
+                labels: parcel_selection.labels,
+                opacity: 0.9,
+            });
         Ok(Vec::new())
     }
 }

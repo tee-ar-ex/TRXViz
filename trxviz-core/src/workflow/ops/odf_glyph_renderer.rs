@@ -1,7 +1,7 @@
 use super::super::{
-    DrawPrimitive, EvalCtx, OdfGlyphDrawPlan, PortKind, WorkflowNodeKind, WorkflowOp, default_false,
-    default_full_opacity, default_odf_glyph_detail, default_odf_glyph_scale, default_true,
-    expect_odf_field_input, optional_volume_input,
+    DrawPrimitive, EvalCtx, OdfGlyphDrawPlan, PortKind, WorkflowNodeKind, WorkflowOp,
+    default_false, default_full_opacity, default_odf_glyph_detail, default_odf_glyph_scale,
+    default_true, expect_odf_field_input, optional_volume_input,
 };
 use super::super::{GlyphColormap, OpacityGate, SizeGate, WorkflowSliceViewKind};
 use crate::workflow::methods::OpCategory;

@@ -376,7 +376,13 @@ mod tests {
         };
         document.assets.push(streamline.clone());
         document.assets.push(cifti);
-        add_default_nodes_for_asset(&mut document, &streamline, GraphPos::ZERO, Some(10_000), false);
+        add_default_nodes_for_asset(
+            &mut document,
+            &streamline,
+            GraphPos::ZERO,
+            Some(10_000),
+            false,
+        );
 
         let editability = classify_workflow_editability(&document);
         assert!(editability.bindings.streamline.contains_key(&1));
