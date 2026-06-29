@@ -64,8 +64,6 @@ nav:
   - Troubleshooting: troubleshooting.md
   - Developer Notes:
       - Overview: developer.md
-      - PTT Implementation Notes: ptt-implementation-notes.md
-      - Purifibre nibrary Settings: purifibre-nibrary-settings.md
   - API Reference: api.md
   - Op Reference: reference/ops/index.md
   - Examples: examples/index.md
