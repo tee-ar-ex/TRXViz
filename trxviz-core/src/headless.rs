@@ -239,8 +239,8 @@ fn render_loaded_scene(
         scene.boundary_field = workflow
             .runtime
             .scene_plan
-            .boundary_glyph_draws
-            .iter()
+            .draws
+            .of_type::<crate::workflow::BoundaryGlyphDrawPlan>()
             .find(|draw| draw.visible)
             .and_then(|draw| {
                 workflow

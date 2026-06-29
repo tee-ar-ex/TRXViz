@@ -235,7 +235,12 @@ impl crate::app::TrxVizApp {
             )
         };
 
-        for draw in &self.workflow.runtime.scene_plan.surface_draws {
+        for draw in self
+            .workflow
+            .runtime
+            .scene_plan
+            .surface_draws(trxviz_core::workflow::SurfaceDisplaySpace::Anatomical)
+        {
             if draw.opacity <= 0.01 {
                 continue;
             }
@@ -684,8 +689,10 @@ impl crate::app::TrxVizApp {
             .workflow
             .runtime
             .scene_plan
-            .parcellation_draws
-            .is_empty()
+            .draws
+            .of_type::<trxviz_core::workflow::ParcellationDrawPlan>()
+            .next()
+            .is_none()
         {
             return;
         }
@@ -701,7 +708,13 @@ impl crate::app::TrxVizApp {
             )
         };
 
-        for draw in &self.workflow.runtime.scene_plan.parcellation_draws {
+        for draw in self
+            .workflow
+            .runtime
+            .scene_plan
+            .draws
+            .of_type::<trxviz_core::workflow::ParcellationDrawPlan>()
+        {
             let Some(parcellation) = self
                 .scene
                 .parcellations

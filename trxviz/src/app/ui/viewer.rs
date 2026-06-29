@@ -565,7 +565,12 @@ impl super::super::TrxVizApp {
 
     fn stage_surface_draw_instances(&self) -> Vec<(usize, usize, MeshDrawStyle)> {
         let mut surface_draws = Vec::new();
-        for draw in &self.workflow.runtime.scene_plan.stage_surface_draws {
+        for draw in self
+            .workflow
+            .runtime
+            .scene_plan
+            .surface_draws(trxviz_core::workflow::SurfaceDisplaySpace::Stage)
+        {
             let Some(surface) = self
                 .scene
                 .gifti_surfaces
@@ -884,10 +889,7 @@ impl super::super::TrxVizApp {
         let vp = self.viewport.camera_3d().view_projection(aspect);
         let scene_plan = &self.workflow.runtime.scene_plan;
         let active_odx_scene = scene_plan
-            .odf_glyph_draws
-            .iter()
-            .find(|p| p.visible)
-            .or_else(|| scene_plan.odf_glyph_draws.first())
+            .active_odf_glyph_draw()
             .map(|p| p.field.scene.as_ref())
             .or_else(|| active_fixel_draw_3d(self).map(|p| p.field.scene.as_ref()))
             .or(self.scene.odx_scene.as_deref());
@@ -1073,8 +1075,8 @@ impl super::super::TrxVizApp {
                             .workflow
                             .runtime
                             .scene_plan
-                            .volume_draws
-                            .iter()
+                            .draws
+                            .of_type::<trxviz_core::workflow::VolumeDrawPlan>()
                             .find_map(|d| match &d.source {
                                 trxviz_core::workflow::VolumeBacking::InMemory {
                                     scalars, ..
@@ -1122,10 +1124,7 @@ impl super::super::TrxVizApp {
                 self.workflow
                     .runtime
                     .scene_plan
-                    .odf_glyph_draws
-                    .iter()
-                    .find(|p| p.visible)
-                    .or_else(|| self.workflow.runtime.scene_plan.odf_glyph_draws.first())
+                    .active_odf_glyph_draw()
                     .map(|p| p.field.scene.glyph_scale())
             })
             .or_else(|| self.scene.odx_scene.as_ref().map(|s| s.glyph_scale()))
@@ -1204,8 +1203,7 @@ impl super::super::TrxVizApp {
             .workflow
             .runtime
             .scene_plan
-            .surface_draws
-            .iter()
+            .surface_draws(trxviz_core::workflow::SurfaceDisplaySpace::Anatomical)
             .map(|draw| {
                 (
                     draw.source_id,
@@ -1230,8 +1228,8 @@ impl super::super::TrxVizApp {
             .workflow
             .runtime
             .scene_plan
-            .volume_draws
-            .iter()
+            .draws
+            .of_type::<trxviz_core::workflow::VolumeDrawPlan>()
             .map(|draw| VolumeDrawInfo {
                 slice_key: draw.source.slice_key(),
                 window_center: draw.window_center,
@@ -1284,17 +1282,10 @@ impl super::super::TrxVizApp {
             .workflow
             .runtime
             .scene_plan
-            .boundary_glyph_draws
-            .iter()
+            .draws
+            .of_type::<trxviz_core::workflow::BoundaryGlyphDrawPlan>()
             .find(|draw| draw.visible);
-        let odf_draw = self
-            .workflow
-            .runtime
-            .scene_plan
-            .odf_glyph_draws
-            .iter()
-            .find(|p| p.visible)
-            .or_else(|| self.workflow.runtime.scene_plan.odf_glyph_draws.first());
+        let odf_draw = self.workflow.runtime.scene_plan.active_odf_glyph_draw();
         let odx_glyphs_active = odf_draw.is_some_and(|p| p.visible);
         let fixel_3d_draw = active_fixel_draw_3d(self);
         let fixel_2d_draw = active_fixel_draw_2d(self);
@@ -1507,7 +1498,14 @@ impl super::super::TrxVizApp {
             // probmap, ODX DPV) live only on the scene plan — count them
             // too so the 3D viewport doesn't claim emptiness when the
             // user has wired one into a Volume Display.
-            && self.workflow.runtime.scene_plan.volume_draws.is_empty()
+            && self
+                .workflow
+                .runtime
+                .scene_plan
+                .draws
+                .of_type::<trxviz_core::workflow::VolumeDrawPlan>()
+                .next()
+                .is_none()
     }
 
     fn max_slice_index(&self, axis_index: usize) -> usize {
@@ -1530,8 +1528,8 @@ impl super::super::TrxVizApp {
             .workflow
             .runtime
             .scene_plan
-            .volume_draws
-            .iter()
+            .draws
+            .of_type::<trxviz_core::workflow::VolumeDrawPlan>()
             .find_map(|d| match &d.source {
                 trxviz_core::workflow::VolumeBacking::InMemory { scalars, .. } => {
                     Some(scalars.dims)

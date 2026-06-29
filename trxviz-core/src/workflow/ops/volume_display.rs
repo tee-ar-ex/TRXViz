@@ -1,6 +1,6 @@
 use super::super::{
-    EvalCtx, EvaluatedValue, PortKind, VolumeBacking, VolumeDrawPlan, WorkflowNodeKind, WorkflowOp,
-    WorkflowValue,
+    DrawPrimitive, EvalCtx, EvaluatedValue, PortKind, VolumeBacking, VolumeDrawPlan,
+    WorkflowNodeKind, WorkflowOp, WorkflowValue,
 };
 use crate::data::loaded_files::VolumeColormap;
 use crate::workflow::methods::OpCategory;
@@ -80,7 +80,7 @@ impl WorkflowOp for VolumeDisplayOp {
                 }
             }
         }
-        ctx.scene_plan.volume_draws.push(VolumeDrawPlan {
+        ctx.scene_plan.draws.push(VolumeDrawPlan {
             source: backing,
             colormap: self.colormap,
             opacity: self.opacity,
@@ -88,6 +88,20 @@ impl WorkflowOp for VolumeDisplayOp {
             window_width: self.window_width,
         });
         Ok(Vec::new())
+    }
+}
+
+impl DrawPrimitive for VolumeDrawPlan {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn DrawPrimitive> {
+        Box::new(self.clone())
     }
 }
 

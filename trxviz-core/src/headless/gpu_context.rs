@@ -136,7 +136,12 @@ pub(super) fn build_gpu_resources(
     // handle the renderer uses.
     use crate::data::nifti_data::NiftiVolume;
     use crate::workflow::VolumeBacking;
-    for draw in &workflow.runtime.scene_plan.volume_draws {
+    for draw in workflow
+        .runtime
+        .scene_plan
+        .draws
+        .of_type::<crate::workflow::VolumeDrawPlan>()
+    {
         let VolumeBacking::InMemory { handle, scalars } = &draw.source else {
             continue;
         };
@@ -172,7 +177,11 @@ pub(super) fn build_gpu_resources(
         expand(surface.data.bbox_min);
         expand(surface.data.bbox_max);
     }
-    for draw in &workflow.runtime.scene_plan.surface_draws {
+    for draw in workflow
+        .runtime
+        .scene_plan
+        .surface_draws(crate::workflow::SurfaceDisplaySpace::Anatomical)
+    {
         if !draw.vertex_rgba.is_empty() {
             meshes.update_surface_colors(queue, draw.source_id, &draw.vertex_rgba);
         }
@@ -255,14 +264,7 @@ pub(super) fn build_gpu_resources(
     }
 
     let mut glyphs = GlyphResources::new(device, TARGET_FORMAT);
-    if let Some(draw) = workflow
-        .runtime
-        .scene_plan
-        .boundary_glyph_draws
-        .iter()
-        .find(|draw| draw.visible)
-        .or_else(|| workflow.runtime.scene_plan.boundary_glyph_draws.first())
-    {
+    if let Some(draw) = workflow.runtime.scene_plan.active_boundary_glyph_draw() {
         if let Some(cache) = workflow
             .execution_cache
             .boundary_field_cache
@@ -285,13 +287,7 @@ pub(super) fn build_gpu_resources(
 
     // ODX ODF glyphs and fixels — driven by the evaluated workflow plan.
     let axial_slice = scene.slice_indices[2] as u32;
-    let odf_plan = workflow
-        .runtime
-        .scene_plan
-        .odf_glyph_draws
-        .iter()
-        .find(|plan| plan.visible)
-        .or_else(|| workflow.runtime.scene_plan.odf_glyph_draws.first());
+    let odf_plan = workflow.runtime.scene_plan.active_odf_glyph_draw();
     if let Some(plan) = odf_plan {
         let odx = &plan.field.scene;
         let conditioning = OdfAmplitudeConditioning::new(plan.subtract_iso, plan.norm_within_voxel);

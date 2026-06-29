@@ -216,11 +216,15 @@ pub fn evaluate_scene_plan_with_mode(
         runtime.node_state.insert(node.uuid, node_state);
     }
 
-    for draws in [
-        &mut runtime.scene_plan.surface_draws,
-        &mut runtime.scene_plan.stage_surface_draws,
-    ] {
-        draws.iter_mut().for_each(|draw| {
+    // Patch projection-map scalars into surface draws (both spaces) now
+    // that projection_by_surface is fully populated. of_type_mut covers
+    // every SurfaceDrawPlan regardless of space — the same set the two
+    // typed fields used to hold.
+    runtime
+        .scene_plan
+        .draws
+        .of_type_mut::<SurfaceDrawPlan>()
+        .for_each(|draw| {
             if draw.show_projection_map
                 && let Some(projection) = projection_by_surface.get(&draw.source_id)
             {
@@ -230,7 +234,13 @@ pub fn evaluate_scene_plan_with_mode(
                 draw.projection_scalars = Some(projection.values.clone());
             }
         });
-    }
+
+    // Collapse multiple independent VolumeDisplay draws into one
+    // CPU-composited slice stack (per-layer alpha, one quad per axis) so
+    // co-registered volumes overlay instead of rendering as N opaque
+    // coplanar quads that z-fight (the multi-volume flicker) and whose
+    // background paints over fixels.
+    fold_volume_draws_into_composite(&mut runtime.scene_plan, &volume_map, execution_cache);
 
     runtime
 }
@@ -269,6 +279,122 @@ fn compile_graph(
         .collect();
 
     Ok((order, connections))
+}
+
+/// Resolve a `VolumeBacking` to its `VolumeScalars`, mirroring
+/// `EvalCtx::scalars_for` but callable from the post-evaluation pass
+/// (which has `volume_map` + `execution_cache` in scope but no `EvalCtx`).
+/// Returns `None` for an already-`Composite` backing or a missing asset.
+fn resolve_volume_scalars(
+    backing: &VolumeBacking,
+    volume_map: &HashMap<FileId, &LoadedNifti>,
+    execution_cache: &mut WorkflowExecutionCache,
+) -> Option<std::sync::Arc<crate::data::cifti::VolumeScalars>> {
+    match backing {
+        VolumeBacking::InMemory { scalars, .. } => Some(scalars.clone()),
+        VolumeBacking::File(id) => {
+            if let Some(cached) = execution_cache.volume_scalars_cache.get(id) {
+                return Some(cached.clone());
+            }
+            let loaded = volume_map.get(id)?;
+            let scalars = std::sync::Arc::new(volume_scalars_from_nifti_volume(
+                &loaded.volume,
+                String::new(),
+                *id,
+            ));
+            execution_cache
+                .volume_scalars_cache
+                .insert(*id, scalars.clone());
+            Some(scalars)
+        }
+        VolumeBacking::Composite { .. } => None,
+    }
+}
+
+/// Fold 2+ independent `VolumeDisplay` draws into a single
+/// `VolumeBacking::Composite` so they render as one CPU-composited slice
+/// quad per axis (with correct per-layer alpha) instead of N opaque
+/// coplanar quads. Layer 0 = the first-evaluated draw (bottom); later
+/// draws overlay on top, matching `VolumeOverlayStackOp`'s base-first
+/// convention. Scenes with <2 volume draws, or any that already contain
+/// an explicit `Composite` (a Volume Overlay Stack output), are left
+/// untouched, so single-volume behavior is byte-identical.
+fn fold_volume_draws_into_composite(
+    scene_plan: &mut SceneFramePlan,
+    volume_map: &HashMap<FileId, &LoadedNifti>,
+    execution_cache: &mut WorkflowExecutionCache,
+) {
+    if scene_plan.draws.of_type::<VolumeDrawPlan>().count() < 2 {
+        return;
+    }
+    if scene_plan
+        .draws
+        .of_type::<VolumeDrawPlan>()
+        .any(|d| matches!(d.source, VolumeBacking::Composite { .. }))
+    {
+        return;
+    }
+
+    let mut layers: Vec<(
+        std::sync::Arc<crate::data::cifti::VolumeScalars>,
+        VolumeOverlayLayerConfig,
+    )> = Vec::new();
+    for draw in scene_plan.draws.of_type::<VolumeDrawPlan>() {
+        // If any layer's scalars can't be resolved (missing asset), bail
+        // and leave the draws untouched rather than silently dropping data.
+        let Some(scalars) = resolve_volume_scalars(&draw.source, volume_map, execution_cache) else {
+            return;
+        };
+        let interpolation = if matches!(scalars.kind, crate::data::cifti::ScalarKind::Label) {
+            Interp::Nearest
+        } else {
+            Interp::Trilinear
+        };
+        layers.push((
+            scalars,
+            VolumeOverlayLayerConfig {
+                enabled: true,
+                opacity: draw.opacity,
+                colormap: draw.colormap,
+                window_center: draw.window_center,
+                window_width: draw.window_width,
+                // VolumeDrawPlan carries no threshold; a permissive gate
+                // lets the overlay-layer alpha-by-value behavior alone hide
+                // empty voxels.
+                threshold_min: f32::NEG_INFINITY,
+                threshold_max: f32::INFINITY,
+                interpolation,
+                legend_label: String::new(),
+            },
+        ));
+    }
+
+    let dims = layers[0].0.dims;
+    let voxel_to_ras = layers[0].0.voxel_to_ras;
+    let stack = CompositeVolumeStack {
+        dims,
+        voxel_to_ras,
+        layers,
+    };
+    let handle = stack.handle();
+    let composite = VolumeDrawPlan {
+        source: VolumeBacking::Composite {
+            handle,
+            stack: std::sync::Arc::new(stack),
+        },
+        // Per-layer colormap/window/opacity live in the stack; the
+        // draw-level fields are unused for a Composite source.
+        colormap: crate::data::loaded_files::VolumeColormap::Grayscale,
+        opacity: 1.0,
+        window_center: 0.5,
+        window_width: 1.0,
+    };
+    // Drop the per-volume draws (keeping every other draw in push order)
+    // and append the merged composite.
+    scene_plan
+        .draws
+        .retain(|d| d.as_any().downcast_ref::<VolumeDrawPlan>().is_none());
+    scene_plan.draws.push(composite);
 }
 
 #[allow(clippy::too_many_arguments)]

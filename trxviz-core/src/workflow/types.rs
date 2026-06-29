@@ -825,14 +825,13 @@ pub struct SceneFramePlan {
     pub surface_query_plans: Vec<SurfaceQueryPlan>,
     pub surface_map_plans: Vec<SurfaceMapPlan>,
     pub streamline_draws: Vec<StreamlineDrawPlan>,
-    pub volume_draws: Vec<VolumeDrawPlan>,
-    pub surface_draws: Vec<SurfaceDrawPlan>,
-    pub stage_surface_draws: Vec<SurfaceDrawPlan>,
+    // volume_draws now live in `draws` (the DrawPrimitive registry);
+    // multiple VolumeDisplay draws are folded into one Composite.
+    // Surface draws (Anatomical + Stage) now live in `draws`, discriminated
+    // by SurfaceDrawPlan.space; query via SceneFramePlan::surface_draws.
     pub bundle_surface_plans: Vec<BundleSurfacePlan>,
     // BundleDrawPlan now lives in `draws` (the DrawPrimitive registry).
-    pub parcellation_draws: Vec<ParcellationDrawPlan>,
     pub boundary_field_plans: Vec<BoundaryFieldPlan>,
-    pub boundary_glyph_draws: Vec<BoundaryGlyphDrawPlan>,
     /// Node UUIDs of `StreamlineDirectionField` (or other BoundaryField-
     /// producing) nodes whose cached field is being *consumed* by a
     /// downstream op for its own computation (not just for rendering).
@@ -850,7 +849,6 @@ pub struct SceneFramePlan {
     /// a time. Display ops push during evaluation; the render backends
     /// read back via `draws.of_type::<T>()`.
     pub draws: super::draw::DrawList,
-    pub odf_glyph_draws: Vec<OdfGlyphDrawPlan>,
     pub dipy_tractography_plans: Vec<DipyTractographyPlan>,
     pub yeh_tractography_plans: Vec<YehTractographyPlan>,
     // VoxelMaskMeshDrawPlan now lives in `draws` (the DrawPrimitive
@@ -972,6 +970,37 @@ impl SceneFramePlan {
     pub fn any_fixel_visible(&self) -> bool {
         self.draws.of_type::<FixelDrawPlan>().any(|p| p.visible)
     }
+
+    /// The boundary-glyph draw that should drive the GPU upload: first
+    /// visible, else first present (single-active, like fixel/ODF glyph).
+    pub fn active_boundary_glyph_draw(&self) -> Option<&BoundaryGlyphDrawPlan> {
+        self.draws
+            .of_type::<BoundaryGlyphDrawPlan>()
+            .find(|d| d.visible)
+            .or_else(|| self.draws.of_type::<BoundaryGlyphDrawPlan>().next())
+    }
+
+    /// The ODF-glyph draw that should drive the GPU upload: first visible,
+    /// else first present (single-active).
+    pub fn active_odf_glyph_draw(&self) -> Option<&OdfGlyphDrawPlan> {
+        self.draws
+            .of_type::<OdfGlyphDrawPlan>()
+            .find(|p| p.visible)
+            .or_else(|| self.draws.of_type::<OdfGlyphDrawPlan>().next())
+    }
+
+    /// Surface draws for one display space (Anatomical vs Stage). After
+    /// the registry merge, the `space` field — not a field name — is the
+    /// sole discriminant between the two, so every consumer that used to
+    /// pick a field now filters here.
+    pub fn surface_draws(
+        &self,
+        space: SurfaceDisplaySpace,
+    ) -> impl Iterator<Item = &SurfaceDrawPlan> {
+        self.draws
+            .of_type::<SurfaceDrawPlan>()
+            .filter(move |d| d.space == space)
+    }
 }
 
 #[derive(Clone)]
@@ -1001,16 +1030,10 @@ impl Default for SceneFramePlan {
             surface_query_plans: Vec::new(),
             surface_map_plans: Vec::new(),
             streamline_draws: Vec::new(),
-            volume_draws: Vec::new(),
-            surface_draws: Vec::new(),
-            stage_surface_draws: Vec::new(),
             bundle_surface_plans: Vec::new(),
             boundary_fields_in_use: std::collections::HashSet::new(),
-            parcellation_draws: Vec::new(),
             boundary_field_plans: Vec::new(),
-            boundary_glyph_draws: Vec::new(),
             draws: super::draw::DrawList::default(),
-            odf_glyph_draws: Vec::new(),
             dipy_tractography_plans: Vec::new(),
             yeh_tractography_plans: Vec::new(),
             hausdorff_plan_jobs: Vec::new(),

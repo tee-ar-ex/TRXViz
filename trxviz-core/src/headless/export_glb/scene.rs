@@ -115,8 +115,7 @@ pub(crate) fn build_glb_scene(
             for (draw_index, draw) in workflow
                 .runtime
                 .scene_plan
-                .stage_surface_draws
-                .iter()
+                .surface_draws(crate::workflow::SurfaceDisplaySpace::Stage)
                 .enumerate()
             {
                 let Some(surface) = scene
@@ -177,7 +176,12 @@ pub(crate) fn build_glb_scene(
             }
         }
         _ => {
-            for (draw_index, draw) in workflow.runtime.scene_plan.surface_draws.iter().enumerate() {
+            for (draw_index, draw) in workflow
+                .runtime
+                .scene_plan
+                .surface_draws(crate::workflow::SurfaceDisplaySpace::Anatomical)
+                .enumerate()
+            {
                 let Some(surface) = scene
                     .gifti_surfaces
                     .iter()
@@ -344,8 +348,8 @@ pub(crate) fn build_glb_scene(
             if let Some(stack) = workflow
                 .runtime
                 .scene_plan
-                .volume_draws
-                .iter()
+                .draws
+                .of_type::<crate::workflow::VolumeDrawPlan>()
                 .find_map(|d| match &d.source {
                     crate::workflow::VolumeBacking::Composite { handle, stack }
                         if (*handle as usize) == volume.slice_key =>

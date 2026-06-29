@@ -234,6 +234,10 @@ impl DrawPrimitive for VoxelMaskMeshDrawPlan {
         self
     }
 
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn clone_box(&self) -> Box<dyn DrawPrimitive> {
         Box::new(self.clone())
     }

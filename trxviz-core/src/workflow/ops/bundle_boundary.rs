@@ -327,6 +327,10 @@ impl DrawPrimitive for BundleDrawPlan {
         self
     }
 
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn clone_box(&self) -> Box<dyn DrawPrimitive> {
         Box::new(self.clone())
     }
@@ -380,8 +384,22 @@ impl WorkflowOp for BoundaryGlyphDisplayOp {
         } else {
             "Displaying boundary field".to_string()
         };
-        ctx.scene_plan.boundary_glyph_draws.push(draw);
+        ctx.scene_plan.draws.push(draw);
         Ok(Vec::new())
+    }
+}
+
+impl DrawPrimitive for BoundaryGlyphDrawPlan {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn DrawPrimitive> {
+        Box::new(self.clone())
     }
 }
 
@@ -411,13 +429,11 @@ impl WorkflowOp for ParcelSurfaceBuildOp {
         ctx: &mut EvalCtx<'_, '_>,
     ) -> crate::error::WorkflowResult<Vec<super::super::EvaluatedValue>> {
         let parcel_selection = expect_parcel_selection_input(ctx.inputs, self.title())?;
-        ctx.scene_plan
-            .parcellation_draws
-            .push(super::super::ParcellationDrawPlan {
-                source_id: parcel_selection.source_id,
-                labels: parcel_selection.labels,
-                opacity: 0.9,
-            });
+        ctx.scene_plan.draws.push(super::super::ParcellationDrawPlan {
+            source_id: parcel_selection.source_id,
+            labels: parcel_selection.labels,
+            opacity: 0.9,
+        });
         Ok(Vec::new())
     }
 }

@@ -39,6 +39,10 @@ pub trait DrawPrimitive: 'static {
     /// Recover the concrete plan type for renderer-specific upload.
     fn as_any(&self) -> &dyn Any;
 
+    /// Mutable downcast, for in-place post-evaluation patches (e.g. the
+    /// surface projection-map merge). The body is always `self`.
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+
     /// Clone into a boxed trait object. Required because `SceneFramePlan`
     /// (which owns the `DrawList`) derives `Clone`. Every implementor is
     /// itself `Clone`, so the body is always `Box::new(self.clone())`.
@@ -73,6 +77,23 @@ impl DrawList {
         self.items
             .iter()
             .filter_map(|b| b.as_any().downcast_ref::<P>())
+    }
+
+    /// Mutable variant of [`DrawList::of_type`], for in-place edits to
+    /// draws of one concrete type during the post-evaluation pass (e.g.
+    /// merging projection scalars into surface draws).
+    pub fn of_type_mut<P: DrawPrimitive>(&mut self) -> impl Iterator<Item = &mut P> {
+        self.items
+            .iter_mut()
+            .filter_map(|b| b.as_any_mut().downcast_mut::<P>())
+    }
+
+    /// Drop every primitive for which `keep` returns false, preserving
+    /// the order of the rest. Lets a post-eval pass replace one draw
+    /// family in place — e.g. the volume composite fold removes the
+    /// per-volume draws before pushing the merged composite.
+    pub fn retain(&mut self, mut keep: impl FnMut(&dyn DrawPrimitive) -> bool) {
+        self.items.retain(|b| keep(b.as_ref()));
     }
 }
 

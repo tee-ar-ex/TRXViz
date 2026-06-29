@@ -1,6 +1,6 @@
 use super::super::{
-    EvalCtx, ParcelIdSet, ParcellationDrawPlan, PortKind, WorkflowNodeKind, WorkflowOp,
-    expect_parcellation_input, resolve_selected_labels,
+    DrawPrimitive, EvalCtx, ParcelIdSet, ParcellationDrawPlan, PortKind, WorkflowNodeKind,
+    WorkflowOp, expect_parcellation_input, resolve_selected_labels,
 };
 use crate::workflow::methods::OpCategory;
 
@@ -49,14 +49,26 @@ impl WorkflowOp for ParcellationDisplayOp {
             crate::error::WorkflowError::Evaluation(format!("Missing parcellation {source_id}"))
         })?;
         let labels = resolve_selected_labels(&self.labels, &parcellation.asset.data);
-        ctx.scene_plan
-            .parcellation_draws
-            .push(ParcellationDrawPlan {
-                source_id,
-                labels,
-                opacity: self.opacity,
-            });
+        ctx.scene_plan.draws.push(ParcellationDrawPlan {
+            source_id,
+            labels,
+            opacity: self.opacity,
+        });
         Ok(Vec::new())
+    }
+}
+
+impl DrawPrimitive for ParcellationDrawPlan {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn DrawPrimitive> {
+        Box::new(self.clone())
     }
 }
 

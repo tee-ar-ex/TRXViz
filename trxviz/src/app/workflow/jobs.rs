@@ -99,13 +99,7 @@ fn active_fixel_draw_2d(
 fn active_odx_glyph_plan(
     app: &crate::app::TrxVizApp,
 ) -> Option<&trxviz_core::workflow::OdfGlyphDrawPlan> {
-    app.workflow
-        .runtime
-        .scene_plan
-        .odf_glyph_draws
-        .iter()
-        .find(|plan| plan.visible)
-        .or_else(|| app.workflow.runtime.scene_plan.odf_glyph_draws.first())
+    app.workflow.runtime.scene_plan.active_odf_glyph_draw()
 }
 
 fn active_odx_glyph_scene(
@@ -1396,9 +1390,8 @@ impl crate::app::TrxVizApp {
                 .workflow
                 .runtime
                 .scene_plan
-                .surface_draws
-                .iter()
-                .chain(self.workflow.runtime.scene_plan.stage_surface_draws.iter())
+                .draws
+                .of_type::<trxviz_core::workflow::SurfaceDrawPlan>()
             {
                 if !draw.vertex_rgba.is_empty() {
                     mesh_resources.update_surface_colors(
@@ -1424,8 +1417,8 @@ impl crate::app::TrxVizApp {
                 self.workflow
                     .runtime
                     .scene_plan
-                    .boundary_glyph_draws
-                    .iter()
+                    .draws
+                    .of_type::<trxviz_core::workflow::BoundaryGlyphDrawPlan>()
                     .map(|draw| draw.build_node_uuid),
             )
             // `boundary_fields_in_use` is populated by non-rendering
@@ -1451,21 +1444,7 @@ impl crate::app::TrxVizApp {
             .retain(|uuid, _| active_boundary_field_ids.contains(uuid));
 
         if let Some(glyph_resources) = renderer.callback_resources.get_mut::<GlyphResources>() {
-            if let Some(draw) = self
-                .workflow
-                .runtime
-                .scene_plan
-                .boundary_glyph_draws
-                .iter()
-                .find(|draw| draw.visible)
-                .or_else(|| {
-                    self.workflow
-                        .runtime
-                        .scene_plan
-                        .boundary_glyph_draws
-                        .first()
-                })
-            {
+            if let Some(draw) = self.workflow.runtime.scene_plan.active_boundary_glyph_draw() {
                 if let Some(cache) = self
                     .workflow
                     .execution_cache
@@ -1710,7 +1689,13 @@ impl crate::app::TrxVizApp {
                 usize,
                 Arc<trxviz_core::workflow::CompositeVolumeStack>,
             > = HashMap::new();
-            for draw in &self.workflow.runtime.scene_plan.volume_draws {
+            for draw in self
+                .workflow
+                .runtime
+                .scene_plan
+                .draws
+                .of_type::<trxviz_core::workflow::VolumeDrawPlan>()
+            {
                 match &draw.source {
                     VolumeBacking::File(id) => {
                         file_keys.insert(*id);

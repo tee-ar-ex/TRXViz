@@ -22,8 +22,7 @@ pub(super) fn build_render_data(
         _ => workflow
             .runtime
             .scene_plan
-            .surface_draws
-            .iter()
+            .surface_draws(crate::workflow::SurfaceDisplaySpace::Anatomical)
             .map(|draw| {
                 (
                     draw.source_id,
@@ -50,8 +49,8 @@ pub(super) fn build_render_data(
         workflow
             .runtime
             .scene_plan
-            .volume_draws
-            .iter()
+            .draws
+            .of_type::<crate::workflow::VolumeDrawPlan>()
             .map(|draw| VolumeDrawInfo {
                 slice_key: draw.source.slice_key(),
                 window_center: draw.window_center,
@@ -112,27 +111,15 @@ pub(super) fn build_render_data(
         workflow
             .runtime
             .scene_plan
-            .boundary_glyph_draws
-            .iter()
+            .draws
+            .of_type::<crate::workflow::BoundaryGlyphDrawPlan>()
             .find(|draw| draw.visible)
     };
-    let odx_has_glyph_field = workflow
-        .runtime
-        .scene_plan
-        .odf_glyph_draws
-        .iter()
-        .find(|p| p.visible)
-        .or_else(|| workflow.runtime.scene_plan.odf_glyph_draws.first())
+    let odx_has_glyph_field = workflow.runtime.scene_plan.active_odf_glyph_draw()
         .map(|plan| plan.field.scene.has_glyph_field())
         .or_else(|| scene.odx_scene.as_ref().map(|odx| odx.has_glyph_field()))
         .unwrap_or(false);
-    let odx_glyphs_active = workflow
-        .runtime
-        .scene_plan
-        .odf_glyph_draws
-        .iter()
-        .find(|p| p.visible)
-        .or_else(|| workflow.runtime.scene_plan.odf_glyph_draws.first())
+    let odx_glyphs_active = workflow.runtime.scene_plan.active_odf_glyph_draw()
         .map(|p| p.visible)
         .unwrap_or(scene.odx_scene.is_some());
     let fixel_3d_draw = active_fixel_draw_3d(workflow);
@@ -156,7 +143,13 @@ pub(super) fn build_render_data(
             .map(|draw| draw.slice_density_step as u32)
             .unwrap_or(1),
         odx_visible: scene.odx_scene.is_some()
-            || !workflow.runtime.scene_plan.odf_glyph_draws.is_empty()
+            || workflow
+                .runtime
+                .scene_plan
+                .draws
+                .of_type::<crate::workflow::OdfGlyphDrawPlan>()
+                .next()
+                .is_some()
             || workflow.runtime.scene_plan.has_fixel_draws(),
         odx_fixel_3d_visible: fixel_3d_draw.map(|p| p.visible).unwrap_or(true)
             && !(odx_has_glyph_field && odx_glyphs_active),
@@ -205,22 +198,10 @@ pub(super) fn build_render_data(
                 ]
             })
             .unwrap_or([0.0, 0.0, 1.0, 1.0]),
-        odf_glyph_opacity: workflow
-            .runtime
-            .scene_plan
-            .odf_glyph_draws
-            .iter()
-            .find(|p| p.visible)
-            .or_else(|| workflow.runtime.scene_plan.odf_glyph_draws.first())
+        odf_glyph_opacity: workflow.runtime.scene_plan.active_odf_glyph_draw()
             .map(|p| p.opacity)
             .unwrap_or(1.0),
-        odf_glyph_gloss: workflow
-            .runtime
-            .scene_plan
-            .odf_glyph_draws
-            .iter()
-            .find(|p| p.visible)
-            .or_else(|| workflow.runtime.scene_plan.odf_glyph_draws.first())
+        odf_glyph_gloss: workflow.runtime.scene_plan.active_odf_glyph_draw()
             .map(|p| p.gloss)
             .unwrap_or(0.0),
     }
@@ -331,7 +312,11 @@ fn stage_surface_draw_instances(
     workflow: &HeadlessWorkflowState,
 ) -> Vec<(usize, usize, MeshDrawStyle)> {
     let mut draws = Vec::new();
-    for draw in &workflow.runtime.scene_plan.stage_surface_draws {
+    for draw in workflow
+        .runtime
+        .scene_plan
+        .surface_draws(crate::workflow::SurfaceDisplaySpace::Stage)
+    {
         let Some(surface) = scene
             .gifti_surfaces
             .iter()
