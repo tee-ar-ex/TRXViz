@@ -711,8 +711,7 @@ pub struct WorkflowExecutionCache {
     /// content fingerprint (input flow + params) so the Arc — and
     /// thus the draw fingerprint — is stable until something
     /// genuinely changes.
-    pub triangle_fundus_datasets:
-        HashMap<WorkflowNodeUuid, (u64, Arc<StreamlineDataset>)>,
+    pub triangle_fundus_datasets: HashMap<WorkflowNodeUuid, (u64, Arc<StreamlineDataset>)>,
     /// `SampleVolumeAlongStreamline` derives a new `StreamlineDataset`
     /// each eval (clones `TrxGpuData`, trilinearly samples every vertex,
     /// writes a DPS field). A fresh `Arc::new` per frame would churn the
@@ -825,14 +824,13 @@ pub struct SceneFramePlan {
     pub surface_query_plans: Vec<SurfaceQueryPlan>,
     pub surface_map_plans: Vec<SurfaceMapPlan>,
     pub streamline_draws: Vec<StreamlineDrawPlan>,
-    pub volume_draws: Vec<VolumeDrawPlan>,
-    pub surface_draws: Vec<SurfaceDrawPlan>,
-    pub stage_surface_draws: Vec<SurfaceDrawPlan>,
+    // volume_draws now live in `draws` (the DrawPrimitive registry);
+    // multiple VolumeDisplay draws are folded into one Composite.
+    // Surface draws (Anatomical + Stage) now live in `draws`, discriminated
+    // by SurfaceDrawPlan.space; query via SceneFramePlan::surface_draws.
     pub bundle_surface_plans: Vec<BundleSurfacePlan>,
-    pub bundle_draws: Vec<BundleDrawPlan>,
-    pub parcellation_draws: Vec<ParcellationDrawPlan>,
+    // BundleDrawPlan now lives in `draws` (the DrawPrimitive registry).
     pub boundary_field_plans: Vec<BoundaryFieldPlan>,
-    pub boundary_glyph_draws: Vec<BoundaryGlyphDrawPlan>,
     /// Node UUIDs of `StreamlineDirectionField` (or other BoundaryField-
     /// producing) nodes whose cached field is being *consumed* by a
     /// downstream op for its own computation (not just for rendering).
@@ -844,12 +842,16 @@ pub struct SceneFramePlan {
     /// without this, the retain() sweep would silently drop their
     /// upstream field and leave them forever stale.
     pub boundary_fields_in_use: std::collections::HashSet<WorkflowNodeUuid>,
-    pub fixel_3d_draws: Vec<FixelDrawPlan>,
-    pub fixel_2d_draws: Vec<FixelDrawPlan>,
-    pub odf_glyph_draws: Vec<OdfGlyphDrawPlan>,
+    /// Generic draw-primitive registry (see [`super::draw`]). Fixel
+    /// draws (3D and on-slice) live here instead of bespoke
+    /// `fixel_*_draws` fields; other draw kinds are migrating over one at
+    /// a time. Display ops push during evaluation; the render backends
+    /// read back via `draws.of_type::<T>()`.
+    pub draws: super::draw::DrawList,
     pub dipy_tractography_plans: Vec<DipyTractographyPlan>,
     pub yeh_tractography_plans: Vec<YehTractographyPlan>,
-    pub voxel_mask_mesh_draws: Vec<VoxelMaskMeshDrawPlan>,
+    // VoxelMaskMeshDrawPlan now lives in `draws` (the DrawPrimitive
+    // registry) rather than a bespoke field.
     pub hausdorff_plan_jobs: Vec<HausdorffPlanJob>,
     pub pyafq_plan_jobs: Vec<PyafqPlanJob>,
 }
@@ -911,9 +913,23 @@ pub struct CachedVoxelMaskMesh {
     pub draw_id: FileId,
 }
 
+/// Which viewport a [`FixelDrawPlan`] targets. Distinguishes the two
+/// fixel display ops now that both share the registry instead of
+/// separate `fixel_3d_draws` / `fixel_2d_draws` fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FixelView {
+    /// Full 3D fixel arrows.
+    ThreeD,
+    /// Fixels clipped to a slice slab (2D overlay).
+    TwoD,
+}
+
 #[derive(Clone)]
 pub struct FixelDrawPlan {
     pub node_uuid: WorkflowNodeUuid,
+    /// Viewport this draw targets; selects which GPU fixel resources the
+    /// backend uploads into (3D vs on-slice).
+    pub view: FixelView,
     pub field: crate::data::odx_data::FixelField,
     pub line_width: f32,
     pub length_scale: f32,
@@ -929,6 +945,65 @@ pub struct FixelDrawPlan {
     /// below the tracking-Otsu band fade to `below` alpha so the user
     /// sees which fixels feed tracking vs which are sub-threshold.
     pub opacity_gate: OpacityGate,
+}
+
+impl SceneFramePlan {
+    /// The fixel draw that should drive `view`'s GPU upload: the first
+    /// visible one of that view, else the first present. Centralizes what
+    /// were three identical copies in the GUI viewer, the GUI job-sync
+    /// loop, and the headless renderer. Kept next to the plan types it
+    /// queries so the scene-plan API stays discoverable from `types.rs`.
+    pub fn active_fixel_draw(&self, view: FixelView) -> Option<&FixelDrawPlan> {
+        self.draws
+            .of_type::<FixelDrawPlan>()
+            .find(|p| p.view == view && p.visible)
+            .or_else(|| {
+                self.draws
+                    .of_type::<FixelDrawPlan>()
+                    .find(|p| p.view == view)
+            })
+    }
+
+    /// Whether any fixel draw was emitted this frame (either view).
+    pub fn has_fixel_draws(&self) -> bool {
+        self.draws.of_type::<FixelDrawPlan>().next().is_some()
+    }
+
+    /// Whether any emitted fixel draw is visible (either view).
+    pub fn any_fixel_visible(&self) -> bool {
+        self.draws.of_type::<FixelDrawPlan>().any(|p| p.visible)
+    }
+
+    /// The boundary-glyph draw that should drive the GPU upload: first
+    /// visible, else first present (single-active, like fixel/ODF glyph).
+    pub fn active_boundary_glyph_draw(&self) -> Option<&BoundaryGlyphDrawPlan> {
+        self.draws
+            .of_type::<BoundaryGlyphDrawPlan>()
+            .find(|d| d.visible)
+            .or_else(|| self.draws.of_type::<BoundaryGlyphDrawPlan>().next())
+    }
+
+    /// The ODF-glyph draw that should drive the GPU upload: first visible,
+    /// else first present (single-active).
+    pub fn active_odf_glyph_draw(&self) -> Option<&OdfGlyphDrawPlan> {
+        self.draws
+            .of_type::<OdfGlyphDrawPlan>()
+            .find(|p| p.visible)
+            .or_else(|| self.draws.of_type::<OdfGlyphDrawPlan>().next())
+    }
+
+    /// Surface draws for one display space (Anatomical vs Stage). After
+    /// the registry merge, the `space` field — not a field name — is the
+    /// sole discriminant between the two, so every consumer that used to
+    /// pick a field now filters here.
+    pub fn surface_draws(
+        &self,
+        space: SurfaceDisplaySpace,
+    ) -> impl Iterator<Item = &SurfaceDrawPlan> {
+        self.draws
+            .of_type::<SurfaceDrawPlan>()
+            .filter(move |d| d.space == space)
+    }
 }
 
 #[derive(Clone)]
@@ -958,21 +1033,12 @@ impl Default for SceneFramePlan {
             surface_query_plans: Vec::new(),
             surface_map_plans: Vec::new(),
             streamline_draws: Vec::new(),
-            volume_draws: Vec::new(),
-            surface_draws: Vec::new(),
-            stage_surface_draws: Vec::new(),
             bundle_surface_plans: Vec::new(),
-            bundle_draws: Vec::new(),
             boundary_fields_in_use: std::collections::HashSet::new(),
-            parcellation_draws: Vec::new(),
             boundary_field_plans: Vec::new(),
-            boundary_glyph_draws: Vec::new(),
-            fixel_3d_draws: Vec::new(),
-            fixel_2d_draws: Vec::new(),
-            odf_glyph_draws: Vec::new(),
+            draws: super::draw::DrawList::default(),
             dipy_tractography_plans: Vec::new(),
             yeh_tractography_plans: Vec::new(),
-            voxel_mask_mesh_draws: Vec::new(),
             hausdorff_plan_jobs: Vec::new(),
             pyafq_plan_jobs: Vec::new(),
         }

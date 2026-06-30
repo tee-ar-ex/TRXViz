@@ -62,7 +62,8 @@ nav:
   - Command Line: cli.md
   - Architecture: architecture.md
   - Troubleshooting: troubleshooting.md
-  - Developer Notes: developer.md
+  - Developer Notes:
+      - Overview: developer.md
   - API Reference: api.md
   - Op Reference: reference/ops/index.md
   - Examples: examples/index.md

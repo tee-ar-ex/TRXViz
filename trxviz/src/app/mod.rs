@@ -120,8 +120,8 @@ impl TrxVizApp {
                 self.workflow
                     .runtime
                     .scene_plan
-                    .volume_draws
-                    .iter()
+                    .draws
+                    .of_type::<trxviz_core::workflow::VolumeDrawPlan>()
                     .find_map(|draw| match &draw.source {
                         VolumeBacking::InMemory { scalars, .. } => Some(NiftiVolume {
                             data: scalars.values.clone(),
@@ -478,8 +478,8 @@ impl eframe::App for TrxVizApp {
                                         self.workflow
                                             .runtime
                                             .scene_plan
-                                            .volume_draws
-                                            .iter()
+                                            .draws
+                                            .of_type::<trxviz_core::workflow::VolumeDrawPlan>()
                                             .find_map(|d| {
                                                 match &d.source {
                                             trxviz_core::workflow::VolumeBacking::InMemory {
@@ -524,8 +524,8 @@ impl eframe::App for TrxVizApp {
                                     .workflow
                                     .runtime
                                     .scene_plan
-                                    .volume_draws
-                                    .iter()
+                                    .draws
+                                    .of_type::<trxviz_core::workflow::VolumeDrawPlan>()
                                     .find_map(|d| match &d.source {
                                         trxviz_core::workflow::VolumeBacking::Composite {
                                             handle,

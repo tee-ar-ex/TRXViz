@@ -84,10 +84,7 @@ fn active_fixel_draw_3d(
     app.workflow
         .runtime
         .scene_plan
-        .fixel_3d_draws
-        .iter()
-        .find(|plan| plan.visible)
-        .or_else(|| app.workflow.runtime.scene_plan.fixel_3d_draws.first())
+        .active_fixel_draw(trxviz_core::workflow::FixelView::ThreeD)
 }
 
 fn active_fixel_draw_2d(
@@ -96,36 +93,13 @@ fn active_fixel_draw_2d(
     app.workflow
         .runtime
         .scene_plan
-        .fixel_2d_draws
-        .iter()
-        .find(|plan| plan.visible)
-        .or_else(|| app.workflow.runtime.scene_plan.fixel_2d_draws.first())
-}
-
-fn fixel_upload_fingerprint(plan: &trxviz_core::workflow::FixelDrawPlan) -> u64 {
-    use trxviz_core::data::odx_data::FixelScalarValues;
-
-    let mut hasher = DefaultHasher::new();
-    plan.field.source_id.hash(&mut hasher);
-    plan.field.colormap_code.hash(&mut hasher);
-    plan.field.scalars.name.hash(&mut hasher);
-    match &plan.field.scalars.values {
-        FixelScalarValues::Rgb(_) => 0u8.hash(&mut hasher),
-        FixelScalarValues::Scalar(_) => 1u8.hash(&mut hasher),
-    }
-    hasher.finish()
+        .active_fixel_draw(trxviz_core::workflow::FixelView::TwoD)
 }
 
 fn active_odx_glyph_plan(
     app: &crate::app::TrxVizApp,
 ) -> Option<&trxviz_core::workflow::OdfGlyphDrawPlan> {
-    app.workflow
-        .runtime
-        .scene_plan
-        .odf_glyph_draws
-        .iter()
-        .find(|plan| plan.visible)
-        .or_else(|| app.workflow.runtime.scene_plan.odf_glyph_draws.first())
+    app.workflow.runtime.scene_plan.active_odf_glyph_draw()
 }
 
 fn active_odx_glyph_scene(
@@ -662,8 +636,8 @@ impl crate::app::TrxVizApp {
                                             .workflow
                                             .runtime
                                             .scene_plan
-                                            .bundle_draws
-                                            .iter()
+                                            .draws
+                                            .of_type::<trxviz_core::workflow::BundleDrawPlan>()
                                             .find(|draw| draw.node_uuid == node_uuid)
                                     {
                                         let build_fingerprint =
@@ -1143,7 +1117,15 @@ impl crate::app::TrxVizApp {
             }
         }
 
-        for draw in self.workflow.runtime.scene_plan.bundle_draws.clone() {
+        for draw in self
+            .workflow
+            .runtime
+            .scene_plan
+            .draws
+            .of_type::<trxviz_core::workflow::BundleDrawPlan>()
+            .cloned()
+            .collect::<Vec<_>>()
+        {
             let boundary_field = draw.boundary_field_node_uuid.and_then(|uuid| {
                 self.workflow
                     .execution_cache
@@ -1329,15 +1311,15 @@ impl crate::app::TrxVizApp {
             .workflow
             .runtime
             .scene_plan
-            .bundle_draws
-            .iter()
+            .draws
+            .of_type::<trxviz_core::workflow::BundleDrawPlan>()
             .map(|draw| draw.draw_id)
             .chain(
                 self.workflow
                     .runtime
                     .scene_plan
-                    .voxel_mask_mesh_draws
-                    .iter()
+                    .draws
+                    .of_type::<trxviz_core::workflow::VoxelMaskMeshDrawPlan>()
                     .map(|draw| draw.draw_id),
             )
             .collect();
@@ -1408,9 +1390,8 @@ impl crate::app::TrxVizApp {
                 .workflow
                 .runtime
                 .scene_plan
-                .surface_draws
-                .iter()
-                .chain(self.workflow.runtime.scene_plan.stage_surface_draws.iter())
+                .draws
+                .of_type::<trxviz_core::workflow::SurfaceDrawPlan>()
             {
                 if !draw.vertex_rgba.is_empty() {
                     mesh_resources.update_surface_colors(
@@ -1429,15 +1410,15 @@ impl crate::app::TrxVizApp {
             .workflow
             .runtime
             .scene_plan
-            .bundle_draws
-            .iter()
+            .draws
+            .of_type::<trxviz_core::workflow::BundleDrawPlan>()
             .filter_map(|draw| draw.boundary_field_node_uuid)
             .chain(
                 self.workflow
                     .runtime
                     .scene_plan
-                    .boundary_glyph_draws
-                    .iter()
+                    .draws
+                    .of_type::<trxviz_core::workflow::BoundaryGlyphDrawPlan>()
                     .map(|draw| draw.build_node_uuid),
             )
             // `boundary_fields_in_use` is populated by non-rendering
@@ -1467,16 +1448,7 @@ impl crate::app::TrxVizApp {
                 .workflow
                 .runtime
                 .scene_plan
-                .boundary_glyph_draws
-                .iter()
-                .find(|draw| draw.visible)
-                .or_else(|| {
-                    self.workflow
-                        .runtime
-                        .scene_plan
-                        .boundary_glyph_draws
-                        .first()
-                })
+                .active_boundary_glyph_draw()
             {
                 if let Some(cache) = self
                     .workflow
@@ -1531,7 +1503,13 @@ impl crate::app::TrxVizApp {
         }
 
         if let Some(mesh_resources) = renderer.callback_resources.get_mut::<MeshResources>() {
-            for draw in &self.workflow.runtime.scene_plan.bundle_draws {
+            for draw in self
+                .workflow
+                .runtime
+                .scene_plan
+                .draws
+                .of_type::<trxviz_core::workflow::BundleDrawPlan>()
+            {
                 let display_fingerprint = workflow_bundle_display_fingerprint(
                     draw,
                     draw.boundary_field_node_uuid.and_then(|uuid| {
@@ -1586,7 +1564,13 @@ impl crate::app::TrxVizApp {
             // Voxel-mask iso-surface meshes reuse the same bundle-mesh pipeline.
             // Skip the GPU upload when the fingerprint matches the prior frame's,
             // otherwise N static ROIs re-upload N meshes every frame.
-            for draw in &self.workflow.runtime.scene_plan.voxel_mask_mesh_draws {
+            for draw in self
+                .workflow
+                .runtime
+                .scene_plan
+                .draws
+                .of_type::<trxviz_core::workflow::VoxelMaskMeshDrawPlan>()
+            {
                 if let Some(cache) = self
                     .workflow
                     .execution_cache
@@ -1594,19 +1578,18 @@ impl crate::app::TrxVizApp {
                     .get(&draw.node_uuid)
                     .filter(|cache| cache.fingerprint == draw.fingerprint)
                 {
+                    let slot =
+                        trxviz_core::workflow::UploadSlot::new("voxel_mask", draw.draw_id as u64);
                     if self
                         .workflow
-                        .uploaded_voxel_mask_fingerprints
-                        .get(&draw.draw_id)
-                        == Some(&draw.fingerprint)
+                        .upload_cache
+                        .is_current(slot, draw.fingerprint)
                     {
                         continue;
                     }
                     let one = [(cache.mesh.clone(), draw.label.clone())];
                     mesh_resources.set_bundle_meshes(draw.draw_id, &rs.device, &one);
-                    self.workflow
-                        .uploaded_voxel_mask_fingerprints
-                        .insert(draw.draw_id, draw.fingerprint);
+                    self.workflow.upload_cache.record(slot, draw.fingerprint);
                 }
             }
 
@@ -1617,8 +1600,11 @@ impl crate::app::TrxVizApp {
             {
                 mesh_resources.clear_bundle_mesh(draw_id);
                 self.workflow
-                    .uploaded_voxel_mask_fingerprints
-                    .remove(&draw_id);
+                    .upload_cache
+                    .forget(trxviz_core::workflow::UploadSlot::new(
+                        "voxel_mask",
+                        draw_id as u64,
+                    ));
                 if let Some(runtime) = self
                     .workflow
                     .display_runtimes
@@ -1637,7 +1623,7 @@ impl crate::app::TrxVizApp {
 
             if let Some(fr) = renderer.callback_resources.get_mut::<OdxFixelResources>() {
                 if let Some(plan) = active_fixel_draw_3d(self) {
-                    let fp = fixel_upload_fingerprint(plan);
+                    let fp = plan.upload_fingerprint();
                     if fp != self.workflow.uploaded_fixel_3d_fingerprint {
                         let scalars_vec: Option<Vec<f32>> = match &plan.field.scalars.values {
                             FixelScalarValues::Scalar(v) if plan.field.colormap_code != 0 => {
@@ -1667,7 +1653,7 @@ impl crate::app::TrxVizApp {
                 }
 
                 if let Some(plan) = active_fixel_draw_2d(self) {
-                    let fp = fixel_upload_fingerprint(plan);
+                    let fp = plan.upload_fingerprint();
                     if fp != self.workflow.uploaded_fixel_2d_fingerprint {
                         let scalars_vec: Option<Vec<f32>> = match &plan.field.scalars.values {
                             FixelScalarValues::Scalar(v) if plan.field.colormap_code != 0 => {
@@ -1713,7 +1699,13 @@ impl crate::app::TrxVizApp {
                 usize,
                 Arc<trxviz_core::workflow::CompositeVolumeStack>,
             > = HashMap::new();
-            for draw in &self.workflow.runtime.scene_plan.volume_draws {
+            for draw in self
+                .workflow
+                .runtime
+                .scene_plan
+                .draws
+                .of_type::<trxviz_core::workflow::VolumeDrawPlan>()
+            {
                 match &draw.source {
                     VolumeBacking::File(id) => {
                         file_keys.insert(*id);

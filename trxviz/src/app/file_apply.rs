@@ -191,7 +191,14 @@ impl super::TrxVizApp {
         // as "scene already has content" so dropping a NIfTI on top is
         // treated as additive — don't re-anchor the camera or jump the
         // slice plane away from what the user is currently looking at.
-        let workflow_has_volumes = !self.workflow.runtime.scene_plan.volume_draws.is_empty();
+        let workflow_has_volumes = self
+            .workflow
+            .runtime
+            .scene_plan
+            .draws
+            .of_type::<trxviz_core::workflow::VolumeDrawPlan>()
+            .next()
+            .is_some();
         let has_odx = self.scene.odx_scene.is_some();
         let first_nifti = self.scene.nifti_files.is_empty() && !workflow_has_volumes && !has_odx;
         let slice_indices = [vol.dims[2] / 2, vol.dims[1] / 2, vol.dims[0] / 2];
@@ -224,7 +231,13 @@ impl super::TrxVizApp {
                 }
             }
             if !overlaps {
-                for draw in &self.workflow.runtime.scene_plan.volume_draws {
+                for draw in self
+                    .workflow
+                    .runtime
+                    .scene_plan
+                    .draws
+                    .of_type::<trxviz_core::workflow::VolumeDrawPlan>()
+                {
                     if let trxviz_core::workflow::VolumeBacking::InMemory { scalars, .. } =
                         &draw.source
                         && aabb_overlap(new_box, ras_aabb(scalars.dims, scalars.voxel_to_ras))
@@ -245,7 +258,14 @@ impl super::TrxVizApp {
                 ));
             }
         }
-        if is_first {
+        if first_nifti {
+            // The first real volume defines the slice reference frame AND
+            // the scene bounds — slice cameras, fog, and half-extents all
+            // derive from volume_center/volume_extent. Adopt them even if a
+            // surface or streamlines were loaded first; otherwise the slice
+            // planes snap to the volume (reset_slice_view below) while the
+            // bounds stay on the surface bbox, leaving the slice cameras and
+            // fog mis-scaled (the surface-then-volume bug).
             let volume_center = vol.voxel_to_world(Vec3::new(
                 vol.dims[0] as f32 / 2.0,
                 vol.dims[1] as f32 / 2.0,
@@ -259,10 +279,21 @@ impl super::TrxVizApp {
             .length();
             self.viewport
                 .set_volume_bounds(volume_center, volume_extent);
-            *self.viewport.camera_3d_mut() = OrbitCamera::new(
-                self.viewport.volume_center(),
-                self.viewport.volume_extent() * 0.8,
-            );
+            // Set the slice indices to the volume midpoint BEFORE the
+            // SliceResources upload below, so the first GPU slice is the
+            // center slice rather than index 0 (indices were previously set
+            // only after the upload, causing a first-frame wrong-slice flash).
+            self.viewport.set_slice_indices(slice_indices);
+            // Only re-anchor the 3D orbit camera when the scene was
+            // genuinely empty. If a surface/streamlines were already in view,
+            // stay additive — keep the user's camera and just adopt the
+            // volume's slice frame.
+            if is_first {
+                *self.viewport.camera_3d_mut() = OrbitCamera::new(
+                    self.viewport.volume_center(),
+                    self.viewport.volume_extent() * 0.8,
+                );
+            }
         }
 
         let slice_resources = SliceResources::new(&rs.device, &rs.queue, rs.target_format, &vol);
@@ -327,7 +358,8 @@ impl super::TrxVizApp {
             );
         }
         if first_nifti {
-            self.viewport.set_slice_indices(slice_indices);
+            // Indices were already set above (before the upload); now
+            // recenter the slice cameras / world-offsets on this volume.
             self.reset_slice_view();
         } else {
             self.viewport.clear_slices_dirty();

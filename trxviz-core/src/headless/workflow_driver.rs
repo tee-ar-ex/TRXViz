@@ -164,7 +164,14 @@ pub(super) fn execute_workflow_to_completion(
             }
         }
 
-        for draw in workflow.runtime.scene_plan.bundle_draws.clone() {
+        for draw in workflow
+            .runtime
+            .scene_plan
+            .draws
+            .of_type::<crate::workflow::BundleDrawPlan>()
+            .cloned()
+            .collect::<Vec<_>>()
+        {
             let boundary_field = draw.boundary_field_node_uuid.and_then(|uuid| {
                 workflow
                     .execution_cache

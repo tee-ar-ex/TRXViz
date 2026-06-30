@@ -1,7 +1,7 @@
 use super::super::{
-    EvalCtx, OdfGlyphDrawPlan, PortKind, WorkflowNodeKind, WorkflowOp, default_false,
-    default_full_opacity, default_odf_glyph_detail, default_odf_glyph_scale, default_true,
-    expect_odf_field_input, optional_volume_input,
+    DrawPrimitive, EvalCtx, OdfGlyphDrawPlan, PortKind, WorkflowNodeKind, WorkflowOp,
+    default_false, default_full_opacity, default_odf_glyph_detail, default_odf_glyph_scale,
+    default_true, expect_odf_field_input, optional_volume_input,
 };
 use super::super::{GlyphColormap, OpacityGate, SizeGate, WorkflowSliceViewKind};
 use crate::workflow::methods::OpCategory;
@@ -77,7 +77,7 @@ impl WorkflowOp for OdfGlyphRendererOp {
             Some(b) => Some(ctx.scalars_for(b)?),
             None => None,
         };
-        ctx.scene_plan.odf_glyph_draws.push(OdfGlyphDrawPlan {
+        ctx.scene_plan.draws.push(OdfGlyphDrawPlan {
             node_uuid: ctx.node.uuid,
             field,
             scale: self.scale,
@@ -115,6 +115,20 @@ impl From<OdfGlyphRendererOp> for WorkflowNodeKind {
             detail: op.detail,
             visible: op.visible,
         }
+    }
+}
+
+impl DrawPrimitive for OdfGlyphDrawPlan {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn DrawPrimitive> {
+        Box::new(self.clone())
     }
 }
 
@@ -220,8 +234,12 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(scene_plan.odf_glyph_draws.len(), 1);
-        let draw = &scene_plan.odf_glyph_draws[0];
+        let odf_draws: Vec<_> = scene_plan
+            .draws
+            .of_type::<crate::workflow::OdfGlyphDrawPlan>()
+            .collect();
+        assert_eq!(odf_draws.len(), 1);
+        let draw = odf_draws[0];
         assert!(!draw.subtract_iso);
         assert!(draw.norm_within_voxel);
     }

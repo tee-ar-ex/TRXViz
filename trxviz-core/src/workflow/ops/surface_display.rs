@@ -1,9 +1,10 @@
 use super::super::{
-    DEFAULT_SURFACE_COLOR, DEFAULT_SURFACE_OPACITY, EvalCtx, PortKind, SurfaceDisplaySpace,
-    SurfaceDrawPlan, SurfaceOverlayLayerConfig, WorkflowNodeKind, WorkflowOp, WorkflowValue,
-    compose_surface_appearance, default_surface_overlay_layers, expect_surface_appearance_input,
-    expect_surface_input, mark_expensive_success, surface_display_model_matrix,
-    sync_node_state_from_run_record, workflow_surface_overlay_fingerprint,
+    DEFAULT_SURFACE_COLOR, DEFAULT_SURFACE_OPACITY, DrawPrimitive, EvalCtx, PortKind,
+    SurfaceDisplaySpace, SurfaceDrawPlan, SurfaceOverlayLayerConfig, WorkflowNodeKind, WorkflowOp,
+    WorkflowValue, compose_surface_appearance, default_surface_overlay_layers,
+    expect_surface_appearance_input, expect_surface_input, mark_expensive_success,
+    surface_display_model_matrix, sync_node_state_from_run_record,
+    workflow_surface_overlay_fingerprint,
 };
 use crate::data::cifti::SurfaceScalars;
 use crate::renderer::mesh_renderer::SurfaceColormap;
@@ -180,11 +181,24 @@ impl WorkflowOp for SurfaceDisplayOp {
             model_matrix: surface_display_model_matrix(surface, appearance.structure, self.space)
                 .to_cols_array_2d(),
         };
-        match self.space {
-            SurfaceDisplaySpace::Anatomical => ctx.scene_plan.surface_draws.push(draw),
-            SurfaceDisplaySpace::Stage => ctx.scene_plan.stage_surface_draws.push(draw),
-        }
+        // Anatomical vs Stage is carried on draw.space; a single push into
+        // the registry, with consumers filtering by space.
+        ctx.scene_plan.draws.push(draw);
         Ok(Vec::new())
+    }
+}
+
+impl DrawPrimitive for SurfaceDrawPlan {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn DrawPrimitive> {
+        Box::new(self.clone())
     }
 }
 

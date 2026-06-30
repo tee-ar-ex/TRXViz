@@ -10,7 +10,9 @@ use crate::workflow::types::{
     VoxelMaskSliceMode, WorkflowValue,
 };
 
-use super::super::{EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp};
+use super::super::{
+    DrawPrimitive, EvalCtx, EvaluatedValue, PortKind, WorkflowNodeKind, WorkflowOp,
+};
 
 fn default_color() -> [f32; 4] {
     [0.85, 0.55, 0.25, 1.0]
@@ -194,19 +196,17 @@ impl WorkflowOp for VoxelMaskDisplayOp {
         };
 
         if mesh_opt.is_some() {
-            ctx.scene_plan
-                .voxel_mask_mesh_draws
-                .push(VoxelMaskMeshDrawPlan {
-                    node_uuid: ctx.node.uuid,
-                    draw_id,
-                    label: ctx.node.label.clone(),
-                    fingerprint,
-                    color: self.color,
-                    opacity: self.opacity,
-                    style: self.style,
-                    slice_mode: self.slice_mode,
-                    voxel_mask: Arc::clone(&mask),
-                });
+            ctx.scene_plan.draws.push(VoxelMaskMeshDrawPlan {
+                node_uuid: ctx.node.uuid,
+                draw_id,
+                label: ctx.node.label.clone(),
+                fingerprint,
+                color: self.color,
+                opacity: self.opacity,
+                style: self.style,
+                slice_mode: self.slice_mode,
+                voxel_mask: Arc::clone(&mask),
+            });
         }
 
         Ok(Vec::new())
@@ -223,5 +223,22 @@ impl From<VoxelMaskDisplayOp> for WorkflowNodeKind {
             style: op.style,
             slice_mode: op.slice_mode,
         }
+    }
+}
+
+// The backend reads `draw.fingerprint` (the cached-mesh content hash
+// minted in `evaluate`) directly for its UploadCache skip, so the trait
+// impl is a bare storage/downcast marker.
+impl DrawPrimitive for VoxelMaskMeshDrawPlan {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn DrawPrimitive> {
+        Box::new(self.clone())
     }
 }

@@ -62,6 +62,20 @@ pub(super) fn intersect_edge_with_slice(
     slice_pos: f32,
     eps: f32,
 ) -> Option<glam::Vec3> {
+    intersect_edge_with_slice_t(p0, p1, axis_index, slice_pos, eps).map(|(p, _)| p)
+}
+
+/// Like [`intersect_edge_with_slice`] but also returns the interpolation
+/// parameter `t ∈ [0, 1]` along the edge `p0 → p1`. Callers use `t` to
+/// interpolate per-vertex attributes (e.g. surface vertex colors) onto
+/// the intersection point.
+pub(super) fn intersect_edge_with_slice_t(
+    p0: glam::Vec3,
+    p1: glam::Vec3,
+    axis_index: usize,
+    slice_pos: f32,
+    eps: f32,
+) -> Option<(glam::Vec3, f32)> {
     let c0 = tri_axis_value(p0, axis_index);
     let c1 = tri_axis_value(p1, axis_index);
     let d0 = c0 - slice_pos;
@@ -72,14 +86,14 @@ pub(super) fn intersect_edge_with_slice(
         return None;
     }
     if d0.abs() <= eps {
-        return Some(p0);
+        return Some((p0, 0.0));
     }
     if d1.abs() <= eps {
-        return Some(p1);
+        return Some((p1, 1.0));
     }
     if d0 * d1 > 0.0 {
         return None;
     }
     let t = d0 / (d0 - d1);
-    Some(p0 + (p1 - p0) * t)
+    Some((p0 + (p1 - p0) * t, t))
 }

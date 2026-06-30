@@ -4,6 +4,7 @@ pub use crate::error::{WorkflowError, WorkflowResult};
 
 pub(super) mod cpu_dipy;
 pub(super) mod cpu_yeh;
+pub mod draw;
 mod eval_inputs;
 mod eval_streamlines;
 mod eval_surface;
@@ -56,6 +57,7 @@ pub use seed_odx::*;
 pub use simple_workflow::*;
 pub use types::*;
 
+pub use draw::{DrawList, DrawPrimitive, UploadCache, UploadSlot};
 pub use op::{ContentHash, Diagnostic, DiagnosticSeverity, FingerprintCtx, ValidateCtx};
 pub use ops::fingerprint as fingerprint_op;
 pub use ops::pyafq_bundles;
@@ -71,8 +73,7 @@ pub(crate) use evaluate::{
     expect_fixel_scalars_input, expect_fixels_input, expect_odf_field_input,
     expect_odx_catalog_input, expect_parcel_selection_input, expect_parcellation_input,
     expect_surface_input, optional_group_selection_input, optional_volume_input,
-    resolve_selected_labels, summarize_value,
-    volume_scalars_from_nifti_volume,
+    resolve_selected_labels, summarize_value, volume_scalars_from_nifti_volume,
 };
 pub(crate) use op::EvalCtx;
 pub use op::WorkflowOp;
@@ -82,15 +83,14 @@ pub use ops::{
     CiftiStructureOp, ColorByDirectionOp, ColorByDpsOp, ColorByDpvOp, ColorByFixelScalarsOp,
     ColorByGroupOp, DipyTractographyOp, Fixel2DDisplayOp, Fixel3DDisplayOp, GroupSelectOp,
     LimitStreamlinesOp, MergeOp, MetaGroupSelectOp, OdfGlyphRendererOp, OdxFixelScalarSelectOp,
-    OdxSourceOp,
-    OdxVolumeSelectOp, ParcelCropOp, ParcelEndOp, ParcelRoaOp, ParcelRoiOp, ParcelSelectOp,
-    ParcelSurfaceBuildOp, ParcellationDisplayOp, ParcellationSourceOp, PrepareHausdorffPlanOp,
-    PreparePyafqPlanOp, PrepareSimplePlanOp, PurifibreOp, RandomSubsetOp, RemoveDuplicatesOp,
-    RoiFromParcelOp, RoiFromShapeOp, RoiFromVolumeOp, RoiShape, SampleVolumeAlongStreamlineOp,
-    SaveStreamlinesOp, SphereQueryOp, StreamlineDirectionFieldOp, StreamlineDisplayOp,
-    StreamlineSourceOp, SurfaceDepthQueryOp, SurfaceDisplayOp, SurfaceOverlayStackOp,
-    SurfaceProjectionDensityOp, SurfaceProjectionMeanDpsOp, SurfaceSourceOp, TipPruneOp,
-    TriangleFundusOp, UniformColorOp, VolumeDisplayOp, VolumeOverlayStackOp, VolumeSourceOp,
-    VoxelMaskDisplayOp, WorkflowNodeKind, YehTractographyOp,
+    OdxSourceOp, OdxVolumeSelectOp, ParcelCropOp, ParcelEndOp, ParcelRoaOp, ParcelRoiOp,
+    ParcelSelectOp, ParcelSurfaceBuildOp, ParcellationDisplayOp, ParcellationSourceOp,
+    PrepareHausdorffPlanOp, PreparePyafqPlanOp, PrepareSimplePlanOp, PurifibreOp, RandomSubsetOp,
+    RemoveDuplicatesOp, RoiFromParcelOp, RoiFromShapeOp, RoiFromVolumeOp, RoiShape,
+    SampleVolumeAlongStreamlineOp, SaveStreamlinesOp, SphereQueryOp, StreamlineDirectionFieldOp,
+    StreamlineDisplayOp, StreamlineSourceOp, SurfaceDepthQueryOp, SurfaceDisplayOp,
+    SurfaceOverlayStackOp, SurfaceProjectionDensityOp, SurfaceProjectionMeanDpsOp, SurfaceSourceOp,
+    TipPruneOp, TriangleFundusOp, UniformColorOp, VolumeDisplayOp, VolumeOverlayStackOp,
+    VolumeSourceOp, VoxelMaskDisplayOp, WorkflowNodeKind, YehTractographyOp,
 };
 pub(crate) use types::{EvaluatedValue, WorkflowValue};

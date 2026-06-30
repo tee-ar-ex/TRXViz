@@ -615,8 +615,8 @@ impl super::super::TrxVizApp {
             .workflow
             .runtime
             .scene_plan
-            .odf_glyph_draws
-            .iter()
+            .draws
+            .of_type::<trxviz_core::workflow::OdfGlyphDrawPlan>()
             .find(|plan| plan.node_uuid == node_uuid)?;
         if plan.field.scene.glyph_source_kind()
             != Some(trxviz_core::data::odx_data::OdxGlyphSourceKind::Sh)

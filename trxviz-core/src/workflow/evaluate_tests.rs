@@ -547,8 +547,20 @@ fn stage_surface_draw_receives_late_bound_projection_scalars() {
         WorkflowEvalMode::Interactive,
     );
 
-    assert!(runtime.scene_plan.surface_draws.is_empty());
-    assert_eq!(runtime.scene_plan.stage_surface_draws.len(), 1);
+    assert!(
+        runtime
+            .scene_plan
+            .surface_draws(SurfaceDisplaySpace::Anatomical)
+            .next()
+            .is_none()
+    );
+    assert_eq!(
+        runtime
+            .scene_plan
+            .surface_draws(SurfaceDisplaySpace::Stage)
+            .count(),
+        1
+    );
     assert!(
         runtime
             .node_state
@@ -560,7 +572,11 @@ fn stage_surface_draw_receives_late_bound_projection_scalars() {
             .values()
             .find_map(|state| state.error.as_deref())
     );
-    let draw = &runtime.scene_plan.stage_surface_draws[0];
+    let draw = runtime
+        .scene_plan
+        .surface_draws(SurfaceDisplaySpace::Stage)
+        .next()
+        .unwrap();
     assert_eq!(draw.source_id, surface_id);
     assert_eq!(draw.projection_scalars.as_deref(), Some(&[2.0, 5.0][..]));
     assert_eq!((draw.range_min, draw.range_max), (2.0, 5.0));
@@ -570,9 +586,25 @@ fn stage_surface_draw_receives_late_bound_projection_scalars() {
 fn stage_surface_draw_preserves_cifti_structure_and_vertex_colors() {
     let runtime = evaluate_surface_overlay_runtime(SurfaceDisplaySpace::Stage);
 
-    assert!(runtime.scene_plan.surface_draws.is_empty());
-    assert_eq!(runtime.scene_plan.stage_surface_draws.len(), 1);
-    let draw = &runtime.scene_plan.stage_surface_draws[0];
+    assert!(
+        runtime
+            .scene_plan
+            .surface_draws(SurfaceDisplaySpace::Anatomical)
+            .next()
+            .is_none()
+    );
+    assert_eq!(
+        runtime
+            .scene_plan
+            .surface_draws(SurfaceDisplaySpace::Stage)
+            .count(),
+        1
+    );
+    let draw = runtime
+        .scene_plan
+        .surface_draws(SurfaceDisplaySpace::Stage)
+        .next()
+        .unwrap();
     assert_eq!(draw.structure, Some(CiftiStructure::CortexLeft));
     assert!(
         draw.vertex_rgba
@@ -585,9 +617,25 @@ fn stage_surface_draw_preserves_cifti_structure_and_vertex_colors() {
 fn anatomical_surface_draw_preserves_cifti_structure_and_vertex_colors() {
     let runtime = evaluate_surface_overlay_runtime(SurfaceDisplaySpace::Anatomical);
 
-    assert!(runtime.scene_plan.stage_surface_draws.is_empty());
-    assert_eq!(runtime.scene_plan.surface_draws.len(), 1);
-    let draw = &runtime.scene_plan.surface_draws[0];
+    assert!(
+        runtime
+            .scene_plan
+            .surface_draws(SurfaceDisplaySpace::Stage)
+            .next()
+            .is_none()
+    );
+    assert_eq!(
+        runtime
+            .scene_plan
+            .surface_draws(SurfaceDisplaySpace::Anatomical)
+            .count(),
+        1
+    );
+    let draw = runtime
+        .scene_plan
+        .surface_draws(SurfaceDisplaySpace::Anatomical)
+        .next()
+        .unwrap();
     assert_eq!(draw.structure, Some(CiftiStructure::CortexLeft));
     assert!(
         draw.vertex_rgba

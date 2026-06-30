@@ -239,8 +239,8 @@ fn render_loaded_scene(
         scene.boundary_field = workflow
             .runtime
             .scene_plan
-            .boundary_glyph_draws
-            .iter()
+            .draws
+            .of_type::<crate::workflow::BoundaryGlyphDrawPlan>()
             .find(|draw| draw.visible)
             .and_then(|draw| {
                 workflow
@@ -360,6 +360,7 @@ mod tests {
     fn make_test_fixel_draw(
         scene: &Arc<OdxScene>,
         node_uuid: WorkflowNodeUuid,
+        view: crate::workflow::FixelView,
         line_width: f32,
         opacity: f32,
         slab_thickness_mm: Millimeters,
@@ -369,6 +370,7 @@ mod tests {
     ) -> crate::workflow::FixelDrawPlan {
         crate::workflow::FixelDrawPlan {
             node_uuid,
+            view,
             field: FixelField {
                 source_id: 17,
                 scene: scene.clone(),
@@ -398,34 +400,28 @@ mod tests {
         scene.slice_visible = [true, true, true];
 
         let mut workflow = HeadlessWorkflowState::default();
-        workflow
-            .runtime
-            .scene_plan
-            .fixel_3d_draws
-            .push(make_test_fixel_draw(
-                &odx_scene,
-                WorkflowNodeUuid(101),
-                0.125,
-                0.4,
-                Millimeters(8.0),
-                true,
-                3,
-                (10.0, 20.0),
-            ));
-        workflow
-            .runtime
-            .scene_plan
-            .fixel_2d_draws
-            .push(make_test_fixel_draw(
-                &odx_scene,
-                WorkflowNodeUuid(202),
-                0.5,
-                0.9,
-                Millimeters(14.0),
-                true,
-                4,
-                (30.0, 40.0),
-            ));
+        workflow.runtime.scene_plan.draws.push(make_test_fixel_draw(
+            &odx_scene,
+            WorkflowNodeUuid(101),
+            crate::workflow::FixelView::ThreeD,
+            0.125,
+            0.4,
+            Millimeters(8.0),
+            true,
+            3,
+            (10.0, 20.0),
+        ));
+        workflow.runtime.scene_plan.draws.push(make_test_fixel_draw(
+            &odx_scene,
+            WorkflowNodeUuid(202),
+            crate::workflow::FixelView::TwoD,
+            0.5,
+            0.9,
+            Millimeters(14.0),
+            true,
+            4,
+            (30.0, 40.0),
+        ));
 
         let render_data = build_render_data(&scene, &workflow, HeadlessView::View3D);
 

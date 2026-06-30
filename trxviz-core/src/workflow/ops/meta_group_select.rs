@@ -1,6 +1,4 @@
-use super::super::{
-    EvalCtx, GroupFilter, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue,
-};
+use super::super::{EvalCtx, GroupFilter, PortKind, WorkflowNodeKind, WorkflowOp, WorkflowValue};
 use crate::workflow::methods::OpCategory;
 
 /// Broadcasts a single `GroupFilter` over the `GroupSelection` port so

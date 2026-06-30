@@ -2,9 +2,9 @@ use crate::units::Millimeters;
 use crate::workflow::methods::OpCategory;
 
 use super::super::{
-    EvalCtx, FixelDrawPlan, OpacityGate, PortKind, WorkflowNodeKind, WorkflowOp,
-    default_fixel_length_scale, default_fixel_line_width, default_fixel_slab_thickness_mm,
-    default_full_opacity, expect_fixels_input,
+    DrawPrimitive, EvalCtx, FixelDrawPlan, FixelView, OpacityGate, PortKind, WorkflowNodeKind,
+    WorkflowOp, default_fixel_length_scale, default_fixel_line_width,
+    default_fixel_slab_thickness_mm, default_full_opacity, expect_fixels_input,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -115,8 +115,9 @@ impl WorkflowOp for Fixel3DDisplayOp {
         let scalar_range = field.scalar_range;
         let opacity_gate =
             resolve_opacity_gate(self.auto_gate_from_otsu, self.opacity_gate, &field.scene);
-        ctx.scene_plan.fixel_3d_draws.push(FixelDrawPlan {
+        ctx.scene_plan.draws.push(FixelDrawPlan {
             node_uuid: ctx.node.uuid,
+            view: FixelView::ThreeD,
             field,
             line_width: self.line_width,
             length_scale: self.length_scale,
@@ -162,8 +163,9 @@ impl WorkflowOp for Fixel2DDisplayOp {
         let scalar_range = field.scalar_range;
         let opacity_gate =
             resolve_opacity_gate(self.auto_gate_from_otsu, self.opacity_gate, &field.scene);
-        ctx.scene_plan.fixel_2d_draws.push(FixelDrawPlan {
+        ctx.scene_plan.draws.push(FixelDrawPlan {
             node_uuid: ctx.node.uuid,
+            view: FixelView::TwoD,
             field,
             line_width: self.line_width,
             length_scale: self.length_scale,
@@ -204,5 +206,45 @@ impl From<Fixel2DDisplayOp> for WorkflowNodeKind {
             auto_gate_from_otsu: op.auto_gate_from_otsu,
             opacity_gate: op.opacity_gate,
         }
+    }
+}
+
+impl FixelDrawPlan {
+    /// Content hash of what this fixel draw uploads as GPU instances: the
+    /// field identity, its colormap code, and the scalar name/variant.
+    /// Uniforms (line width, opacity, gate) are excluded — they don't
+    /// rebuild the instance buffer; `view` is excluded too, since 3D and
+    /// 2D draws are diffed against separate upload slots, so an identical
+    /// field maps to identical buffers per view. Lives here as an inherent
+    /// method (not on `DrawPrimitive`) because fingerprinting is per-op
+    /// backend policy, not a universal trait contract — see `draw.rs`.
+    pub fn upload_fingerprint(&self) -> u64 {
+        use crate::data::odx_data::FixelScalarValues;
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        self.field.source_id.hash(&mut hasher);
+        self.field.colormap_code.hash(&mut hasher);
+        self.field.scalars.name.hash(&mut hasher);
+        match &self.field.scalars.values {
+            FixelScalarValues::Rgb(_) => 0u8.hash(&mut hasher),
+            FixelScalarValues::Scalar(_) => 1u8.hash(&mut hasher),
+        }
+        hasher.finish()
+    }
+}
+
+impl DrawPrimitive for FixelDrawPlan {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn DrawPrimitive> {
+        Box::new(self.clone())
     }
 }

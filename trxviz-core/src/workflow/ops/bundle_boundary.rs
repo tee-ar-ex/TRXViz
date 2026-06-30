@@ -1,7 +1,7 @@
 use super::super::{
     BoundaryFieldPlan, BoundaryGlyphDrawPlan, BundleDrawPlan, BundleSurfaceBuildMode,
-    BundleSurfaceColorMode, BundleSurfacePlan, EvalCtx, PortKind, StreamlineDisplayRuntime,
-    WorkflowNodeKind, WorkflowOp, default_boundary_field_normalization,
+    BundleSurfaceColorMode, BundleSurfacePlan, DrawPrimitive, EvalCtx, PortKind,
+    StreamlineDisplayRuntime, WorkflowNodeKind, WorkflowOp, default_boundary_field_normalization,
     default_boundary_field_sphere_lod, default_boundary_field_voxel_size_mm,
     default_boundary_glyph_color_mode, default_boundary_glyph_density_3d_step,
     default_boundary_glyph_min_contacts, default_boundary_glyph_scale,
@@ -310,8 +310,28 @@ impl WorkflowOp for BundleSurfaceDisplayOp {
                 resolved_color_mode.label()
             )
         };
-        ctx.scene_plan.bundle_draws.push(draw);
+        ctx.scene_plan.draws.push(draw);
         Ok(Vec::new())
+    }
+}
+
+// Bundle surfaces fingerprint and skip via the backend's
+// `workflow_bundle_display_fingerprint` + `display_runtimes`/`node_runs`
+// machinery (it folds in a separate boundary-field cache), so — unlike a
+// `u64`-fingerprinted plan — the trait impl is a bare storage/downcast
+// marker. This is the case that proved fingerprinting can't be a trait
+// method.
+impl DrawPrimitive for BundleDrawPlan {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn DrawPrimitive> {
+        Box::new(self.clone())
     }
 }
 
@@ -363,8 +383,22 @@ impl WorkflowOp for BoundaryGlyphDisplayOp {
         } else {
             "Displaying boundary field".to_string()
         };
-        ctx.scene_plan.boundary_glyph_draws.push(draw);
+        ctx.scene_plan.draws.push(draw);
         Ok(Vec::new())
+    }
+}
+
+impl DrawPrimitive for BoundaryGlyphDrawPlan {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn DrawPrimitive> {
+        Box::new(self.clone())
     }
 }
 
@@ -395,7 +429,7 @@ impl WorkflowOp for ParcelSurfaceBuildOp {
     ) -> crate::error::WorkflowResult<Vec<super::super::EvaluatedValue>> {
         let parcel_selection = expect_parcel_selection_input(ctx.inputs, self.title())?;
         ctx.scene_plan
-            .parcellation_draws
+            .draws
             .push(super::super::ParcellationDrawPlan {
                 source_id: parcel_selection.source_id,
                 labels: parcel_selection.labels,

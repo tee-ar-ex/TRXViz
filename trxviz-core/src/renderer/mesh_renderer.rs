@@ -202,7 +202,7 @@ impl MeshResources {
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
-                    cull_mode: Some(wgpu::Face::Back),
+                    cull_mode: None, // two-sided (handled in shader)
                     ..Default::default()
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
