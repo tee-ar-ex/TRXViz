@@ -4,6 +4,7 @@ pub mod merge_streamlines_dialog;
 pub mod methods_dialog;
 pub mod overlays;
 pub mod reference_affine_dialog;
+pub mod response_panel;
 pub mod simple_shell;
 pub mod viewer;
 pub mod workspace;

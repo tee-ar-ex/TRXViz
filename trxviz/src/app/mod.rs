@@ -33,6 +33,8 @@ pub struct TrxVizApp {
     pub(crate) reference_affine_dialog: ReferenceAffineDialogState,
     pub(crate) merge_streamlines_dialog: MergeStreamlinesDialogState,
     pub(crate) methods_dialog: MethodsDialogState,
+    /// UI state for the continuous-b response panel (scrubbed b-value).
+    pub(crate) response_panel: ui::response_panel::ResponsePanelState,
     /// Slice-local ODX glyph amplitude normalization used by the shader LUT path.
     pub(crate) odx_amp_norm: f32,
     pub(crate) max_storage_buffer_binding_size: Option<usize>,
@@ -400,6 +402,7 @@ impl TrxVizApp {
             reference_affine_dialog: ReferenceAffineDialogState::default(),
             merge_streamlines_dialog: MergeStreamlinesDialogState::default(),
             methods_dialog: MethodsDialogState::default(),
+            response_panel: ui::response_panel::ResponsePanelState::default(),
             odx_amp_norm: 1.0,
             max_storage_buffer_binding_size: None,
             gpu_device: None,
@@ -775,6 +778,11 @@ impl eframe::App for TrxVizApp {
         }
         self.sync_workflow_resources(frame);
         self.show_viewports(ctx);
+        ui::response_panel::show_response_panel(
+            ctx,
+            &mut self.response_panel,
+            self.scene.odx_scene.as_deref(),
+        );
         let open_files_after_ui = match self.ui_mode {
             UiMode::Simple => self.show_simple_shell(ctx),
             UiMode::Advanced => {

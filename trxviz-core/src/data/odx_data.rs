@@ -35,6 +35,124 @@ pub struct OdxScene {
     /// compute latency.
     fixel_otsu_cache: Arc<std::sync::RwLock<HashMap<(String, OtsuScope), FixelOtsu>>>,
     default_fixel_otsu: Option<FixelOtsu>,
+    /// Dense-b tissue response functions recorded by cs-cbmt (continuous-b
+    /// MSMT), if present in the ODX header. Global (one kernel per scan).
+    contb_response: Option<ContbResponse>,
+}
+
+/// The dense-b (continuous-in-b) tissue response functions carried in an ODX
+/// header (`contb_responses`), as written by cs-cbmt. Global to the scan: one
+/// WM (anisotropic zonal SH `R_l(b)`), one GM and one CSF (isotropic `R_0(b)`),
+/// each sampled on a uniform b-grid `b_k = k · step`.
+#[derive(Clone, Debug)]
+pub struct ContbResponse {
+    /// Dense-b grid step in s/mm²; row `k` is the response at `b = k · step`.
+    pub step: f64,
+    /// Max even SH order of the WM response (coeffs are `[r0, r2, …, r_lmax]`).
+    pub wm_lmax: usize,
+    /// WM response: one row per grid point, even zonal SH coefficients
+    /// (`Y_{l,0} = √((2l+1)/4π)·P_l`; row 0 = b=0 isotropic).
+    pub wm: Vec<Vec<f32>>,
+    /// GM isotropic response (`r0` per grid point).
+    pub gm: Vec<f32>,
+    /// CSF isotropic response (`r0` per grid point).
+    pub csf: Vec<f32>,
+}
+
+impl ContbResponse {
+    /// Parse from an ODX header's `contb_responses` extra value, if present.
+    fn from_header(dataset: &OdxDataset) -> Option<Self> {
+        Self::from_json_value(dataset.header().extra.get("contb_responses")?)
+    }
+
+    /// Parse from the `contb_responses` JSON value (split out for testing).
+    fn from_json_value(val: &serde_json::Value) -> Option<Self> {
+        #[derive(serde::Deserialize)]
+        struct Tissue {
+            #[serde(default)]
+            lmax: usize,
+            coeffs: Vec<Vec<f32>>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Raw {
+            #[serde(default = "default_step")]
+            step: f64,
+            wm: Tissue,
+            gm: Tissue,
+            csf: Tissue,
+        }
+        fn default_step() -> f64 {
+            50.0 // ODX written before `step` was recorded used the default grid
+        }
+        let raw: Raw = serde_json::from_value(val.clone()).ok()?;
+        let iso = |t: Tissue| t.coeffs.into_iter().map(|r| r.first().copied().unwrap_or(0.0)).collect();
+        Some(ContbResponse {
+            step: if raw.step > 0.0 { raw.step } else { 50.0 },
+            wm_lmax: raw.wm.lmax,
+            wm: raw.wm.coeffs,
+            gm: iso(raw.gm),
+            csf: iso(raw.csf),
+        })
+    }
+
+    /// Number of even zonal orders in the WM response (`r0, r2, …` ⇒ `lmax/2+1`).
+    pub fn n_wm_orders(&self) -> usize {
+        self.wm_lmax / 2 + 1
+    }
+
+    /// Number of dense-b grid points.
+    pub fn n_grid(&self) -> usize {
+        self.wm.len()
+    }
+
+    /// Largest b on the grid (`(n_grid − 1) · step`).
+    pub fn b_max(&self) -> f64 {
+        (self.wm.len().max(1) - 1) as f64 * self.step
+    }
+
+    /// Fractional grid index for a b-value, clamped into `[0, n_grid − 1]`.
+    fn frac_index(&self, b: f64) -> (usize, usize, f32) {
+        let n = self.wm.len().max(1);
+        let x = (b / self.step).clamp(0.0, (n - 1) as f64);
+        let lo = x.floor() as usize;
+        let hi = (lo + 1).min(n - 1);
+        (lo, hi, (x - lo as f64) as f32)
+    }
+
+    /// WM zonal SH coefficients `[r0, r2, …]` at an arbitrary `b` (linear
+    /// interpolation between the two bracketing grid rows).
+    pub fn wm_at(&self, b: f64) -> Vec<f32> {
+        if self.wm.is_empty() {
+            return Vec::new();
+        }
+        let (lo, hi, t) = self.frac_index(b);
+        let a = &self.wm[lo];
+        let c = &self.wm[hi];
+        (0..a.len()).map(|j| a[j] + t * (c.get(j).copied().unwrap_or(a[j]) - a[j])).collect()
+    }
+
+    /// Isotropic value at `b` for one of the isotropic tissue tracks.
+    fn iso_at(track: &[f32], step: f64, b: f64) -> f32 {
+        if track.is_empty() {
+            return 0.0;
+        }
+        let n = track.len();
+        let x = (b / step).clamp(0.0, (n - 1) as f64);
+        let lo = x.floor() as usize;
+        let hi = (lo + 1).min(n - 1);
+        let t = (x - lo as f64) as f32;
+        track[lo] + t * (track[hi] - track[lo])
+    }
+
+    /// GM isotropic response at `b`.
+    pub fn gm_at(&self, b: f64) -> f32 {
+        Self::iso_at(&self.gm, self.step, b)
+    }
+
+    /// CSF isotropic response at `b`.
+    pub fn csf_at(&self, b: f64) -> f32 {
+        Self::iso_at(&self.csf, self.step, b)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -203,6 +321,8 @@ impl OdxScene {
             cache.insert((otsu.metric_name.clone(), otsu.scope), otsu.clone());
         }
 
+        let contb_response = ContbResponse::from_header(&dataset);
+
         Ok(Self {
             dataset,
             ijk_lookup,
@@ -215,7 +335,14 @@ impl OdxScene {
             sh_render_mesh_cache: Mutex::new(HashMap::new()),
             fixel_otsu_cache: Arc::new(std::sync::RwLock::new(cache)),
             default_fixel_otsu,
+            contb_response,
         })
+    }
+
+    /// The dense-b tissue response functions from the ODX header, if this scene
+    /// came from a cs-cbmt (continuous-b MSMT) reconstruction.
+    pub fn contb_response(&self) -> Option<&ContbResponse> {
+        self.contb_response.as_ref()
     }
 
     /// Return the Otsu threshold for the given metric + scope, computing
@@ -1473,6 +1600,46 @@ mod tests {
     use super::*;
 
     use odx_rs::{DType, OdxBuilder};
+
+    #[test]
+    fn contb_response_parses_and_interpolates() {
+        // Mirror the cs-cbmt header JSON: step + per-tissue {lmax, coeffs}.
+        let val = serde_json::json!({
+            "step": 50.0,
+            "wm": {"lmax": 4, "coeffs": [[3.5, 0.0, 0.0], [2.0, -0.4, 0.1], [1.0, -0.3, 0.05]]},
+            "gm": {"lmax": 0, "coeffs": [[3.5], [2.5], [1.5]]},
+            "csf": {"lmax": 0, "coeffs": [[3.5], [1.0], [0.2]]},
+        });
+        let r = ContbResponse::from_json_value(&val).expect("parse");
+        assert_eq!(r.step, 50.0);
+        assert_eq!(r.wm_lmax, 4);
+        assert_eq!(r.n_wm_orders(), 3);
+        assert_eq!(r.n_grid(), 3);
+        assert_eq!(r.b_max(), 100.0);
+        // Exact grid points.
+        assert_eq!(r.wm_at(0.0), vec![3.5, 0.0, 0.0]);
+        assert_eq!(r.wm_at(50.0), vec![2.0, -0.4, 0.1]);
+        // Midpoint interpolation at b=25 (halfway between rows 0 and 1).
+        let mid = r.wm_at(25.0);
+        assert!((mid[0] - 2.75).abs() < 1e-5, "{mid:?}");
+        assert!((mid[1] - -0.2).abs() < 1e-5, "{mid:?}");
+        // Isotropic tracks + clamping beyond b_max.
+        assert!((r.gm_at(100.0) - 1.5).abs() < 1e-5);
+        assert!((r.csf_at(75.0) - 0.6).abs() < 1e-5); // halfway between 1.0 and 0.2
+        assert!((r.gm_at(9999.0) - 1.5).abs() < 1e-5); // clamped to last grid point
+    }
+
+    #[test]
+    fn contb_response_defaults_step_when_absent() {
+        // ODX written before `step` was recorded ⇒ default grid step 50.
+        let val = serde_json::json!({
+            "wm": {"lmax": 0, "coeffs": [[1.0], [2.0]]},
+            "gm": {"lmax": 0, "coeffs": [[1.0], [2.0]]},
+            "csf": {"lmax": 0, "coeffs": [[1.0], [2.0]]},
+        });
+        let r = ContbResponse::from_json_value(&val).expect("parse");
+        assert_eq!(r.step, 50.0);
+    }
 
     fn build_test_dataset_with_odf(hemisphere: bool) -> OdxDataset {
         let full = dsistudio_odf8::full_vertices_ras().to_vec();
