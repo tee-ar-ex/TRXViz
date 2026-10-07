@@ -42,7 +42,11 @@ pub(super) fn load_project_state(
                 let volume = NiftiVolume::load(&path)?;
                 apply_loaded_nifti(&mut scene, path, volume, Some(id));
             }
-            WorkflowAssetDocument::Cifti { .. } => {}
+            WorkflowAssetDocument::Cifti { id, path, .. } => {
+                let data = crate::data::cifti::LoadedCifti::load(&path)
+                    .map_err(|err| anyhow!("opening CIFTI {}: {}", path.display(), err))?;
+                apply_loaded_cifti(&mut scene, path, data, Some(id));
+            }
             WorkflowAssetDocument::Surface { id, path } => {
                 let surface = GiftiSurfaceData::load(&path)?;
                 apply_loaded_surface(&mut scene, path, surface, Some(id));
@@ -388,6 +392,29 @@ fn apply_loaded_nifti(
             scene.volume_center.x,
         ];
     }
+    id
+}
+
+fn apply_loaded_cifti(
+    scene: &mut HeadlessScene,
+    path: PathBuf,
+    data: crate::data::cifti::LoadedCifti,
+    explicit_id: Option<FileId>,
+) -> FileId {
+    let id = allocate_file_id(scene, explicit_id);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "cifti.nii".to_string());
+    scene
+        .cifti_files
+        .push(crate::data::loaded_files::LoadedCifti {
+            id,
+            name,
+            path,
+            data: Arc::new(data),
+            visible: true,
+        });
     id
 }
 

@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::app::callbacks::{self, BundleDrawInfo, StreamlineDrawInfo, VolumeDrawInfo};
 use crate::app::state::{ExportTarget, SliceViewKind, View2DMode};
+use crate::app::ui::{colorbars, probe_panel};
 use glam::{Mat4, Vec3};
 use trxviz_core::data::cifti::CiftiStructure;
 use trxviz_core::data::orientation_field::BoundaryGlyphColorMode;
@@ -948,6 +949,41 @@ impl super::super::TrxVizApp {
             },
         ));
         self.draw_3d_axes(ui, rect, vp);
+
+        if self.show_colorbars {
+            let model = colorbars::build_legend_model(
+                &self.workflow.runtime.scene_plan,
+                trxviz_core::renderer::colorbar::LegendView::ThreeD,
+                &self.scene.nifti_files,
+                self.odx_colorbar_amp_norm,
+                &mut self.colorbar_auto_ranges,
+            );
+            colorbars::paint_colorbars(ui, rect, &model);
+        }
+
+        // Value probe: cast the cursor ray against every visible slice
+        // plane; the nearest in-bounds hit wins. Skipped while orbiting.
+        if let Some(response) = response
+            && !response.dragged()
+            && let Some(pointer) = response.hover_pos()
+        {
+            let planes = self.probe_planes_3d();
+            if let Some(hover) =
+                probe_panel::pick_at_pointer(rect, pointer, vp, &planes, self.probe_bounds())
+            {
+                if response.clicked() {
+                    self.probe.pinned = Some(hover.world);
+                }
+                probe_panel::paint_hover_readout(
+                    ui,
+                    rect,
+                    &hover,
+                    self.scene.odx_scene.as_deref(),
+                    &self.scene.nifti_files,
+                    &self.workflow.runtime.scene_plan,
+                );
+            }
+        }
     }
 
     fn draw_stage_scene3d_rect(
@@ -1196,6 +1232,81 @@ impl super::super::TrxVizApp {
         self.draw_bundle_mesh_intersections(ui, rect, axis_index, vp, slice_pos);
         self.draw_voxel_mask_mesh_intersections(ui, rect, axis_index, vp, slice_pos);
         self.draw_parcellation_intersections(ui, rect, axis_index, vp, slice_pos);
+
+        // Colorbars on the active/center tile only, so the ortho layout
+        // doesn't triplicate them.
+        if self.show_colorbars && show_crosshairs {
+            let model = colorbars::build_legend_model(
+                &self.workflow.runtime.scene_plan,
+                trxviz_core::renderer::colorbar::LegendView::Slice,
+                &self.scene.nifti_files,
+                self.odx_colorbar_amp_norm,
+                &mut self.colorbar_auto_ranges,
+            );
+            colorbars::paint_colorbars(ui, rect, &model);
+        }
+
+        // Value probe: the orthographic cursor ray inverts exactly onto the
+        // slice plane; hovering shows a readout, clicking pins the voxel.
+        if let Some(response) = response
+            && !response.dragged()
+            && let Some(pointer) = response.hover_pos()
+        {
+            let planes = [probe_panel::PlaneCandidate {
+                normal: slab_normal,
+                center: slab_center,
+            }];
+            if let Some(hover) =
+                probe_panel::pick_at_pointer(rect, pointer, vp, &planes, self.probe_bounds())
+            {
+                if response.clicked() {
+                    self.probe.pinned = Some(hover.world);
+                }
+                probe_panel::paint_hover_readout(
+                    ui,
+                    rect,
+                    &hover,
+                    self.scene.odx_scene.as_deref(),
+                    &self.scene.nifti_files,
+                    &self.workflow.runtime.scene_plan,
+                );
+            }
+        }
+    }
+
+    /// Anchor volume bounds for probe-hit culling: the first NIfTI, else
+    /// the ODX grid.
+    fn probe_bounds(&self) -> Option<(glam::Mat4, [usize; 3])> {
+        if let Some(nf) = self.scene.nifti_files.first() {
+            return Some((nf.volume.voxel_to_ras, nf.volume.dims));
+        }
+        self.scene.odx_scene.as_ref().map(|s| {
+            let d = s.dimensions();
+            (
+                s.voxel_to_ras(),
+                [d[0] as usize, d[1] as usize, d[2] as usize],
+            )
+        })
+    }
+
+    /// Slice-plane candidates for 3D probing: every visible slice plane,
+    /// using the same plane-source fallback chain as `draw_slice_rect`.
+    fn probe_planes_3d(&self) -> Vec<probe_panel::PlaneCandidate> {
+        let visible = self.viewport.slice_visible();
+        let indices = self.viewport.slice_indices();
+        (0..3)
+            .filter(|&axis| visible[axis])
+            .filter_map(|axis| {
+                let (normal, center) = if let Some(nf) = self.scene.nifti_files.first() {
+                    nf.volume.slice_plane(axis, indices[axis])
+                } else if let Some(odx) = self.scene.odx_scene.as_ref() {
+                    odx.slice_plane(axis, indices[axis])
+                } else {
+                    return None;
+                };
+                Some(probe_panel::PlaneCandidate { normal, center })
+            })
+            .collect()
     }
 
     fn build_viewer_render_data(&self) -> ViewerRenderData {

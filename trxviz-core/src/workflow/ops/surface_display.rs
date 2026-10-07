@@ -177,6 +177,7 @@ impl WorkflowOp for SurfaceDisplayOp {
             range_max: final_range.1,
             projection_scalars,
             vertex_rgba: appearance.vertex_rgba,
+            legend_labels: appearance.legend_labels,
             space: self.space,
             model_matrix: surface_display_model_matrix(surface, appearance.structure, self.space)
                 .to_cols_array_2d(),

@@ -290,12 +290,9 @@ fn dipy_ptt_benchmark_cst_l() {
 
     let t0 = std::time::Instant::now();
     let output = run_workflow_job(
-        WorkflowJobPayload::DipyTractography {
-            plan,
-            device: Some(device),
-            queue: Some(queue),
-        },
+        WorkflowJobPayload::DipyTractography { plan },
         trxviz_core::workflow::CancelFlag::new(),
+        Some(&trxviz_core::gpu::GpuHandle { device, queue }),
     )
     .expect("dipy PTT job ran");
     let elapsed = t0.elapsed();

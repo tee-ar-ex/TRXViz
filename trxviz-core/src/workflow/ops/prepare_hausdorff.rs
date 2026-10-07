@@ -235,16 +235,21 @@ impl WorkflowOp for PrepareHausdorffPlanOp {
                 max_reference_points: self.max_reference_points as usize,
             };
 
-            ctx.scene_plan.hausdorff_plan_jobs.push(HausdorffPlanJob {
-                node_uuid: ctx.node.uuid,
+            ctx.scene_plan.request_job(crate::workflow::JobRequest::new(
+                ctx.node.uuid,
                 fingerprint,
-                label: ctx.node.label.clone(),
-                odx_scene: loaded_odx.scene.clone(),
-                gpu_data: reference_flow.dataset.gpu_data.clone(),
-                selected,
-                params,
-                fixel_otsu: fixel_otsu.clone(),
-            });
+                upstream_stale,
+                crate::workflow::WorkflowJobPayload::PrepareHausdorffPlan(HausdorffPlanJob {
+                    node_uuid: ctx.node.uuid,
+                    fingerprint,
+                    label: ctx.node.label.clone(),
+                    odx_scene: loaded_odx.scene.clone(),
+                    gpu_data: reference_flow.dataset.gpu_data.clone(),
+                    selected,
+                    params,
+                    fixel_otsu: fixel_otsu.clone(),
+                }),
+            ));
         }
 
         let cache = ctx.execution_cache.hausdorff_plan_cache.get(&ctx.node.uuid);

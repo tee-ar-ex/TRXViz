@@ -195,14 +195,19 @@ impl WorkflowOp for PreparePyafqPlanOp {
                 override_max_len_mm: self.override_max_len_mm,
             };
 
-            ctx.scene_plan.pyafq_plan_jobs.push(PyafqPlanJob {
-                node_uuid: ctx.node.uuid,
+            ctx.scene_plan.request_job(crate::workflow::JobRequest::new(
+                ctx.node.uuid,
                 fingerprint,
-                label: ctx.node.label.clone(),
-                working_dir,
-                bundle_spec,
-                params,
-            });
+                upstream_stale,
+                crate::workflow::WorkflowJobPayload::PreparePyafqPlan(PyafqPlanJob {
+                    node_uuid: ctx.node.uuid,
+                    fingerprint,
+                    label: ctx.node.label.clone(),
+                    working_dir,
+                    bundle_spec,
+                    params,
+                }),
+            ));
         }
 
         let cache = ctx.execution_cache.pyafq_plan_cache.get(&ctx.node.uuid);

@@ -123,12 +123,41 @@ fn colormap_inferno(t: f32) -> vec3<f32> {
     return mix(a, b, f);
 }
 
+// nilearn cold_hot pair: exact piecewise matplotlib `hot` + its
+// channel-rotated "cold" twin. Mirrors renderer/colormap.rs.
+fn hot_ramp(x: f32) -> vec3<f32> {
+    let c = clamp(x, 0.0, 1.0);
+    var r = 1.0;
+    if c < 0.365079 { r = 0.0416 + c * (1.0 - 0.0416) / 0.365079; }
+    let g = clamp((c - 0.365079) / (0.746032 - 0.365079), 0.0, 1.0);
+    let b = clamp((c - 0.746032) / (1.0 - 0.746032), 0.0, 1.0);
+    return vec3<f32>(r, g, b);
+}
+
+fn colormap_cold_hot(t: f32) -> vec3<f32> {
+    let x = clamp(t, 0.0, 1.0);
+    if x < 0.5 { return hot_ramp(1.0 - 2.0 * x).zyx; }
+    return hot_ramp(2.0 * x - 1.0);
+}
+
+fn colormap_cold_white_hot(t: f32) -> vec3<f32> {
+    let x = clamp(t, 0.0, 1.0);
+    if x < 0.5 { return hot_ramp(2.0 * x).zyx; }
+    return hot_ramp(2.0 - 2.0 * x);
+}
+
 fn sample_colormap(t: f32, cmap: u32) -> vec3<f32> {
     if cmap == 1u {
         return colormap_viridis(t);
     }
     if cmap == 2u {
         return colormap_inferno(t);
+    }
+    if cmap == 3u {
+        return colormap_cold_hot(t);
+    }
+    if cmap == 4u {
+        return colormap_cold_white_hot(t);
     }
     return colormap_blue_white_red(t);
 }

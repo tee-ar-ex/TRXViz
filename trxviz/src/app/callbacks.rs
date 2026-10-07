@@ -9,16 +9,7 @@ use trxviz_core::renderer::slice_renderer::{AllSliceResources, SliceAxis, SliceR
 use trxviz_core::renderer::streamline_renderer::AllStreamlineResources;
 use trxviz_core::renderer::viewport::ViewportIndex;
 
-fn glyph_colormap_code(cm: trxviz_core::workflow::GlyphColormap) -> u32 {
-    use trxviz_core::workflow::GlyphColormap as G;
-    match cm {
-        G::Directional => 0,
-        G::Plasma => 2,
-        G::Viridis => 3,
-        G::Inferno => 4,
-        G::BlueWhiteRed => 5,
-    }
-}
+use trxviz_core::renderer::colormap::glyph_colormap_code;
 
 pub(in crate::app) struct OdxFixelResources {
     pub(in crate::app) resources_3d: FixelResources,

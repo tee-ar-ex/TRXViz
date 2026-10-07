@@ -331,34 +331,39 @@ impl WorkflowOp for YehTractographyOp {
             };
 
         if stale {
-            ctx.scene_plan
-                .yeh_tractography_plans
-                .push(YehTractographyPlan {
-                    node_uuid: ctx.node.uuid,
-                    label: ctx.node.label.clone(),
-                    fingerprint: super::super::op::ContentHash(fingerprint),
-                    odx_source_id,
-                    odx_scene: loaded_odx.scene.clone(),
-                    seed_mask,
-                    limiting_mask,
-                    roa_mask,
-                    term_mask,
-                    roi_masks,
-                    end_masks,
-                    no_end_mask,
-                    post_filter,
-                    step_size_mm: effective.step_size_mm,
-                    max_angle_deg: effective.max_angle_deg,
-                    min_len_mm: effective.min_len_mm,
-                    max_len_mm: effective.max_len_mm,
-                    fixel_threshold: effective.fixel_threshold,
-                    smooth_fraction: effective.smooth_fraction.unwrap_or(self.smooth_fraction),
-                    max_points: self.max_points,
-                    target_streamlines: self.target_streamlines,
-                    max_seed_attempts: self.max_seed_attempts,
-                    rng_seed: self.rng_seed,
-                    fixel_otsu: plan_input.as_ref().and_then(|p| p.fixel_otsu),
-                });
+            ctx.scene_plan.request_job(crate::workflow::JobRequest::new(
+                ctx.node.uuid,
+                fingerprint,
+                upstream_stale,
+                crate::workflow::WorkflowJobPayload::YehTractography {
+                    plan: YehTractographyPlan {
+                        node_uuid: ctx.node.uuid,
+                        label: ctx.node.label.clone(),
+                        fingerprint: super::super::op::ContentHash(fingerprint),
+                        odx_source_id,
+                        odx_scene: loaded_odx.scene.clone(),
+                        seed_mask,
+                        limiting_mask,
+                        roa_mask,
+                        term_mask,
+                        roi_masks,
+                        end_masks,
+                        no_end_mask,
+                        post_filter,
+                        step_size_mm: effective.step_size_mm,
+                        max_angle_deg: effective.max_angle_deg,
+                        min_len_mm: effective.min_len_mm,
+                        max_len_mm: effective.max_len_mm,
+                        fixel_threshold: effective.fixel_threshold,
+                        smooth_fraction: effective.smooth_fraction.unwrap_or(self.smooth_fraction),
+                        max_points: self.max_points,
+                        target_streamlines: self.target_streamlines,
+                        max_seed_attempts: self.max_seed_attempts,
+                        rng_seed: self.rng_seed,
+                        fixel_otsu: plan_input.as_ref().and_then(|p| p.fixel_otsu),
+                    },
+                },
+            ));
         }
 
         Ok(vec![super::super::EvaluatedValue {

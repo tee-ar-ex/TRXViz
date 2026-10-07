@@ -19,10 +19,11 @@ pub struct MenuAction {
     pub export_2d_view: bool,
     pub copy_camera_3d_json: bool,
     pub generate_methods: bool,
+    pub toggle_colorbars: bool,
     pub switch_mode: Option<UiMode>,
 }
 
-pub fn show_menu_bar(ctx: &egui::Context, ui_mode: UiMode) -> MenuAction {
+pub fn show_menu_bar(ctx: &egui::Context, ui_mode: UiMode, colorbars_on: bool) -> MenuAction {
     let mut action = MenuAction {
         open_files: false,
         new_workflow_project: false,
@@ -42,6 +43,7 @@ pub fn show_menu_bar(ctx: &egui::Context, ui_mode: UiMode) -> MenuAction {
         export_2d_view: false,
         copy_camera_3d_json: false,
         generate_methods: false,
+        toggle_colorbars: false,
         switch_mode: None,
     };
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
@@ -126,6 +128,13 @@ pub fn show_menu_bar(ctx: &egui::Context, ui_mode: UiMode) -> MenuAction {
                 }
                 if ui.button("Open 2D Window").clicked() {
                     action.open_2d_window = true;
+                    ui.close();
+                }
+                if ui
+                    .selectable_label(colorbars_on, "Show Colorbars")
+                    .clicked()
+                {
+                    action.toggle_colorbars = true;
                     ui.close();
                 }
                 ui.separator();

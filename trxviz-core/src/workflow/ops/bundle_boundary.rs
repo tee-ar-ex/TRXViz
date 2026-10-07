@@ -157,10 +157,14 @@ impl WorkflowOp for BundleSurfaceBuildOp {
             .or_default();
         prime_expensive_record(record, fingerprint);
         sync_node_state_from_run_record(ctx.node_state, record);
-        ctx.scene_plan.bundle_surface_plans.push(bundle.clone());
+        // The plan value itself is always current; whether the *mesh*
+        // built from it is current is tracked by the display node's
+        // job (which also marks this record Ready). Only propagate
+        // upstream staleness so the display job can defer until its
+        // streamline input has settled.
         Ok(vec![super::super::EvaluatedValue {
             value: super::super::WorkflowValue::BundleSurface(bundle),
-            stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
+            stale: upstream_stale,
         }])
     }
 }
@@ -209,7 +213,12 @@ impl WorkflowOp for StreamlineDirectionFieldOp {
             .or_default();
         prime_expensive_record(record, fingerprint);
         sync_node_state_from_run_record(ctx.node_state, record);
-        ctx.scene_plan.boundary_field_plans.push(plan.clone());
+        ctx.scene_plan.request_job(crate::workflow::JobRequest::new(
+            ctx.node.uuid,
+            fingerprint,
+            upstream_stale,
+            crate::workflow::WorkflowJobPayload::BoundaryField { plan: plan.clone() },
+        ));
         Ok(vec![super::super::EvaluatedValue {
             value: super::super::WorkflowValue::BoundaryField(plan),
             stale: record.last_success_fingerprint != Some(fingerprint) || upstream_stale,
@@ -284,12 +293,11 @@ impl WorkflowOp for BundleSurfaceDisplayOp {
             opacity: bundle.opacity,
             outline_thickness: self.outline_thickness,
         };
-        let boundary_revision = draw.boundary_field_node_uuid.and_then(|uuid| {
-            ctx.execution_cache
-                .boundary_field_cache
-                .get(&uuid)
-                .map(|cache| cache.fingerprint)
-        });
+        let boundary_cache = draw
+            .boundary_field_node_uuid
+            .and_then(|uuid| ctx.execution_cache.boundary_field_cache.get(&uuid))
+            .map(|cache| (cache.fingerprint, cache.field.clone()));
+        let boundary_revision = boundary_cache.as_ref().map(|(fingerprint, _)| *fingerprint);
         let display_fingerprint = workflow_bundle_display_fingerprint(&draw, boundary_revision);
         let record = ctx
             .execution_cache
@@ -298,8 +306,27 @@ impl WorkflowOp for BundleSurfaceDisplayOp {
             .or_default();
         prime_expensive_record(record, display_fingerprint);
         sync_node_state_from_run_record(ctx.node_state, record);
+        let mesh_stale = record.last_success_fingerprint != Some(display_fingerprint);
         let boundary_stale = boundary_field.as_ref().is_some_and(|(_, stale)| *stale);
-        ctx.node_state.summary = if stale || boundary_stale {
+        // A wired boundary field whose job has not produced a cache
+        // entry yet counts as stale input: the mesh job waits for it.
+        let boundary_pending = draw.boundary_field_node_uuid.is_some() && boundary_cache.is_none();
+        let bundle_plan = draw.bundle_surface_plan();
+        let build_fingerprint = workflow_bundle_plan_fingerprint(&bundle_plan);
+        ctx.scene_plan.request_job(
+            crate::workflow::JobRequest::new(
+                ctx.node.uuid,
+                display_fingerprint,
+                stale || boundary_stale || boundary_pending,
+                crate::workflow::WorkflowJobPayload::BundleSurface {
+                    plan: bundle_plan,
+                    color_mode: resolved_color_mode,
+                    boundary_field: boundary_cache.map(|(_, field)| field),
+                },
+            )
+            .with_build_node(draw.build_node_uuid, build_fingerprint),
+        );
+        ctx.node_state.summary = if mesh_stale || stale || boundary_stale {
             format!(
                 "Displaying stale bundle surface ({})",
                 resolved_color_mode.label()

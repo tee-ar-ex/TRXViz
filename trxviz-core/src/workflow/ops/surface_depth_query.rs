@@ -56,13 +56,18 @@ impl WorkflowOp for SurfaceDepthQueryOp {
             .entry(ctx.node.uuid)
             .or_default();
         prime_expensive_record(record, fingerprint);
-        ctx.scene_plan.surface_query_plans.push(SurfaceQueryPlan {
-            node_uuid: ctx.node.uuid,
-            flow,
-            surface_id,
-            surface: surface.data.clone(),
-            depth_mm: self.depth_mm,
-        });
+        ctx.scene_plan.request_job(crate::workflow::JobRequest::new(
+            ctx.node.uuid,
+            fingerprint,
+            upstream_stale,
+            crate::workflow::WorkflowJobPayload::SurfaceQuery(SurfaceQueryPlan {
+                node_uuid: ctx.node.uuid,
+                flow,
+                surface_id,
+                surface: surface.data.clone(),
+                depth_mm: self.depth_mm,
+            }),
+        ));
 
         sync_node_state_from_run_record(ctx.node_state, record);
         if let Some(CachedSurfaceQuery { flow }) =

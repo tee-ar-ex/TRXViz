@@ -32,6 +32,10 @@ pub enum VolumeColormap {
     Cool,
     RedYellow,
     BlueLightblue,
+    /// nilearn stat-map diverging: blue/cyan → black → red/yellow.
+    ColdHot,
+    /// nilearn white-centered variant for light backgrounds.
+    ColdWhiteHot,
 }
 
 impl VolumeColormap {
@@ -42,6 +46,8 @@ impl VolumeColormap {
             VolumeColormap::Cool => 2,
             VolumeColormap::RedYellow => 3,
             VolumeColormap::BlueLightblue => 4,
+            VolumeColormap::ColdHot => 5,
+            VolumeColormap::ColdWhiteHot => 6,
         }
     }
 
@@ -52,6 +58,8 @@ impl VolumeColormap {
             VolumeColormap::Cool => "Cool",
             VolumeColormap::RedYellow => "Red-Yellow",
             VolumeColormap::BlueLightblue => "Blue-Lightblue",
+            VolumeColormap::ColdHot => "Cold-Hot",
+            VolumeColormap::ColdWhiteHot => "Cold-White-Hot",
         }
     }
 
@@ -61,6 +69,8 @@ impl VolumeColormap {
         VolumeColormap::Cool,
         VolumeColormap::RedYellow,
         VolumeColormap::BlueLightblue,
+        VolumeColormap::ColdHot,
+        VolumeColormap::ColdWhiteHot,
     ];
 }
 

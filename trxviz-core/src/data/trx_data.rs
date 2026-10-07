@@ -27,6 +27,9 @@ pub enum ColorMode {
     DirectionRgb,
     /// Scalar per-vertex field mapped to colormap.
     Dpv(String),
+    /// Scalar per-vertex field mapped to colormap AND to per-vertex opacity
+    /// (|value| drives alpha; zero = fully transparent). "Glow" highlight mode.
+    DpvGlow(String),
     /// Scalar per-streamline field expanded to all vertices.
     Dps(String),
     /// Distinct color per group.
@@ -293,6 +296,14 @@ impl TrxGpuData {
                 if let Some((_, data)) = self.dpv_data.iter().find(|(n, _)| n == name) {
                     let (lo, hi) = scalar_range.unwrap_or_else(|| scalar_auto_range(data));
                     scalar_to_colors_ranged(data, lo, hi, colormap)
+                } else {
+                    vec![[0.5, 0.5, 0.5, 1.0]; self.nb_vertices]
+                }
+            }
+            ColorMode::DpvGlow(name) => {
+                if let Some((_, data)) = self.dpv_data.iter().find(|(n, _)| n == name) {
+                    let (lo, hi) = scalar_range.unwrap_or_else(|| scalar_auto_range(data));
+                    scalar_to_glow_colors(data, lo, hi, colormap)
                 } else {
                     vec![[0.5, 0.5, 0.5, 1.0]; self.nb_vertices]
                 }
@@ -827,6 +838,36 @@ pub fn scalar_to_colors_ranged(
             let t = ((v - min_v) / range).clamp(0.0, 1.0);
             let [r, g, b] = crate::renderer::colormap::surface_colormap_rgb(t, colormap);
             [r, g, b, 1.0]
+        })
+        .collect()
+}
+
+/// Map a signed per-vertex scalar to colour AND opacity ("glow" mode). The
+/// colormap is centred symmetrically about zero (so a diverging map puts 0 at
+/// its neutral midpoint); per-vertex alpha grows with |value| / max|range|,
+/// with exact zeros fully transparent. `min_v`/`max_v` bound the field.
+pub fn scalar_to_glow_colors(
+    values: &[f32],
+    min_v: f32,
+    max_v: f32,
+    colormap: crate::renderer::mesh_renderer::SurfaceColormap,
+) -> Vec<[f32; 4]> {
+    let vmax = min_v.abs().max(max_v.abs()).max(1e-10);
+    // Map to the SATURATED middle of the colormap only (t in [0.5-HALF, 0.5+HALF]),
+    // dropping the washed-out white tips that diverging maps like ColdHot / BlueWhiteRed
+    // reach at their extremes.
+    const HALF: f32 = 0.38;
+    values
+        .iter()
+        .map(|&v| {
+            let t = (0.5 + HALF * (v / vmax)).clamp(0.0, 1.0);
+            let [r, g, b] = crate::renderer::colormap::surface_colormap_rgb(t, colormap);
+            let a = if v.abs() < 1e-12 {
+                0.0
+            } else {
+                (0.12 + 0.88 * (v.abs() / vmax).clamp(0.0, 1.0).powf(0.80)).clamp(0.0, 1.0)
+            };
+            [r, g, b, a]
         })
         .collect()
 }

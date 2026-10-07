@@ -1,8 +1,10 @@
+pub mod colorbars;
 pub mod import_dialog;
 pub mod menu_bar;
 pub mod merge_streamlines_dialog;
 pub mod methods_dialog;
 pub mod overlays;
+pub mod probe_panel;
 pub mod reference_affine_dialog;
 pub mod response_panel;
 pub mod simple_shell;

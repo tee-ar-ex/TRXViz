@@ -385,34 +385,39 @@ impl WorkflowOp for DipyTractographyOp {
             } else {
                 (None, None, None, Vec::new(), Vec::new(), None, None)
             };
-            ctx.scene_plan
-                .dipy_tractography_plans
-                .push(DipyTractographyPlan {
-                    node_uuid: ctx.node.uuid,
-                    label: ctx.node.label.clone(),
-                    fingerprint: super::super::op::ContentHash(fingerprint),
-                    odx_source_id,
-                    odx_scene: loaded_odx.scene.clone(),
-                    seed_mask,
-                    step_size_mm: effective.step_size_mm,
-                    max_angle_deg: effective.max_angle_deg,
-                    min_len_mm: effective.min_len_mm,
-                    max_len_mm: effective.max_len_mm,
-                    fixel_threshold: effective.fixel_threshold,
-                    relative_peak_threshold: self.relative_peak_threshold,
-                    seeds_per_voxel: self.seeds_per_voxel,
-                    max_points: self.max_points,
-                    rng_seed: self.rng_seed,
-                    limiting_mask,
-                    roa_mask,
-                    term_mask,
-                    roi_masks,
-                    end_masks,
-                    no_end_mask,
-                    post_filter,
-                    fixel_otsu: plan_input.as_ref().and_then(|p| p.fixel_otsu),
-                    direction_getter: self.direction_getter,
-                });
+            ctx.scene_plan.request_job(crate::workflow::JobRequest::new(
+                ctx.node.uuid,
+                fingerprint,
+                upstream_stale,
+                crate::workflow::WorkflowJobPayload::DipyTractography {
+                    plan: DipyTractographyPlan {
+                        node_uuid: ctx.node.uuid,
+                        label: ctx.node.label.clone(),
+                        fingerprint: super::super::op::ContentHash(fingerprint),
+                        odx_source_id,
+                        odx_scene: loaded_odx.scene.clone(),
+                        seed_mask,
+                        step_size_mm: effective.step_size_mm,
+                        max_angle_deg: effective.max_angle_deg,
+                        min_len_mm: effective.min_len_mm,
+                        max_len_mm: effective.max_len_mm,
+                        fixel_threshold: effective.fixel_threshold,
+                        relative_peak_threshold: self.relative_peak_threshold,
+                        seeds_per_voxel: self.seeds_per_voxel,
+                        max_points: self.max_points,
+                        rng_seed: self.rng_seed,
+                        limiting_mask,
+                        roa_mask,
+                        term_mask,
+                        roi_masks,
+                        end_masks,
+                        no_end_mask,
+                        post_filter,
+                        fixel_otsu: plan_input.as_ref().and_then(|p| p.fixel_otsu),
+                        direction_getter: self.direction_getter,
+                    },
+                },
+            ));
         }
 
         Ok(vec![super::super::EvaluatedValue {

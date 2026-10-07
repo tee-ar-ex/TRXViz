@@ -648,17 +648,7 @@ pub fn composite_slice_into(
 
 /// CPU mirror of the WGSL colormap functions in `slice.wgsl`.
 fn colormap_sample(cmap: VolumeColormap, t: f32) -> [f32; 3] {
-    match cmap {
-        VolumeColormap::Grayscale => [t, t, t],
-        VolumeColormap::Hot => [
-            (t * 2.5).clamp(0.0, 1.0),
-            (t * 2.5 - 1.0).clamp(0.0, 1.0),
-            (t * 5.0 - 4.0).clamp(0.0, 1.0),
-        ],
-        VolumeColormap::Cool => [t, 1.0 - t, 1.0],
-        VolumeColormap::RedYellow => [1.0, t, 0.0],
-        VolumeColormap::BlueLightblue => [0.0, t, 1.0],
-    }
+    crate::renderer::colormap::volume_colormap_rgb(t, cmap.as_u32())
 }
 
 // Holding `VolumeOverlayLayerConfig` import even if unused after edits

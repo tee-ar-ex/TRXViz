@@ -274,6 +274,10 @@ fn hash_flow(flow: &StreamlineFlow, state: &mut impl Hasher) {
             1u8.hash(state);
             name.hash(state);
         }
+        ColorMode::DpvGlow(name) => {
+            5u8.hash(state);
+            name.hash(state);
+        }
         ColorMode::Dps(name) => {
             2u8.hash(state);
             name.hash(state);

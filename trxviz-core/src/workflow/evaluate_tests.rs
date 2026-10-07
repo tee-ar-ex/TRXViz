@@ -95,7 +95,15 @@ fn interactive_remove_duplicates_defers_work_and_uses_plan() {
         WorkflowEvalMode::Interactive,
     );
 
-    assert_eq!(runtime.scene_plan.reactive_streamline_plans.len(), 1);
+    assert_eq!(
+        runtime
+            .scene_plan
+            .jobs
+            .iter()
+            .filter(|job| job.receipt.kind == WorkflowJobKind::ReactiveStreamline)
+            .count(),
+        1
+    );
     let state = runtime
         .node_state
         .get(&dedupe)
@@ -132,7 +140,13 @@ fn interactive_unconnected_expensive_node_reports_only_input_error() {
         WorkflowEvalMode::Interactive,
     );
 
-    assert!(runtime.scene_plan.surface_query_plans.is_empty());
+    assert!(
+        !runtime
+            .scene_plan
+            .jobs
+            .iter()
+            .any(|job| job.receipt.kind == WorkflowJobKind::SurfaceQuery)
+    );
     let state = runtime.node_state.get(&query).expect("query state");
     assert_eq!(
         state.error.as_deref(),
@@ -205,7 +219,7 @@ fn first_surface_overlay_input_uses_base_layer_config() {
     assert_eq!(appearance.legend_labels, vec!["Base".to_string()]);
 }
 
-fn test_streamline_flow() -> StreamlineFlow {
+pub(crate) fn test_streamline_flow() -> StreamlineFlow {
     let mut tractogram = Tractogram::new();
     for start in [0.0, 2.0, 4.0, 6.0] {
         tractogram
@@ -228,7 +242,7 @@ fn test_streamline_flow() -> StreamlineFlow {
     }
 }
 
-fn test_surface_asset(id: usize) -> LoadedGiftiSurface {
+pub(crate) fn test_surface_asset(id: usize) -> LoadedGiftiSurface {
     LoadedGiftiSurface {
         id,
         name: format!("surface_{id}"),
@@ -748,4 +762,104 @@ fn random_subset_is_deterministic_and_reuses_dataset_boundary() {
     assert_eq!(first.selected_streamlines.len(), 2);
     assert!(Arc::ptr_eq(&first.dataset, &upstream.dataset));
     assert!(Arc::ptr_eq(&second.dataset, &upstream.dataset));
+}
+
+/// A `LoadedTrx` asset wrapping the same four-streamline tractogram as
+/// [`test_streamline_flow`].
+pub(crate) fn test_streamline_asset(id: usize) -> LoadedTrx {
+    let flow = test_streamline_flow();
+    let backing = match &flow.dataset.backing {
+        StreamlineBacking::Imported(tractogram) => StreamlineBacking::Imported(tractogram.clone()),
+        other => panic!("unexpected backing {:?}", std::mem::discriminant(other)),
+    };
+    LoadedTrx {
+        id,
+        name: format!("streamlines_{id}"),
+        path: PathBuf::from(format!("streamlines_{id}.trx")),
+        data: flow.dataset.gpu_data.clone(),
+        backing: Some(backing),
+        import_warnings: Vec::new(),
+    }
+}
+
+/// Node UUIDs of the [`job_pipeline_fixture`] document.
+pub(crate) struct JobPipelineNodes {
+    pub merge: WorkflowNodeUuid,
+    pub tubes: WorkflowNodeUuid,
+    pub query: WorkflowNodeUuid,
+    pub projection: WorkflowNodeUuid,
+    pub direction_field: WorkflowNodeUuid,
+    pub bundle_build: WorkflowNodeUuid,
+    pub bundle_display: WorkflowNodeUuid,
+}
+
+/// A document exercising every job kind that runs on in-memory data:
+///
+/// ```text
+/// StreamlineSource(0) ─┬─> Merge ──> StreamlineDisplay(tubes)
+///                      ├─> SurfaceDepthQuery <── SurfaceSource(1)
+///                      ├─> SurfaceProjectionDensity <── SurfaceSource(1)
+///                      ├─> StreamlineDirectionField
+///                      └─> BundleSurfaceBuild ──> BundleSurfaceDisplay
+/// ```
+///
+/// Returns the document, the streamline asset (id 0), the surface asset
+/// (id 1) and the node ids. Tractography and plan-prep ops need an ODX
+/// dataset and are covered by hand-built outputs elsewhere.
+pub(crate) fn job_pipeline_fixture() -> (
+    WorkflowDocument,
+    LoadedTrx,
+    LoadedGiftiSurface,
+    JobPipelineNodes,
+) {
+    let mut document = default_document();
+    let mut add =
+        |op: WorkflowNodeKind, x: f32| make_node(&mut document, op, GraphPos::new(x, 0.0));
+    let source = add(WorkflowNodeKind::StreamlineSource { source_id: 0 }, 0.0);
+    let surface = add(WorkflowNodeKind::SurfaceSource { source_id: 1 }, 0.0);
+    let merge = add(MergeOp.into(), 200.0);
+    let tubes = add(
+        StreamlineDisplayOp {
+            render_style: crate::data::trx_data::RenderStyle::Tubes,
+            ..StreamlineDisplayOp::default()
+        }
+        .into(),
+        400.0,
+    );
+    let query = add(SurfaceDepthQueryOp::default().into(), 200.0);
+    let projection = add(SurfaceProjectionDensityOp::default().into(), 200.0);
+    let direction_field = add(StreamlineDirectionFieldOp::default().into(), 200.0);
+    let bundle_build = add(BundleSurfaceBuildOp::default().into(), 200.0);
+    let bundle_display = add(BundleSurfaceDisplayOp::default().into(), 400.0);
+
+    let mut wire = |from: WorkflowNodeUuid, output: usize, to: WorkflowNodeUuid, input: usize| {
+        document
+            .graph
+            .connect(OutPort { node: from, output }, InPort { node: to, input });
+    };
+    wire(source, 0, merge, 0);
+    wire(source, 0, merge, 1);
+    wire(merge, 0, tubes, 0);
+    wire(source, 0, query, 0);
+    wire(surface, 0, query, 1);
+    wire(source, 0, projection, 0);
+    wire(surface, 0, projection, 1);
+    wire(source, 0, direction_field, 0);
+    wire(source, 0, bundle_build, 0);
+    wire(bundle_build, 0, bundle_display, 0);
+
+    (
+        document,
+        test_streamline_asset(0),
+        test_surface_asset(1),
+        JobPipelineNodes {
+            merge,
+            tubes,
+            query,
+            projection,
+            direction_field,
+            bundle_build,
+            bundle_display,
+        },
+    )
 }

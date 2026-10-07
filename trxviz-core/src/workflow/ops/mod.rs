@@ -5,6 +5,7 @@ mod cifti_structure;
 mod color_by_direction;
 mod color_by_dps;
 mod color_by_dpv;
+mod color_by_dpv_glow;
 mod color_by_fixel_scalars;
 mod color_by_group;
 mod dipy_tractography;
@@ -58,6 +59,7 @@ pub use cifti_structure::CiftiStructureOp;
 pub use color_by_direction::ColorByDirectionOp;
 pub use color_by_dps::ColorByDpsOp;
 pub use color_by_dpv::ColorByDpvOp;
+pub use color_by_dpv_glow::ColorByDpvGlowOp;
 pub use color_by_fixel_scalars::ColorByFixelScalarsOp;
 pub use color_by_group::ColorByGroupOp;
 pub use dipy_tractography::DipyTractographyOp;
@@ -199,6 +201,10 @@ pub enum WorkflowNodeKind {
     ColorByDirection,
     ColorByGroup,
     ColorByDPV {
+        field: DpvFieldName,
+        colormap: crate::renderer::mesh_renderer::SurfaceColormap,
+    },
+    ColorByDpvGlow {
         field: DpvFieldName,
         colormap: crate::renderer::mesh_renderer::SurfaceColormap,
     },
@@ -757,6 +763,13 @@ macro_rules! with_workflow_op {
             }
             WorkflowNodeKind::ColorByDPV { field, colormap } => {
                 let $op = color_by_dpv::ColorByDpvOp {
+                    field: field.clone(),
+                    colormap: *colormap,
+                };
+                $body
+            }
+            WorkflowNodeKind::ColorByDpvGlow { field, colormap } => {
+                let $op = color_by_dpv_glow::ColorByDpvGlowOp {
                     field: field.clone(),
                     colormap: *colormap,
                 };

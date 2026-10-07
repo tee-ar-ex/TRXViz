@@ -87,13 +87,37 @@ Workflow execution is op-registry based:
 This keeps “add a new node” work localized to one op module plus one registry
 entry.
 
+### Background jobs
+
+Ops that need expensive work (derived streamlines, surface queries, tube
+geometry, boundary fields, bundle meshes, plan preparation, tractography) do
+not run it inline. During evaluation they push a `JobRequest` onto
+`SceneFramePlan::jobs`, carrying the fingerprint they primed their run record
+with and whether their inputs are stale. `workflow/scheduler.rs` is the single
+place that decides what to dispatch (`plan_jobs`) and how a finished job lands
+in the execution cache (`apply_job_output` / `apply_job_error`):
+
+- `ReactiveStreamline` jobs are `Auto` tier and run on every settled pass; every
+  other kind is `Expensive` and runs only when the driver's `SchedulePolicy`
+  says so (the GUI's Run button, always in the CLI).
+- A request whose inputs are stale is deferred until the upstream jobs land, so
+  a tracker never runs against a placeholder seed mask.
+- A node that failed at its current fingerprint stays `Failed` and is not
+  re-dispatched until the user edits it or clicks Run again.
+
+The GUI and the headless driver differ only in *how* they run the jobs the
+scheduler hands them: worker threads plus an mpsc channel in the app, an inline
+loop in `headless/workflow_driver.rs`.
+
 ## Render flow
 
 ### GUI
 
 1. Load or edit a workflow document.
-2. Evaluate the workflow graph and queue any expensive jobs.
-3. Apply completed job results back into shared scene/runtime state.
+2. Evaluate the workflow graph; once settled, ask the shared scheduler which
+   jobs to spawn on worker threads.
+3. Apply completed job results back into the execution cache through the
+   shared scheduler.
 4. Render through egui-wgpu callbacks using the same renderer types as the
    headless path.
 
@@ -101,7 +125,9 @@ entry.
 
 1. Parse arguments into a headless render request.
 2. Load assets/project state through the shared loader path.
-3. Evaluate the workflow to completion synchronously.
+3. Loop: evaluate in `Settled` mode, run every job the shared scheduler
+   returns inline, until it returns none (or `--skip-expensive` limits it to
+   the automatic tier).
 4. Build GPU resources, render to offscreen textures, and export PNG or GLB.
 
 The evaluator and renderer stack is shared; only the driving shell differs.

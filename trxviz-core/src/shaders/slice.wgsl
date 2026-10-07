@@ -47,6 +47,29 @@ fn colormap_blue_lightblue(t: f32) -> vec3<f32> {
     return vec3<f32>(0.0, t, 1.0);
 }
 
+// nilearn cold_hot pair: exact piecewise matplotlib `hot` + its
+// channel-rotated "cold" twin. Mirrors renderer/colormap.rs.
+fn hot_ramp(x: f32) -> vec3<f32> {
+    let c = clamp(x, 0.0, 1.0);
+    var r = 1.0;
+    if c < 0.365079 { r = 0.0416 + c * (1.0 - 0.0416) / 0.365079; }
+    let g = clamp((c - 0.365079) / (0.746032 - 0.365079), 0.0, 1.0);
+    let b = clamp((c - 0.746032) / (1.0 - 0.746032), 0.0, 1.0);
+    return vec3<f32>(r, g, b);
+}
+
+fn colormap_cold_hot(t: f32) -> vec3<f32> {
+    let x = clamp(t, 0.0, 1.0);
+    if x < 0.5 { return hot_ramp(1.0 - 2.0 * x).zyx; }
+    return hot_ramp(2.0 * x - 1.0);
+}
+
+fn colormap_cold_white_hot(t: f32) -> vec3<f32> {
+    let x = clamp(t, 0.0, 1.0);
+    if x < 0.5 { return hot_ramp(2.0 * x).zyx; }
+    return hot_ramp(2.0 - 2.0 * x);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let intensity = textureSample(volume_texture, volume_sampler, in.tex_coord).r;
@@ -61,6 +84,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         case 2u: { color = colormap_cool(val); }
         case 3u: { color = colormap_red_yellow(val); }
         case 4u: { color = colormap_blue_lightblue(val); }
+        case 5u: { color = colormap_cold_hot(val); }
+        case 6u: { color = colormap_cold_white_hot(val); }
         default: { color = vec3<f32>(val, val, val); }
     }
 

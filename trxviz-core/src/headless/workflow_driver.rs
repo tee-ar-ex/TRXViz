@@ -1,287 +1,88 @@
 use anyhow::{anyhow, bail};
 
-use crate::data::trx_data::RenderStyle;
 use crate::scene::{HeadlessScene, HeadlessWorkflowState};
 use crate::workflow::{
-    BundleSurfacePlan, CachedBoundaryField, CachedBundleSurfaceMeshes, CachedDerivedStreamline,
-    CachedSurfaceQuery, CachedSurfaceStreamlineMap, CachedTubeGeometry, CancelFlag,
-    WorkflowJobOutput, WorkflowJobPayload, WorkflowNodeUuid, ensure_node_uuids,
-    evaluate_scene_plan, mark_expensive_success, run_workflow_job, save_streamline_plan,
-    workflow_boundary_plan_fingerprint, workflow_bundle_display_fingerprint,
-    workflow_bundle_plan_fingerprint, workflow_reactive_streamline_fingerprint,
-    workflow_streamline_fingerprint, workflow_surface_projection_fingerprint,
-    workflow_surface_query_fingerprint,
+    CancelFlag, SchedulePolicy, WorkflowEvalMode, apply_job_output, deferred_jobs,
+    ensure_node_uuids, evaluate_scene_plan_with_mode, plan_jobs, run_workflow_job,
+    save_streamline_plan, workflow_job_kind_title,
 };
 
+/// Evaluate the workflow and run every background job it asks for, inline,
+/// until a settled evaluation asks for nothing more.
+///
+/// Each pass runs every job the scheduler considers dispatchable, then
+/// re-evaluates so downstream requests see the results. Jobs whose inputs
+/// are still stale are deferred to a later pass (plan-prep before
+/// trackers, trackers before tube geometry). The pass cap turns a
+/// fingerprint that churns on every evaluation into an error instead of
+/// an infinite loop.
 pub(super) fn execute_workflow_to_completion(
     scene: &HeadlessScene,
     workflow: &mut HeadlessWorkflowState,
+    gpu: Option<&crate::gpu::GpuHandle>,
+    run_expensive: bool,
 ) -> anyhow::Result<()> {
-    loop {
+    let policy = SchedulePolicy {
+        run_expensive,
+        ..SchedulePolicy::run_all()
+    };
+    let max_passes = 8 + 4 * workflow.document.graph.len();
+    let mut converged = false;
+    for _ in 0..max_passes {
         refresh_workflow_runtime(scene, workflow);
         if let Some(error) = &workflow.runtime.graph_error {
             bail!("{error}");
         }
-
-        let mut ran_job = false;
-
-        for plan in workflow
-            .runtime
-            .scene_plan
-            .reactive_streamline_plans
-            .clone()
-        {
-            let fingerprint = workflow_reactive_streamline_fingerprint(&plan);
-            let record = workflow
-                .execution_cache
-                .node_runs
-                .entry(plan.node_uuid)
-                .or_default();
-            if record.last_success_fingerprint == Some(fingerprint) {
-                continue;
-            }
-            apply_job_result(
-                &mut workflow.execution_cache,
-                plan.node_uuid,
-                fingerprint,
-                run_workflow_job(
-                    WorkflowJobPayload::ReactiveStreamline(plan),
-                    CancelFlag::new(),
-                )
-                .map_err(|err| anyhow!(err))?,
-            );
-            ran_job = true;
-        }
-
-        for plan in workflow.runtime.scene_plan.surface_query_plans.clone() {
-            let fingerprint =
-                workflow_surface_query_fingerprint(&plan.flow, plan.surface_id, plan.depth_mm);
-            let record = workflow
-                .execution_cache
-                .node_runs
-                .entry(plan.node_uuid)
-                .or_default();
-            if record.last_success_fingerprint == Some(fingerprint) {
-                continue;
-            }
-            apply_job_result(
-                &mut workflow.execution_cache,
-                plan.node_uuid,
-                fingerprint,
-                run_workflow_job(WorkflowJobPayload::SurfaceQuery(plan), CancelFlag::new())
-                    .map_err(|err| anyhow!(err))?,
-            );
-            ran_job = true;
-        }
-
-        for plan in workflow.runtime.scene_plan.surface_map_plans.clone() {
-            let fingerprint = workflow_surface_projection_fingerprint(
-                &plan.flow,
-                plan.surface_id,
-                plan.depth_mm,
-                plan.dps_field.as_ref().map(|field| field.as_str()),
-            );
-            let record = workflow
-                .execution_cache
-                .node_runs
-                .entry(plan.node_uuid)
-                .or_default();
-            if record.last_success_fingerprint == Some(fingerprint) {
-                continue;
-            }
-            apply_job_result(
-                &mut workflow.execution_cache,
-                plan.node_uuid,
-                fingerprint,
-                run_workflow_job(WorkflowJobPayload::SurfaceMap(plan), CancelFlag::new())
-                    .map_err(|err| anyhow!(err))?,
-            );
-            ran_job = true;
-        }
-
-        for draw in workflow.runtime.scene_plan.streamline_draws.clone() {
-            if draw.render_style != RenderStyle::Tubes {
-                continue;
-            }
-            let fingerprint = workflow_streamline_fingerprint(&draw);
-            let record = workflow
-                .execution_cache
-                .node_runs
-                .entry(draw.node_uuid)
-                .or_default();
-            if record.last_success_fingerprint == Some(fingerprint) {
-                continue;
-            }
-            apply_job_result(
-                &mut workflow.execution_cache,
-                draw.node_uuid,
-                fingerprint,
-                run_workflow_job(WorkflowJobPayload::TubeGeometry(draw), CancelFlag::new())
-                    .map_err(|err| anyhow!(err))?,
-            );
-            ran_job = true;
-        }
-
-        for plan in workflow.runtime.scene_plan.boundary_field_plans.clone() {
-            let fingerprint = workflow_boundary_plan_fingerprint(&plan);
-            let record = workflow
-                .execution_cache
-                .node_runs
-                .entry(plan.build_node_uuid)
-                .or_default();
-            if record.last_success_fingerprint == Some(fingerprint) {
-                continue;
-            }
-            apply_job_result(
-                &mut workflow.execution_cache,
-                plan.build_node_uuid,
-                fingerprint,
-                run_workflow_job(
-                    WorkflowJobPayload::BoundaryField { plan },
-                    CancelFlag::new(),
-                )
-                .map_err(|err| anyhow!(err))?,
-            );
-            ran_job = true;
-        }
-
-        for plan in workflow.runtime.scene_plan.bundle_surface_plans.clone() {
-            let fingerprint = workflow_bundle_plan_fingerprint(&plan);
-            let record = workflow
-                .execution_cache
-                .node_runs
-                .entry(plan.build_node_uuid)
-                .or_default();
-            if record.last_success_fingerprint != Some(fingerprint) {
-                mark_expensive_success(
-                    record,
-                    fingerprint,
-                    format!(
-                        "Bundle surface build for {} streamline(s)",
-                        plan.flow.selected_streamlines.len()
-                    ),
+        let jobs = plan_jobs(&workflow.runtime, &workflow.execution_cache, &policy);
+        if jobs.is_empty() {
+            let stuck = deferred_jobs(&workflow.runtime, &workflow.execution_cache, &policy);
+            if !stuck.is_empty() {
+                let names: Vec<String> = stuck
+                    .iter()
+                    .map(|receipt| {
+                        format!(
+                            "{} (node {})",
+                            workflow_job_kind_title(receipt.kind),
+                            receipt.node_uuid.0
+                        )
+                    })
+                    .collect();
+                bail!(
+                    "workflow cannot make progress: {} waiting on upstream inputs that never \
+                     settled",
+                    names.join(", ")
                 );
             }
-        }
-
-        for draw in workflow
-            .runtime
-            .scene_plan
-            .draws
-            .of_type::<crate::workflow::BundleDrawPlan>()
-            .cloned()
-            .collect::<Vec<_>>()
-        {
-            let boundary_field = draw.boundary_field_node_uuid.and_then(|uuid| {
-                workflow
-                    .execution_cache
-                    .boundary_field_cache
-                    .get(&uuid)
-                    .map(|cache| cache.field.clone())
-            });
-            if draw.boundary_field_node_uuid.is_some() && boundary_field.is_none() {
-                continue;
-            }
-            let fingerprint = workflow_bundle_display_fingerprint(
-                &draw,
-                draw.boundary_field_node_uuid.and_then(|uuid| {
-                    workflow
-                        .execution_cache
-                        .boundary_field_cache
-                        .get(&uuid)
-                        .map(|cache| cache.fingerprint)
-                }),
-            );
-            let record = workflow
-                .execution_cache
-                .node_runs
-                .entry(draw.node_uuid)
-                .or_default();
-            if record.last_success_fingerprint == Some(fingerprint) {
-                continue;
-            }
-            let plan = BundleSurfacePlan {
-                build_node_uuid: draw.build_node_uuid,
-                label: draw.label.clone(),
-                flow: draw.flow.clone(),
-                per_group: draw.per_group,
-                build_mode: draw.build_mode,
-                voxel_size_mm: draw.voxel_size_mm,
-                threshold: draw.threshold,
-                smooth_sigma: draw.smooth_sigma,
-                min_component_volume_mm3: draw.min_component_volume_mm3,
-                tube_radius_mm: draw.tube_radius_mm,
-                tube_sides: draw.tube_sides,
-                opacity: draw.opacity,
-            };
-            apply_job_result(
-                &mut workflow.execution_cache,
-                draw.node_uuid,
-                fingerprint,
-                run_workflow_job(
-                    WorkflowJobPayload::BundleSurface {
-                        plan,
-                        color_mode: draw.color_mode,
-                        boundary_field,
-                    },
-                    CancelFlag::new(),
-                )
-                .map_err(|err| anyhow!(err))?,
-            );
-            ran_job = true;
-        }
-
-        if !ran_job {
+            converged = true;
             break;
         }
+        for job in jobs {
+            let output = run_workflow_job(job.payload, CancelFlag::new(), gpu).map_err(|err| {
+                anyhow!(
+                    "{} job for node {} failed: {err}",
+                    workflow_job_kind_title(job.receipt.kind),
+                    job.receipt.node_uuid.0
+                )
+            })?;
+            apply_job_output(&mut workflow.execution_cache, &job.receipt, output);
+        }
+    }
+    if !converged {
+        bail!(
+            "workflow did not converge after {max_passes} evaluation passes; \
+             a node's fingerprint may be changing on every evaluation"
+        );
     }
 
-    refresh_workflow_runtime(scene, workflow);
-    if let Some(error) = &workflow.runtime.graph_error {
-        bail!("{error}");
-    }
     for plan in workflow.runtime.save_streamline_targets.values() {
         save_streamline_plan(plan).map_err(|err| anyhow!(err))?;
     }
     Ok(())
 }
 
-pub(super) fn ensure_export_tube_geometry(
-    workflow: &mut HeadlessWorkflowState,
-) -> anyhow::Result<()> {
-    for draw in workflow.runtime.scene_plan.streamline_draws.clone() {
-        if !draw.visible {
-            continue;
-        }
-        let fingerprint = workflow_streamline_fingerprint(&draw);
-        let record = workflow
-            .execution_cache
-            .node_runs
-            .entry(draw.node_uuid)
-            .or_default();
-        if record.last_success_fingerprint == Some(fingerprint)
-            && workflow
-                .execution_cache
-                .tube_geometry_cache
-                .get(&draw.node_uuid)
-                .is_some_and(|cache| cache.fingerprint == fingerprint)
-        {
-            continue;
-        }
-        apply_job_result(
-            &mut workflow.execution_cache,
-            draw.node_uuid,
-            fingerprint,
-            run_workflow_job(WorkflowJobPayload::TubeGeometry(draw), CancelFlag::new())
-                .map_err(|err| anyhow!(err))?,
-        );
-    }
-    Ok(())
-}
-
 fn refresh_workflow_runtime(scene: &HeadlessScene, workflow: &mut HeadlessWorkflowState) {
     ensure_node_uuids(&mut workflow.document);
-    workflow.runtime = evaluate_scene_plan(
+    workflow.runtime = evaluate_scene_plan_with_mode(
         &workflow.document,
         &scene.trx_files,
         &scene.nifti_files,
@@ -292,132 +93,79 @@ fn refresh_workflow_runtime(scene: &HeadlessScene, workflow: &mut HeadlessWorkfl
         &mut workflow.display_runtimes,
         &mut workflow.next_draw_id,
         &mut workflow.execution_cache,
+        WorkflowEvalMode::Settled,
     );
 }
 
-fn apply_job_result(
-    cache: &mut crate::workflow::WorkflowExecutionCache,
-    node_uuid: WorkflowNodeUuid,
-    fingerprint: u64,
-    output: WorkflowJobOutput,
-) {
-    let record = cache.node_runs.entry(node_uuid).or_default();
-    match output {
-        WorkflowJobOutput::ReactiveStreamline(flow) => {
-            cache
-                .derived_streamline_cache
-                .insert(node_uuid, CachedDerivedStreamline { flow });
-            mark_expensive_success(record, fingerprint, "reactive streamlines".to_string());
-        }
-        WorkflowJobOutput::SurfaceQuery(flow) => {
-            cache
-                .surface_query_cache
-                .insert(node_uuid, CachedSurfaceQuery { flow });
-            mark_expensive_success(record, fingerprint, "surface query".to_string());
-        }
-        WorkflowJobOutput::SurfaceMap(map) => {
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workflow::{WorkflowExecutionStatus, evaluate_tests::job_pipeline_fixture};
+
+    #[test]
+    fn headless_driver_runs_every_job_and_converges() {
+        let (document, trx, surface, nodes) = job_pipeline_fixture();
+        let scene = HeadlessScene {
+            trx_files: vec![trx],
+            gifti_surfaces: vec![surface],
+            ..HeadlessScene::default()
+        };
+        let mut workflow = HeadlessWorkflowState {
+            document,
+            ..HeadlessWorkflowState::default()
+        };
+
+        execute_workflow_to_completion(&scene, &mut workflow, None, true).expect("converges");
+
+        let cache = &workflow.execution_cache;
+        assert!(cache.derived_streamline_cache.contains_key(&nodes.merge));
+        assert!(cache.tube_geometry_cache.contains_key(&nodes.tubes));
+        assert!(cache.surface_query_cache.contains_key(&nodes.query));
+        assert!(
             cache
                 .surface_streamline_map_cache
-                .insert(node_uuid, CachedSurfaceStreamlineMap { map });
-            mark_expensive_success(record, fingerprint, "surface map".to_string());
-        }
-        WorkflowJobOutput::TubeGeometry { vertices, indices } => {
-            cache.tube_geometry_cache.insert(
-                node_uuid,
-                CachedTubeGeometry {
-                    fingerprint,
-                    vertices,
-                    indices,
-                },
+                .contains_key(&nodes.projection)
+        );
+        assert!(
+            cache
+                .bundle_surface_mesh_cache
+                .contains_key(&nodes.bundle_display)
+        );
+        for uuid in [
+            nodes.merge,
+            nodes.tubes,
+            nodes.query,
+            nodes.projection,
+            nodes.direction_field,
+            nodes.bundle_build,
+            nodes.bundle_display,
+        ] {
+            assert_eq!(
+                cache.node_runs[&uuid].status,
+                WorkflowExecutionStatus::Ready,
+                "node {uuid:?}"
             );
-            mark_expensive_success(record, fingerprint, "tube geometry".to_string());
         }
-        WorkflowJobOutput::BundleSurface { meshes } => {
-            let summary = if meshes.is_empty() {
-                "Bundle surface is empty".to_string()
-            } else {
-                format!("{} bundle surface mesh(es)", meshes.len())
-            };
-            cache.bundle_surface_mesh_cache.insert(
-                node_uuid,
-                CachedBundleSurfaceMeshes {
-                    fingerprint,
-                    meshes,
-                },
-            );
-            mark_expensive_success(record, fingerprint, summary);
-        }
-        WorkflowJobOutput::BoundaryField { field } => {
-            let summary = field
-                .as_ref()
-                .map(|_| "Boundary field".to_string())
-                .unwrap_or_else(|| "No boundary field".to_string());
-            if let Some(field) = field {
-                cache
-                    .boundary_field_cache
-                    .insert(node_uuid, CachedBoundaryField { fingerprint, field });
-            } else {
-                cache.boundary_field_cache.remove(&node_uuid);
-            }
-            mark_expensive_success(record, fingerprint, summary);
-        }
-        WorkflowJobOutput::DipyTractography { flow } => {
-            cache.dipy_tractography_results.insert(
-                node_uuid,
-                crate::workflow::CachedTractographyResult { fingerprint, flow },
-            );
-            mark_expensive_success(record, fingerprint, "dipy tractography".to_string());
-        }
-        WorkflowJobOutput::YehTractography { flow } => {
-            cache.yeh_tractography_results.insert(
-                node_uuid,
-                crate::workflow::CachedTractographyResult { fingerprint, flow },
-            );
-            mark_expensive_success(record, fingerprint, "yeh tractography".to_string());
-        }
-        WorkflowJobOutput::PrepareHausdorffPlan {
-            plan,
-            seed_mask,
-            limiting_mask,
-            no_end_mask,
-            summary,
-        } => {
-            cache.hausdorff_plan_cache.insert(
-                node_uuid,
-                crate::workflow::CachedHausdorffPlan {
-                    fingerprint,
-                    plan,
-                    seed_mask,
-                    limiting_mask,
-                    no_end_mask,
-                    summary: summary.clone(),
-                },
-            );
-            mark_expensive_success(record, fingerprint, summary);
-        }
-        WorkflowJobOutput::PreparePyafqPlan {
-            plan,
-            include_mask,
-            exclude_mask,
-            start_mask,
-            end_mask,
-            prob_map,
-            summary,
-        } => {
-            cache.pyafq_plan_cache.insert(
-                node_uuid,
-                crate::workflow::CachedPyafqPlan {
-                    fingerprint,
-                    plan,
-                    include_mask,
-                    exclude_mask,
-                    start_mask,
-                    end_mask,
-                    prob_map,
-                    summary: summary.clone(),
-                },
-            );
-            mark_expensive_success(record, fingerprint, summary);
-        }
+        // The final runtime reflects the settled state: nothing left to run.
+        assert!(plan_jobs(&workflow.runtime, cache, &SchedulePolicy::run_all()).is_empty());
+    }
+
+    #[test]
+    fn headless_driver_skips_expensive_when_asked() {
+        let (document, trx, surface, nodes) = job_pipeline_fixture();
+        let scene = HeadlessScene {
+            trx_files: vec![trx],
+            gifti_surfaces: vec![surface],
+            ..HeadlessScene::default()
+        };
+        let mut workflow = HeadlessWorkflowState {
+            document,
+            ..HeadlessWorkflowState::default()
+        };
+        execute_workflow_to_completion(&scene, &mut workflow, None, false).expect("converges");
+        let cache = &workflow.execution_cache;
+        assert!(cache.derived_streamline_cache.contains_key(&nodes.merge));
+        assert!(!cache.tube_geometry_cache.contains_key(&nodes.tubes));
+        assert!(!cache.surface_query_cache.contains_key(&nodes.query));
     }
 }

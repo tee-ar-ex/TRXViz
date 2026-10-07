@@ -65,9 +65,28 @@ The `--tractogram` input follows the same format-detection rules as the GUI. Nat
 load directly, while `.trk`, `.trk.gz`, `.tck`, `.tck.gz`, `.vtk`, `.tt`, and `.tt.gz` are
 imported according to their extension before rendering.
 
+## Expensive Jobs
+
+The CLI runs the same background jobs the GUI runs when you click Run:
+tractography, plan preparation, surface depth queries and projections, tube
+geometry, boundary fields, and bundle meshes. A project that tracks streamlines
+therefore renders its tracked streamlines, and takes tracker time to do so.
+
+To render only what the cheap automatic jobs produce (the GUI's state before
+Run), pass:
+
+```bash
+trxviz-cli render --project workflow.json --skip-expensive --out scene.png
+```
+
+The same flag applies to `export-scene`. GPU-only tracking options (Dipy PTT)
+need a usable wgpu device; on a host without one the CLI reports the error
+instead of silently rendering an empty result.
+
 ## Camera and Output Controls
 
 - `--view`: choose `3d`, `2d`, or `stage` project rendering; defaults to `3d`
+- `--skip-expensive`: skip Run-tier jobs (see above)
 - `--width` / `--height`: output image size
 - `--target`: override camera target
 - `--azimuth`, `--elevation`, `--distance`: camera placement controls

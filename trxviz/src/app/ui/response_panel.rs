@@ -30,7 +30,12 @@ pub struct ResponsePanelState {
 
 impl Default for ResponsePanelState {
     fn default() -> Self {
-        Self { b: 1000.0, yaw: 0.6, pitch: 0.35, initialized: false }
+        Self {
+            b: 1000.0,
+            yaw: 0.6,
+            pitch: 0.35,
+            initialized: false,
+        }
     }
 }
 
@@ -45,7 +50,13 @@ const GM_COLOR: Color32 = Color32::from_rgb(0x8c, 0x56, 0x4b);
 const CSF_COLOR: Color32 = Color32::from_rgb(0x7f, 0x7f, 0x7f);
 
 /// `√((2l+1)/4π)` for l = 0,2,4,6,8 (the zonal SH normalization).
-const YL0: [f32; 5] = [0.282_094_8, 0.630_783_1, 0.846_284_4, 1.017_107_2, 1.163_106_6];
+const YL0: [f32; 5] = [
+    0.282_094_8,
+    0.630_783_1,
+    0.846_284_4,
+    1.017_107_2,
+    1.163_106_6,
+];
 
 /// Even Legendre polynomials P_{0,2,4,6,8}(x).
 fn legendre_even(x: f32) -> [f32; 5] {
@@ -64,7 +75,9 @@ fn legendre_even(x: f32) -> [f32; 5] {
 /// cosine `cos` — `Σ_l r_l · Y_{l,0}(cos)`.
 fn wm_amplitude(coeffs: &[f32], cos: f32) -> f32 {
     let p = legendre_even(cos);
-    (0..coeffs.len().min(5)).map(|j| coeffs[j] * YL0[j] * p[j]).sum()
+    (0..coeffs.len().min(5))
+        .map(|j| coeffs[j] * YL0[j] * p[j])
+        .sum()
 }
 
 /// A UV (lat/long) unit sphere: vertices + triangle index triples.
@@ -137,7 +150,10 @@ pub fn show_response_panel(
             ));
             ui.horizontal_wrapped(|ui| {
                 for j in 0..resp.n_wm_orders() {
-                    ui.colored_label(WM_COLORS[j.min(WM_COLORS.len() - 1)], format!("WM r{}", 2 * j));
+                    ui.colored_label(
+                        WM_COLORS[j.min(WM_COLORS.len() - 1)],
+                        format!("WM r{}", 2 * j),
+                    );
                 }
                 ui.colored_label(GM_COLOR, "GM");
                 ui.colored_label(CSF_COLOR, "CSF");
@@ -163,16 +179,27 @@ fn draw_glyph(ui: &mut egui::Ui, wm_coeffs: &[f32], b: f64, state: &mut Response
     let painter = ui.painter_at(rect);
     // Opaque backdrop: gives the glyph a viewport-like frame and prevents the
     // 3D scene behind a translucent window from bleeding through.
-    painter.rect_filled(rect, egui::CornerRadius::ZERO, ui.visuals().extreme_bg_color);
+    painter.rect_filled(
+        rect,
+        egui::CornerRadius::ZERO,
+        ui.visuals().extreme_bg_color,
+    );
     let center = rect.center();
 
     let (verts, faces) = uv_sphere(28, 56);
-    let amps: Vec<f32> = verts.iter().map(|v| wm_amplitude(wm_coeffs, v.z).max(0.0)).collect();
+    let amps: Vec<f32> = verts
+        .iter()
+        .map(|v| wm_amplitude(wm_coeffs, v.z).max(0.0))
+        .collect();
     let max_r = amps.iter().cloned().fold(1e-6_f32, f32::max);
     let dscale = (side * 0.42) / max_r;
 
     let rot = Mat3::from_rotation_x(state.pitch) * Mat3::from_rotation_y(state.yaw);
-    let view: Vec<Vec3> = verts.iter().zip(&amps).map(|(v, &a)| rot * (*v * a)).collect();
+    let view: Vec<Vec3> = verts
+        .iter()
+        .zip(&amps)
+        .map(|(v, &a)| rot * (*v * a))
+        .collect();
     let light = Vec3::new(0.35, 0.45, 1.0).normalize();
 
     let project = |p: Vec3| pos2(center.x + p.x * dscale, center.y - p.y * dscale);
@@ -270,16 +297,31 @@ fn draw_plot(ui: &mut egui::Ui, resp: &ContbResponse, b_cursor: f64, bmax: f64) 
     let to_screen = |b: f64, y: f64| -> Pos2 {
         let fx = (b / x_max).clamp(0.0, 1.0) as f32;
         let fy = ((y - ymin as f64) / (ymax - ymin) as f64).clamp(0.0, 1.0) as f32;
-        pos2(plot.left() + fx * plot.width(), plot.bottom() - fy * plot.height())
+        pos2(
+            plot.left() + fx * plot.width(),
+            plot.bottom() - fy * plot.height(),
+        )
     };
 
-    let axis = ui.visuals().widgets.noninteractive.fg_stroke.color.gamma_multiply(0.5);
+    let axis = ui
+        .visuals()
+        .widgets
+        .noninteractive
+        .fg_stroke
+        .color
+        .gamma_multiply(0.5);
     let grid = Stroke::new(1.0, axis.gamma_multiply(0.4));
     let font = FontId::proportional(10.0);
     let text_col = ui.visuals().text_color();
 
-    painter.line_segment([plot.left_top(), plot.left_bottom()], Stroke::new(1.0, axis));
-    painter.line_segment([plot.left_bottom(), plot.right_bottom()], Stroke::new(1.0, axis));
+    painter.line_segment(
+        [plot.left_top(), plot.left_bottom()],
+        Stroke::new(1.0, axis),
+    );
+    painter.line_segment(
+        [plot.left_bottom(), plot.right_bottom()],
+        Stroke::new(1.0, axis),
+    );
     if ymin < 0.0 && ymax > 0.0 {
         let y0 = to_screen(0.0, 0.0).y;
         painter.line_segment(
@@ -290,8 +332,17 @@ fn draw_plot(ui: &mut egui::Ui, resp: &ContbResponse, b_cursor: f64, bmax: f64) 
     let mut bt = 0.0;
     while bt <= x_max + 1.0 {
         let x = to_screen(bt, ymin as f64).x;
-        painter.line_segment([pos2(x, plot.bottom()), pos2(x, plot.bottom() + 3.0)], Stroke::new(1.0, axis));
-        painter.text(pos2(x, plot.bottom() + 4.0), Align2::CENTER_TOP, format!("{bt:.0}"), font.clone(), text_col);
+        painter.line_segment(
+            [pos2(x, plot.bottom()), pos2(x, plot.bottom() + 3.0)],
+            Stroke::new(1.0, axis),
+        );
+        painter.text(
+            pos2(x, plot.bottom() + 4.0),
+            Align2::CENTER_TOP,
+            format!("{bt:.0}"),
+            font.clone(),
+            text_col,
+        );
         painter.line_segment([pos2(x, plot.top()), pos2(x, plot.bottom())], grid);
         bt += 1000.0;
     }
@@ -300,21 +351,39 @@ fn draw_plot(ui: &mut egui::Ui, resp: &ContbResponse, b_cursor: f64, bmax: f64) 
             continue;
         }
         let p = to_screen(0.0, yv);
-        painter.text(pos2(plot.left() - 4.0, p.y), Align2::RIGHT_CENTER, format!("{yv:.2}"), font.clone(), text_col);
+        painter.text(
+            pos2(plot.left() - 4.0, p.y),
+            Align2::RIGHT_CENTER,
+            format!("{yv:.2}"),
+            font.clone(),
+            text_col,
+        );
     }
-    painter.text(pos2(plot.center().x, rect.bottom() - 10.0), Align2::CENTER_CENTER, "b (s/mm\u{b2})", font.clone(), text_col);
+    painter.text(
+        pos2(plot.center().x, rect.bottom() - 10.0),
+        Align2::CENTER_CENTER,
+        "b (s/mm\u{b2})",
+        font.clone(),
+        text_col,
+    );
 
     let step = resp.step;
     let line = |vals: &dyn Fn(usize) -> f64, n: usize, color: Color32| {
         if n < 2 {
             return;
         }
-        let pts: Vec<Pos2> = (0..n).map(|k| to_screen(k as f64 * step, vals(k))).collect();
+        let pts: Vec<Pos2> = (0..n)
+            .map(|k| to_screen(k as f64 * step, vals(k)))
+            .collect();
         painter.add(Shape::line(pts, Stroke::new(1.6, color)));
     };
     for j in 0..resp.n_wm_orders() {
         let color = WM_COLORS[j.min(WM_COLORS.len() - 1)];
-        line(&|k| resp.wm[k].get(j).copied().unwrap_or(0.0) as f64, resp.wm.len(), color);
+        line(
+            &|k| resp.wm[k].get(j).copied().unwrap_or(0.0) as f64,
+            resp.wm.len(),
+            color,
+        );
     }
     line(&|k| resp.gm[k] as f64, resp.gm.len(), GM_COLOR);
     line(&|k| resp.csf[k] as f64, resp.csf.len(), CSF_COLOR);
@@ -324,5 +393,11 @@ fn draw_plot(ui: &mut egui::Ui, resp: &ContbResponse, b_cursor: f64, bmax: f64) 
         [pos2(xc, plot.top()), pos2(xc, plot.bottom())],
         Stroke::new(1.5, Color32::from_rgb(0xff, 0xd0, 0x20)),
     );
-    painter.text(pos2(xc + 3.0, plot.top() + 2.0), Align2::LEFT_TOP, format!("b={b_cursor:.0}"), font, text_col);
+    painter.text(
+        pos2(xc + 3.0, plot.top() + 2.0),
+        Align2::LEFT_TOP,
+        format!("b={b_cursor:.0}"),
+        font,
+        text_col,
+    );
 }

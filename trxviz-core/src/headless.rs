@@ -21,7 +21,7 @@ use self::render_2d::render_scene2d_to_png;
 use self::render_3d::render_scene3d_to_png;
 use self::render_data::{build_camera, build_render_data, compute_render_bounds};
 use self::scene_loader::{load_asset_args_state, load_project_state};
-use self::workflow_driver::{ensure_export_tube_geometry, execute_workflow_to_completion};
+use self::workflow_driver::execute_workflow_to_completion;
 use crate::data::orientation_field::BoundaryGlyphColorMode;
 use crate::data::trx_data::RenderStyle;
 use crate::renderer::mesh_renderer::MeshDrawStyle;
@@ -59,6 +59,11 @@ pub struct HeadlessSceneExportOptions {
     pub azimuth_deg: Option<f32>,
     pub elevation_deg: Option<f32>,
     pub distance: Option<f32>,
+    /// Run Expensive-tier jobs (tractography, plan prep, surface
+    /// queries, bundle meshes) before rendering. `false` renders only
+    /// what cheap, automatic jobs produce, mirroring the GUI before
+    /// the user clicks Run.
+    pub run_expensive: bool,
 }
 
 impl Default for HeadlessSceneExportOptions {
@@ -75,6 +80,7 @@ impl Default for HeadlessSceneExportOptions {
             azimuth_deg: None,
             elevation_deg: None,
             distance: None,
+            run_expensive: true,
         }
     }
 }
@@ -87,6 +93,11 @@ pub struct HeadlessRenderOptions {
     pub azimuth_deg: Option<f32>,
     pub elevation_deg: Option<f32>,
     pub distance: Option<f32>,
+    /// Run Expensive-tier jobs (tractography, plan prep, surface
+    /// queries, bundle meshes) before rendering. `false` renders only
+    /// what cheap, automatic jobs produce, mirroring the GUI before
+    /// the user clicks Run.
+    pub run_expensive: bool,
 }
 
 impl Default for HeadlessRenderOptions {
@@ -99,6 +110,7 @@ impl Default for HeadlessRenderOptions {
             azimuth_deg: None,
             elevation_deg: None,
             distance: None,
+            run_expensive: true,
         }
     }
 }
@@ -229,8 +241,15 @@ fn render_loaded_scene(
     output_path: &Path,
     options: &HeadlessRenderOptions,
 ) -> anyhow::Result<()> {
-    execute_workflow_to_completion(&scene, &mut workflow)?;
+    // The device is created before running jobs so GPU-only ops (Dipy
+    // PTT) can use it; rendering reuses the same device afterwards.
     let gpu = create_gpu_context()?;
+    execute_workflow_to_completion(
+        &scene,
+        &mut workflow,
+        Some(&gpu.handle()),
+        options.run_expensive,
+    )?;
     let mut resources = build_gpu_resources(&gpu.device, &gpu.queue, &scene, &workflow)
         .context("building GPU resources")?;
     let render_3d = workflow.document.render_3d.clone().unwrap_or_default();
@@ -302,8 +321,19 @@ fn export_loaded_scene(
         bail!("unsupported scene export format");
     }
 
-    execute_workflow_to_completion(scene, &mut workflow)?;
-    ensure_export_tube_geometry(&mut workflow)?;
+    // GLB export needs no device of its own, so only pay for one when
+    // the graph has an op that can use it.
+    let gpu = if workflow.document.graph.nodes().any(|(_, node)| {
+        matches!(
+            node.op,
+            crate::workflow::WorkflowNodeKind::DipyTractography { .. }
+        )
+    }) {
+        create_gpu_context().ok().map(|ctx| ctx.handle())
+    } else {
+        None
+    };
+    execute_workflow_to_completion(scene, &mut workflow, gpu.as_ref(), options.run_expensive)?;
     let render_data = build_render_data(scene, &workflow, options.view);
     let bounds = if options.view == HeadlessView::InflatedStage {
         compute_render_bounds(scene, &render_data)
@@ -321,6 +351,7 @@ fn export_loaded_scene(
             azimuth_deg: options.azimuth_deg,
             elevation_deg: options.elevation_deg,
             distance: options.distance,
+            run_expensive: options.run_expensive,
         },
         options.width as f32 / options.height.max(1) as f32,
     );

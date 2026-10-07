@@ -56,11 +56,8 @@ impl WorkflowOp for ColorByFixelScalarsOp {
                 scalars.fixel_count, field.scalars.fixel_count
             )));
         }
-        field.colormap_code = match self.colormap {
-            SurfaceColormap::BlueWhiteRed => 5,
-            SurfaceColormap::Viridis => 3,
-            SurfaceColormap::Inferno => 4,
-        };
+        field.colormap_code =
+            crate::renderer::colormap::surface_colormap_to_palette_code(self.colormap);
         field.scalar_range = self.range.unwrap_or(scalars.range);
         field.scalars = scalars;
         let output_scalars = field.scalars.clone();

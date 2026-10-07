@@ -101,10 +101,40 @@ fn palette_bwr(t: f32) -> vec3<f32> {
     return vec3<f32>(1.0, 1.0 - s, 1.0 - s);
 }
 
+// nilearn cold_hot pair: exact piecewise matplotlib `hot` + its
+// channel-rotated "cold" twin. Mirrors renderer/colormap.rs.
+fn hot_ramp(x: f32) -> vec3<f32> {
+    let c = clamp(x, 0.0, 1.0);
+    var r = 1.0;
+    if c < 0.365079 { r = 0.0416 + c * (1.0 - 0.0416) / 0.365079; }
+    let g = clamp((c - 0.365079) / (0.746032 - 0.365079), 0.0, 1.0);
+    let b = clamp((c - 0.746032) / (1.0 - 0.746032), 0.0, 1.0);
+    return vec3<f32>(r, g, b);
+}
+
+fn palette_cold_hot(t: f32) -> vec3<f32> {
+    let x = clamp(t, 0.0, 1.0);
+    if x < 0.5 { return hot_ramp(1.0 - 2.0 * x).zyx; }
+    return hot_ramp(2.0 * x - 1.0);
+}
+
+fn palette_cold_white_hot(t: f32) -> vec3<f32> {
+    let x = clamp(t, 0.0, 1.0);
+    if x < 0.5 { return hot_ramp(2.0 * x).zyx; }
+    return hot_ramp(2.0 - 2.0 * x);
+}
+
+// Palette codes shared with fixel.wgsl and renderer/colormap.rs
+// (palette_code_rgb): 2=plasma 3=viridis 4=inferno 5=grayscale
+// 6=blue-white-red 7=cold-hot 8=cold-white-hot.
 fn sample_palette(mode: u32, t: f32) -> vec3<f32> {
     if mode == 2u { return palette_plasma(t); }
     if mode == 3u { return palette_viridis(t); }
     if mode == 4u { return palette_inferno(t); }
+    if mode == 5u { return vec3<f32>(t, t, t); }
+    if mode == 6u { return palette_bwr(t); }
+    if mode == 7u { return palette_cold_hot(t); }
+    if mode == 8u { return palette_cold_white_hot(t); }
     return palette_bwr(t);
 }
 

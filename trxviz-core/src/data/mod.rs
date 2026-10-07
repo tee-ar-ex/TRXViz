@@ -7,5 +7,6 @@ pub mod nifti_data;
 pub mod odx_data;
 pub mod orientation_field;
 pub mod parcellation_data;
+pub mod probe;
 pub mod sampling;
 pub mod trx_data;

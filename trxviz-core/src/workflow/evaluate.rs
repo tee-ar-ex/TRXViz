@@ -65,7 +65,10 @@ pub fn evaluate_scene_plan_with_mode(
     execution_cache: &mut WorkflowExecutionCache,
     mode: WorkflowEvalMode,
 ) -> WorkflowRuntime {
-    let mut runtime = WorkflowRuntime::default();
+    let mut runtime = WorkflowRuntime {
+        eval_mode: mode,
+        ..WorkflowRuntime::default()
+    };
     debug_assert!(super::ops::validate_registry().is_ok());
     let compiled = compile_graph(document);
     let Ok((order, connections)) = compiled else {

@@ -96,6 +96,12 @@ impl WorkflowOp for StreamlineDisplayOp {
             if upstream_stale && matches!(record.status, WorkflowExecutionStatus::Ready) {
                 ctx.node_state.execution = Some(WorkflowExecutionStatus::Stale);
             }
+            ctx.scene_plan.request_job(crate::workflow::JobRequest::new(
+                ctx.node.uuid,
+                fingerprint,
+                upstream_stale,
+                crate::workflow::WorkflowJobPayload::TubeGeometry(plan.clone()),
+            ));
         } else {
             ctx.node_state.execution = None;
         }

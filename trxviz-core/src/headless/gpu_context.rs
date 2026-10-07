@@ -36,6 +36,16 @@ pub(super) struct GpuContext {
     pub(super) queue: wgpu::Queue,
 }
 
+impl GpuContext {
+    /// The job-facing view of this context.
+    pub(super) fn handle(&self) -> crate::gpu::GpuHandle {
+        crate::gpu::GpuHandle {
+            device: self.device.clone(),
+            queue: self.queue.clone(),
+        }
+    }
+}
+
 pub(super) fn active_fixel_draw_3d(
     workflow: &HeadlessWorkflowState,
 ) -> Option<&crate::workflow::FixelDrawPlan> {
@@ -153,6 +163,7 @@ pub(super) fn build_gpu_resources(
             data: scalars.values.clone(),
             dims: scalars.dims,
             voxel_to_ras: scalars.voxel_to_ras,
+            value_range: (0.0, 1.0),
         };
         let slice_resources = SliceResources::new(device, queue, TARGET_FORMAT, &volume);
         slice_resources.update_slice(queue, SliceAxis::Axial, scene.slice_indices[0], &volume);
@@ -201,12 +212,21 @@ pub(super) fn build_gpu_resources(
         }
         let mut resource = StreamlineResources::new(device, TARGET_FORMAT, &subset);
         if draw.render_style == RenderStyle::Tubes {
-            let cache = workflow
+            let Some(cache) = workflow
                 .execution_cache
                 .tube_geometry_cache
                 .get(&draw.node_uuid)
                 .filter(|cache| cache.fingerprint == fingerprint)
-                .ok_or_else(|| anyhow!("missing tube geometry for {}", draw.label))?;
+            else {
+                // The tube job did not run (e.g. `--skip-expensive`, or
+                // an upstream that never settled). Render nothing for
+                // this draw rather than failing the whole frame.
+                log::warn!(
+                    "skipping '{}': tube geometry was not built for the current flow",
+                    draw.label
+                );
+                continue;
+            };
             resource.update_tube_geometry(device, &cache.vertices, &cache.indices);
         }
         streamlines.entries.push((draw.draw_id, resource));

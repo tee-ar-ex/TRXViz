@@ -54,12 +54,12 @@ impl WorkflowOp for RemoveDuplicatesOp {
             left: flow.clone(),
             right: flow,
         };
-        ctx.scene_plan.reactive_streamline_plans.push(plan.clone());
         evaluate_derived_streamline_plan(
             ctx.node,
             plan,
             ctx.inputs,
             ctx.execution_cache,
+            ctx.scene_plan,
             ctx.node_state,
         )
     }

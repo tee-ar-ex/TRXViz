@@ -10,7 +10,7 @@ mod eval_streamlines;
 mod eval_surface;
 mod evaluate;
 #[cfg(test)]
-mod evaluate_tests;
+pub(crate) mod evaluate_tests;
 mod fingerprint;
 mod graph;
 mod jobs;
@@ -21,6 +21,7 @@ pub(crate) mod ops;
 pub mod port_labels;
 mod project_io;
 pub(super) mod purifibre;
+mod scheduler;
 mod seed;
 mod seed_odx;
 mod simple_workflow;
@@ -40,7 +41,8 @@ pub use fingerprint::{
 pub use graph::{GraphPos, GraphRect, InPort, OutPort, Wire, WorkflowGraph, WorkflowNodeEntry};
 pub use jobs::{
     bundle_surface_component_flows, bundle_surface_solid_color, mark_expensive_cancelled,
-    mark_expensive_success, materialize_flow_gpu, prime_expensive_record, run_workflow_job,
+    mark_expensive_failure, mark_expensive_queued, mark_expensive_running, mark_expensive_success,
+    materialize_flow_gpu, prime_expensive_record, run_workflow_job,
     sync_node_state_from_run_record, workflow_job_kind_title,
 };
 pub use layout::{
@@ -51,6 +53,10 @@ pub use layout::{
 pub use project_io::{
     load_workflow_project_from_path, relativized_document, resolve_document_asset_paths,
     save_workflow_project_to_path,
+};
+pub use scheduler::{
+    AppliedError, AppliedJob, InFlightJobs, JobReceipt, JobRequest, JobTier, SchedulePolicy,
+    ScheduledJob, apply_job_error, apply_job_output, deferred_jobs, plan_jobs, should_dispatch,
 };
 pub use seed::*;
 pub use seed_odx::*;

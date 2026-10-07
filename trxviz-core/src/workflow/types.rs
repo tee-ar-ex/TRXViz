@@ -171,6 +171,10 @@ pub enum GlyphColormap {
     Viridis,
     Inferno,
     BlueWhiteRed,
+    /// nilearn stat-map diverging: blue/cyan → black → red/yellow.
+    ColdHot,
+    /// nilearn white-centered variant for light backgrounds.
+    ColdWhiteHot,
 }
 
 /// Piecewise opacity curve driven by a voxel-scalar input.
@@ -621,6 +625,12 @@ pub struct ExpensiveNodeRunRecord {
     /// retries at the same fingerprint) or when the fingerprint
     /// changes (because it won't match anymore).
     pub last_cancelled_fingerprint: Option<u64>,
+    /// Fingerprint at which this node most recently failed with a
+    /// non-cancel error. The scheduler treats a match here like a
+    /// cancellation: don't auto-re-dispatch the same failing job every
+    /// pass. Cleared on an explicit Run (so the user can retry after
+    /// fixing the environment) or when the fingerprint changes.
+    pub last_failed_fingerprint: Option<u64>,
     pub status: WorkflowExecutionStatus,
     pub last_result_summary: Option<String>,
 }
@@ -631,6 +641,7 @@ impl Default for ExpensiveNodeRunRecord {
             current_fingerprint: None,
             last_success_fingerprint: None,
             last_cancelled_fingerprint: None,
+            last_failed_fingerprint: None,
             status: WorkflowExecutionStatus::NeverRun,
             last_result_summary: None,
         }
@@ -820,17 +831,19 @@ pub struct CachedTractographyResult {
 
 #[derive(Clone)]
 pub struct SceneFramePlan {
-    pub reactive_streamline_plans: Vec<ReactiveStreamlinePlan>,
-    pub surface_query_plans: Vec<SurfaceQueryPlan>,
-    pub surface_map_plans: Vec<SurfaceMapPlan>,
+    /// Background jobs requested by ops during this evaluation, in
+    /// evaluation (topological) order. Ops push a [`JobRequest`] with
+    /// the fingerprint they primed their run record with and whether
+    /// their inputs are stale; the scheduler (`workflow::scheduler`)
+    /// decides which to dispatch. Replaces the former per-kind
+    /// `Vec<FooPlan>` / `Vec<FooJob>` fields.
+    pub jobs: Vec<super::scheduler::JobRequest>,
     pub streamline_draws: Vec<StreamlineDrawPlan>,
     // volume_draws now live in `draws` (the DrawPrimitive registry);
     // multiple VolumeDisplay draws are folded into one Composite.
     // Surface draws (Anatomical + Stage) now live in `draws`, discriminated
     // by SurfaceDrawPlan.space; query via SceneFramePlan::surface_draws.
-    pub bundle_surface_plans: Vec<BundleSurfacePlan>,
     // BundleDrawPlan now lives in `draws` (the DrawPrimitive registry).
-    pub boundary_field_plans: Vec<BoundaryFieldPlan>,
     /// Node UUIDs of `StreamlineDirectionField` (or other BoundaryField-
     /// producing) nodes whose cached field is being *consumed* by a
     /// downstream op for its own computation (not just for rendering).
@@ -848,12 +861,8 @@ pub struct SceneFramePlan {
     /// a time. Display ops push during evaluation; the render backends
     /// read back via `draws.of_type::<T>()`.
     pub draws: super::draw::DrawList,
-    pub dipy_tractography_plans: Vec<DipyTractographyPlan>,
-    pub yeh_tractography_plans: Vec<YehTractographyPlan>,
     // VoxelMaskMeshDrawPlan now lives in `draws` (the DrawPrimitive
     // registry) rather than a bespoke field.
-    pub hausdorff_plan_jobs: Vec<HausdorffPlanJob>,
-    pub pyafq_plan_jobs: Vec<PyafqPlanJob>,
 }
 
 #[derive(
@@ -948,6 +957,11 @@ pub struct FixelDrawPlan {
 }
 
 impl SceneFramePlan {
+    /// Ask for a background job. Called by ops during `evaluate`.
+    pub fn request_job(&mut self, request: super::scheduler::JobRequest) {
+        self.jobs.push(request);
+    }
+
     /// The fixel draw that should drive `view`'s GPU upload: the first
     /// visible one of that view, else the first present. Centralizes what
     /// were three identical copies in the GUI viewer, the GUI job-sync
@@ -1029,18 +1043,10 @@ pub struct OdfGlyphDrawPlan {
 impl Default for SceneFramePlan {
     fn default() -> Self {
         Self {
-            reactive_streamline_plans: Vec::new(),
-            surface_query_plans: Vec::new(),
-            surface_map_plans: Vec::new(),
+            jobs: Vec::new(),
             streamline_draws: Vec::new(),
-            bundle_surface_plans: Vec::new(),
             boundary_fields_in_use: std::collections::HashSet::new(),
-            boundary_field_plans: Vec::new(),
             draws: super::draw::DrawList::default(),
-            dipy_tractography_plans: Vec::new(),
-            yeh_tractography_plans: Vec::new(),
-            hausdorff_plan_jobs: Vec::new(),
-            pyafq_plan_jobs: Vec::new(),
         }
     }
 }
@@ -1118,6 +1124,27 @@ pub struct BundleDrawPlan {
     pub tube_sides: u32,
     pub opacity: f32,
     pub outline_thickness: f32,
+}
+
+impl BundleDrawPlan {
+    /// The build-side plan this draw was derived from. The bundle
+    /// surface job takes the plan, not the draw.
+    pub fn bundle_surface_plan(&self) -> BundleSurfacePlan {
+        BundleSurfacePlan {
+            build_node_uuid: self.build_node_uuid,
+            label: self.label.clone(),
+            flow: self.flow.clone(),
+            per_group: self.per_group,
+            build_mode: self.build_mode,
+            voxel_size_mm: self.voxel_size_mm,
+            threshold: self.threshold,
+            smooth_sigma: self.smooth_sigma,
+            min_component_volume_mm3: self.min_component_volume_mm3,
+            tube_radius_mm: self.tube_radius_mm,
+            tube_sides: self.tube_sides,
+            opacity: self.opacity,
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -1321,6 +1348,10 @@ pub struct SurfaceDrawPlan {
     pub range_max: f32,
     pub projection_scalars: Option<Vec<f32>>,
     pub vertex_rgba: Vec<[f32; 4]>,
+    /// Human-readable names of the overlay layers baked into
+    /// `vertex_rgba`, from `SurfaceAppearance::legend_labels`. Consumed by
+    /// the colorbar/legend overlay.
+    pub legend_labels: Vec<String>,
     pub space: SurfaceDisplaySpace,
     pub model_matrix: [[f32; 4]; 4],
 }
@@ -1427,6 +1458,11 @@ pub struct WorkflowRuntime {
     pub node_state: HashMap<WorkflowNodeUuid, NodeEvalState>,
     pub save_streamline_targets: HashMap<WorkflowNodeUuid, SaveStreamlinePlan>,
     pub graph_error: Option<String>,
+    /// The mode this runtime was evaluated in. The job scheduler only
+    /// dispatches from a `Settled` runtime: `Interactive` passes are
+    /// per-frame and may be mid-edit, so plans in them are not a
+    /// reliable basis for spending on background work.
+    pub eval_mode: WorkflowEvalMode,
 }
 
 impl Default for WorkflowRuntime {
@@ -1436,6 +1472,7 @@ impl Default for WorkflowRuntime {
             node_state: HashMap::new(),
             save_streamline_targets: HashMap::new(),
             graph_error: None,
+            eval_mode: WorkflowEvalMode::Interactive,
         }
     }
 }
@@ -1878,14 +1915,31 @@ pub enum WorkflowJobPayload {
     },
     DipyTractography {
         plan: DipyTractographyPlan,
-        device: Option<wgpu::Device>,
-        queue: Option<wgpu::Queue>,
     },
     YehTractography {
         plan: YehTractographyPlan,
     },
     PrepareHausdorffPlan(HausdorffPlanJob),
     PreparePyafqPlan(PyafqPlanJob),
+}
+
+impl WorkflowJobPayload {
+    /// The job kind this payload runs as. Lets schedulers and status
+    /// displays classify a payload without matching on every variant.
+    pub fn kind(&self) -> WorkflowJobKind {
+        match self {
+            WorkflowJobPayload::ReactiveStreamline(_) => WorkflowJobKind::ReactiveStreamline,
+            WorkflowJobPayload::SurfaceQuery(_) => WorkflowJobKind::SurfaceQuery,
+            WorkflowJobPayload::SurfaceMap(_) => WorkflowJobKind::SurfaceMap,
+            WorkflowJobPayload::TubeGeometry(_) => WorkflowJobKind::TubeGeometry,
+            WorkflowJobPayload::BundleSurface { .. } => WorkflowJobKind::BundleSurface,
+            WorkflowJobPayload::BoundaryField { .. } => WorkflowJobKind::BoundaryField,
+            WorkflowJobPayload::DipyTractography { .. } => WorkflowJobKind::DipyTractography,
+            WorkflowJobPayload::YehTractography { .. } => WorkflowJobKind::YehTractography,
+            WorkflowJobPayload::PrepareHausdorffPlan(_) => WorkflowJobKind::PrepareHausdorffPlan,
+            WorkflowJobPayload::PreparePyafqPlan(_) => WorkflowJobKind::PreparePyafqPlan,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1969,8 +2023,7 @@ pub enum WorkflowJobMessage {
         total: u64,
     },
     Finished {
-        node_uuid: WorkflowNodeUuid,
-        fingerprint: u64,
+        receipt: super::JobReceipt,
         result: WorkflowResult<WorkflowJobOutput>,
     },
 }

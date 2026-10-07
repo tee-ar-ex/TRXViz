@@ -248,7 +248,15 @@ fn yeh_benchmark_cst_l() {
         WorkflowEvalMode::Interactive,
     );
 
-    let mut plans = runtime.scene_plan.yeh_tractography_plans;
+    let mut plans: Vec<_> = runtime
+        .scene_plan
+        .jobs
+        .into_iter()
+        .filter_map(|job| match job.payload {
+            WorkflowJobPayload::YehTractography { plan } => Some(plan),
+            _ => None,
+        })
+        .collect();
     assert_eq!(plans.len(), 1, "exactly one yeh plan should be queued");
     let mut plan = plans.remove(0);
 
@@ -271,6 +279,7 @@ fn yeh_benchmark_cst_l() {
     let output = run_workflow_job(
         WorkflowJobPayload::YehTractography { plan },
         trxviz_core::workflow::CancelFlag::new(),
+        None,
     )
     .expect("yeh job ran");
     let elapsed = t0.elapsed();

@@ -35,8 +35,18 @@ pub struct TrxVizApp {
     pub(crate) methods_dialog: MethodsDialogState,
     /// UI state for the continuous-b response panel (scrubbed b-value).
     pub(crate) response_panel: ui::response_panel::ResponsePanelState,
+    /// Hover/pin state for the value probe.
+    pub(crate) probe: ui::probe_panel::ProbeState,
+    /// Whether viewport colorbars are drawn (View → Show Colorbars).
+    pub(crate) show_colorbars: bool,
+    /// Memoized streamline auto-ranges for colorbar labels, keyed by node.
+    pub(crate) colorbar_auto_ranges:
+        std::collections::HashMap<trxviz_core::workflow::WorkflowNodeUuid, (u64, (f32, f32))>,
     /// Slice-local ODX glyph amplitude normalization used by the shader LUT path.
     pub(crate) odx_amp_norm: f32,
+    /// Real (pre-normalization) glyph amplitude max for colorbar labeling;
+    /// 1.0 when amplitudes reach the shader already normalized.
+    pub(crate) odx_colorbar_amp_norm: f32,
     pub(crate) max_storage_buffer_binding_size: Option<usize>,
     /// Cloned wgpu device for background GPU compute (tractography, etc.).
     pub(crate) gpu_device: Option<wgpu::Device>,
@@ -117,6 +127,7 @@ impl TrxVizApp {
                 data: nf.volume.data.clone(),
                 dims: nf.volume.dims,
                 voxel_to_ras: nf.volume.voxel_to_ras,
+                value_range: nf.volume.value_range,
             })
             .or_else(|| {
                 self.workflow
@@ -129,11 +140,13 @@ impl TrxVizApp {
                             data: scalars.values.clone(),
                             dims: scalars.dims,
                             voxel_to_ras: scalars.voxel_to_ras,
+                            value_range: (0.0, 1.0),
                         }),
                         VolumeBacking::Composite { stack, .. } => Some(NiftiVolume {
                             data: Vec::new(),
                             dims: stack.dims,
                             voxel_to_ras: stack.voxel_to_ras,
+                            value_range: (0.0, 1.0),
                         }),
                         VolumeBacking::File(_) => None,
                     })
@@ -403,7 +416,11 @@ impl TrxVizApp {
             merge_streamlines_dialog: MergeStreamlinesDialogState::default(),
             methods_dialog: MethodsDialogState::default(),
             response_panel: ui::response_panel::ResponsePanelState::default(),
+            probe: ui::probe_panel::ProbeState::default(),
+            show_colorbars: true,
+            colorbar_auto_ranges: std::collections::HashMap::new(),
             odx_amp_norm: 1.0,
+            odx_colorbar_amp_norm: 1.0,
             max_storage_buffer_binding_size: None,
             gpu_device: None,
             gpu_queue: None,
@@ -493,6 +510,7 @@ impl eframe::App for TrxVizApp {
                                                     data: Vec::new(),
                                                     dims: scalars.dims,
                                                     voxel_to_ras: scalars.voxel_to_ras,
+                                                    value_range: (0.0, 1.0),
                                                 },
                                             ),
                                             _ => None,
@@ -541,6 +559,7 @@ impl eframe::App for TrxVizApp {
                                         data: Vec::new(),
                                         dims: stack.dims,
                                         voxel_to_ras: stack.voxel_to_ras,
+                                        value_range: (0.0, 1.0),
                                     };
                                     composite.update_slice(
                                         &rs.device,
@@ -591,9 +610,12 @@ impl eframe::App for TrxVizApp {
         }
 
         // ── Menu bar ──
-        let menu_action = ui::menu_bar::show_menu_bar(ctx, self.ui_mode);
+        let menu_action = ui::menu_bar::show_menu_bar(ctx, self.ui_mode, self.show_colorbars);
         if let Some(mode) = menu_action.switch_mode {
             self.ui_mode = mode;
+        }
+        if menu_action.toggle_colorbars {
+            self.show_colorbars = !self.show_colorbars;
         }
         if menu_action.open_files {
             self.open_files_dialog();
@@ -782,6 +804,13 @@ impl eframe::App for TrxVizApp {
             ctx,
             &mut self.response_panel,
             self.scene.odx_scene.as_deref(),
+        );
+        ui::probe_panel::show_probe_panel(
+            ctx,
+            &mut self.probe,
+            self.scene.odx_scene.as_deref(),
+            &self.scene.nifti_files,
+            &self.workflow.runtime.scene_plan,
         );
         let open_files_after_ui = match self.ui_mode {
             UiMode::Simple => self.show_simple_shell(ctx),

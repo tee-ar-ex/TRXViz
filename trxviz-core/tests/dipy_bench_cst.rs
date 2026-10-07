@@ -285,12 +285,9 @@ fn dipy_benchmark_cst_l() {
 
     let t0 = std::time::Instant::now();
     let output = run_workflow_job(
-        WorkflowJobPayload::DipyTractography {
-            plan,
-            device: None,
-            queue: None,
-        },
+        WorkflowJobPayload::DipyTractography { plan },
         trxviz_core::workflow::CancelFlag::new(),
+        None,
     )
     .expect("dipy job ran");
     let elapsed = t0.elapsed();

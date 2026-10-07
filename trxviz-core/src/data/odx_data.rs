@@ -35,15 +35,18 @@ pub struct OdxScene {
     /// compute latency.
     fixel_otsu_cache: Arc<std::sync::RwLock<HashMap<(String, OtsuScope), FixelOtsu>>>,
     default_fixel_otsu: Option<FixelOtsu>,
-    /// Dense-b tissue response functions recorded by cs-cbmt (continuous-b
+    /// Dense-b tissue response functions recorded by consh (continuous-b
     /// MSMT), if present in the ODX header. Global (one kernel per scan).
     contb_response: Option<ContbResponse>,
+    /// Lazily-built world→compact-row lookup for the value probe. One
+    /// dims-product `Vec<u32>`, built on first use.
+    source_lookup: std::sync::OnceLock<odx_rs::SourceLookup>,
 }
 
 /// The dense-b (continuous-in-b) tissue response functions carried in an ODX
-/// header (`contb_responses`), as written by cs-cbmt. Global to the scan: one
-/// WM (anisotropic zonal SH `R_l(b)`), one GM and one CSF (isotropic `R_0(b)`),
-/// each sampled on a uniform b-grid `b_k = k · step`.
+/// header (`consh_responses`), as written by cs-dmri's `consh`. Global to the
+/// scan: one WM (anisotropic zonal SH `R_l(b)`), one GM and one CSF (isotropic
+/// `R_0(b)`), each sampled on a uniform b-grid `b_k = k · step`.
 #[derive(Clone, Debug)]
 pub struct ContbResponse {
     /// Dense-b grid step in s/mm²; row `k` is the response at `b = k · step`.
@@ -60,12 +63,19 @@ pub struct ContbResponse {
 }
 
 impl ContbResponse {
-    /// Parse from an ODX header's `contb_responses` extra value, if present.
+    /// Parse from an ODX header's dense-b response extra value, if present.
+    /// `consh_responses` is the current key; `contb_responses` is the name the
+    /// same block carried before cs-dmri renamed `cs-cbmt` → `consh`, kept so
+    /// ODXs written by that build still light up the panel.
     fn from_header(dataset: &OdxDataset) -> Option<Self> {
-        Self::from_json_value(dataset.header().extra.get("contb_responses")?)
+        let extra = &dataset.header().extra;
+        let val = extra
+            .get("consh_responses")
+            .or_else(|| extra.get("contb_responses"))?;
+        Self::from_json_value(val)
     }
 
-    /// Parse from the `contb_responses` JSON value (split out for testing).
+    /// Parse from the `consh_responses` JSON value (split out for testing).
     fn from_json_value(val: &serde_json::Value) -> Option<Self> {
         #[derive(serde::Deserialize)]
         struct Tissue {
@@ -85,7 +95,12 @@ impl ContbResponse {
             50.0 // ODX written before `step` was recorded used the default grid
         }
         let raw: Raw = serde_json::from_value(val.clone()).ok()?;
-        let iso = |t: Tissue| t.coeffs.into_iter().map(|r| r.first().copied().unwrap_or(0.0)).collect();
+        let iso = |t: Tissue| {
+            t.coeffs
+                .into_iter()
+                .map(|r| r.first().copied().unwrap_or(0.0))
+                .collect()
+        };
         Some(ContbResponse {
             step: if raw.step > 0.0 { raw.step } else { 50.0 },
             wm_lmax: raw.wm.lmax,
@@ -128,7 +143,9 @@ impl ContbResponse {
         let (lo, hi, t) = self.frac_index(b);
         let a = &self.wm[lo];
         let c = &self.wm[hi];
-        (0..a.len()).map(|j| a[j] + t * (c.get(j).copied().unwrap_or(a[j]) - a[j])).collect()
+        (0..a.len())
+            .map(|j| a[j] + t * (c.get(j).copied().unwrap_or(a[j]) - a[j]))
+            .collect()
     }
 
     /// Isotropic value at `b` for one of the isotropic tissue tracks.
@@ -336,11 +353,19 @@ impl OdxScene {
             fixel_otsu_cache: Arc::new(std::sync::RwLock::new(cache)),
             default_fixel_otsu,
             contb_response,
+            source_lookup: std::sync::OnceLock::new(),
         })
     }
 
+    /// World→voxel→compact-row lookup for point queries (the value probe).
+    /// Built once per scene from the header affine and mask.
+    pub fn source_lookup(&self) -> &odx_rs::SourceLookup {
+        self.source_lookup
+            .get_or_init(|| odx_rs::SourceLookup::new(self.dataset.header(), self.dataset.mask()))
+    }
+
     /// The dense-b tissue response functions from the ODX header, if this scene
-    /// came from a cs-cbmt (continuous-b MSMT) reconstruction.
+    /// came from a consh (continuous-b MSMT) reconstruction.
     pub fn contb_response(&self) -> Option<&ContbResponse> {
         self.contb_response.as_ref()
     }
@@ -1137,6 +1162,11 @@ impl OdxScene {
             data,
             dims: [ni, nj, nk],
             voxel_to_ras,
+            value_range: if range > 0.0 {
+                (min_val, max_val)
+            } else {
+                (0.0, 1.0)
+            },
         })
     }
 
@@ -1198,8 +1228,9 @@ pub struct FixelField {
     /// Scalars applied to each fixel. Defaults to directional RGB.
     pub scalars: FixelScalars,
     /// Shader colormap code (0=directional/none, 2=plasma, 3=viridis,
-    /// 4=inferno, 5=blue-white-red). When 0 the shader falls back to
-    /// `abs(direction)` and ignores `scalar_range`.
+    /// 4=inferno, 5=grayscale, 6=blue-white-red — see
+    /// `renderer::colormap::palette_code_rgb`). When 0 the shader falls back
+    /// to `abs(direction)` and ignores `scalar_range`.
     pub colormap_code: u32,
     pub scalar_range: (f32, f32),
 }
@@ -1627,6 +1658,57 @@ mod tests {
         assert!((r.gm_at(100.0) - 1.5).abs() < 1e-5);
         assert!((r.csf_at(75.0) - 0.6).abs() < 1e-5); // halfway between 1.0 and 0.2
         assert!((r.gm_at(9999.0) - 1.5).abs() < 1e-5); // clamped to last grid point
+    }
+
+    /// The header key is the contract with cs-dmri's ODX writer, so exercise
+    /// `from_header` (not just `from_json_value`) for both the current
+    /// `consh_responses` and the pre-rename `contb_responses`.
+    #[test]
+    fn contb_response_read_from_header_under_either_key() {
+        fn dataset_with_response_key(key: &str) -> OdxDataset {
+            let mut builder = OdxBuilder::new(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                [1, 1, 1],
+                vec![1u8],
+            );
+            builder.push_voxel_peaks(&[]);
+            builder.set_extra_value(
+                key,
+                serde_json::json!({
+                    "step": 50.0,
+                    "wm": {"lmax": 2, "coeffs": [[3.5, 0.0], [2.0, -0.4]]},
+                    "gm": {"lmax": 0, "coeffs": [[3.5], [2.5]]},
+                    "csf": {"lmax": 0, "coeffs": [[3.5], [1.0]]},
+                }),
+            );
+            builder.finalize().unwrap()
+        }
+
+        for key in ["consh_responses", "contb_responses"] {
+            let r = ContbResponse::from_header(&dataset_with_response_key(key))
+                .unwrap_or_else(|| panic!("header key {key:?} should yield a response"));
+            assert_eq!(r.wm_lmax, 2, "{key}");
+            assert_eq!(r.n_grid(), 2, "{key}");
+        }
+
+        // A header with neither key stays None (panel stays hidden).
+        let mut bare = OdxBuilder::new(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            [1, 1, 1],
+            vec![1u8],
+        );
+        bare.push_voxel_peaks(&[]);
+        assert!(ContbResponse::from_header(&bare.finalize().unwrap()).is_none());
     }
 
     #[test]

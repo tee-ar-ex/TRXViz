@@ -69,6 +69,10 @@ struct RenderArgs {
     elevation: Option<f32>,
     #[arg(long)]
     distance: Option<f32>,
+    /// Skip expensive jobs (tractography, plan prep, surface queries,
+    /// bundle meshes) and render only what automatic jobs produce.
+    #[arg(long)]
+    skip_expensive: bool,
 }
 
 #[derive(Args)]
@@ -107,6 +111,10 @@ struct ExportSceneArgs {
     include_lights: bool,
     #[arg(long, default_value_t = true)]
     include_slices: bool,
+    /// Skip expensive jobs (tractography, plan prep, surface queries,
+    /// bundle meshes) and export only what automatic jobs produce.
+    #[arg(long)]
+    skip_expensive: bool,
 }
 
 #[derive(Args)]
@@ -157,6 +165,7 @@ fn run_render(args: RenderArgs) -> anyhow::Result<()> {
         azimuth_deg: args.azimuth,
         elevation_deg: args.elevation,
         distance: args.distance,
+        run_expensive: !args.skip_expensive,
     };
 
     if let Some(project_path) = args.project {
@@ -206,6 +215,7 @@ fn run_export_scene(args: ExportSceneArgs) -> anyhow::Result<()> {
         azimuth_deg: args.azimuth,
         elevation_deg: args.elevation,
         distance: args.distance,
+        run_expensive: !args.skip_expensive,
     };
 
     if let Some(project_path) = args.project {

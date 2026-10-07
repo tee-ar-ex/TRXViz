@@ -25,21 +25,6 @@ use crate::app::callbacks::OdxFixelResources;
 
 use super::*;
 
-pub(crate) fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
-    match kind {
-        WorkflowJobKind::ReactiveStreamline => "derived streamlines",
-        WorkflowJobKind::SurfaceQuery => "surface depth query",
-        WorkflowJobKind::SurfaceMap => "surface map",
-        WorkflowJobKind::TubeGeometry => "tube geometry",
-        WorkflowJobKind::BundleSurface => "bundle surface",
-        WorkflowJobKind::BoundaryField => "boundary field",
-        WorkflowJobKind::DipyTractography => "dipy tractography",
-        WorkflowJobKind::YehTractography => "yeh tractography",
-        WorkflowJobKind::PrepareHausdorffPlan => "Hausdorff plan",
-        WorkflowJobKind::PreparePyafqPlan => "pyAFQ plan",
-    }
-}
-
 fn hash_f32(hasher: &mut DefaultHasher, value: f32) {
     value.to_bits().hash(hasher);
 }
@@ -124,6 +109,7 @@ fn active_odx_slice_state(app: &crate::app::TrxVizApp) -> Option<(usize, u32)> {
         data: Vec::new(),
         dims: [dims[0] as usize, dims[1] as usize, dims[2] as usize],
         voxel_to_ras,
+        value_range: (0.0, 1.0),
     };
     let world = app.viewport.slice_world_offsets();
     let slice_for_axis = |axis_index: usize| -> u32 {
@@ -331,6 +317,7 @@ impl crate::app::TrxVizApp {
         };
         let Some(resource_key) = active_odx_glyph_resource_key(self, device) else {
             self.odx_amp_norm = 1.0;
+            self.odx_colorbar_amp_norm = 1.0;
             self.workflow.uploaded_odx_glyph_resource_key = None;
             return;
         };
@@ -359,6 +346,7 @@ impl crate::app::TrxVizApp {
                 if metadata.instances.is_empty() {
                     glyph_resources.clear();
                     self.odx_amp_norm = 1.0;
+                    self.odx_colorbar_amp_norm = 1.0;
                     self.workflow.uploaded_odx_glyph_resource_key = None;
                     return;
                 }
@@ -368,6 +356,9 @@ impl crate::app::TrxVizApp {
                 let (opacity_samples, size_samples) =
                     sample_odx_gate_buffers(self, &metadata.instances);
                 self.odx_amp_norm = 1.0;
+                // The gather path bakes `metadata.amp_norm` into the LUT
+                // divisor, so that is the real top of the colormap ramp.
+                self.odx_colorbar_amp_norm = metadata.amp_norm;
                 glyph_resources.set_odx_slice_gather(
                     device,
                     queue,
@@ -410,6 +401,7 @@ impl crate::app::TrxVizApp {
                 if instances.is_empty() {
                     glyph_resources.clear();
                     self.odx_amp_norm = 1.0;
+                    self.odx_colorbar_amp_norm = 1.0;
                     self.workflow.uploaded_odx_glyph_resource_key = None;
                     return;
                 }
@@ -422,6 +414,8 @@ impl crate::app::TrxVizApp {
                     .ncols();
                 let (opacity_samples, size_samples) = sample_odx_gate_buffers(self, &instances);
                 self.odx_amp_norm = 1.0;
+                // SH amplitudes reach the LUT raw with divisor 1.0.
+                self.odx_colorbar_amp_norm = 1.0;
                 glyph_resources.set_odx_sh_volume(
                     device,
                     mesh.vertices(),
@@ -490,13 +484,12 @@ impl crate::app::TrxVizApp {
                 WorkflowJobMessage::Started {
                     node_uuid,
                     fingerprint,
-                    ..
                 } => {
                     if let Some(record) =
                         self.workflow.execution_cache.node_runs.get_mut(&node_uuid)
                         && record.current_fingerprint == Some(fingerprint)
                     {
-                        record.status = WorkflowExecutionStatus::Running;
+                        mark_expensive_running(record, fingerprint);
                         changed = true;
                     }
                 }
@@ -523,39 +516,11 @@ impl crate::app::TrxVizApp {
                         changed = true;
                     }
                 }
-                WorkflowJobMessage::Finished {
-                    node_uuid,
-                    fingerprint,
-                    result,
-                } => {
+                WorkflowJobMessage::Finished { receipt, result } => {
+                    let node_uuid = receipt.node_uuid;
                     self.workflow.jobs_in_flight.remove(&node_uuid);
                     self.workflow.cancel_flags.remove(&node_uuid);
                     self.workflow.job_progress.remove(&node_uuid);
-
-                    // Node removed from the document while the job ran —
-                    // no record to attribute the result to.
-                    if !self
-                        .workflow
-                        .execution_cache
-                        .node_runs
-                        .contains_key(&node_uuid)
-                    {
-                        continue;
-                    }
-
-                    // Did the node's fingerprint move on while the job ran?
-                    // If so, we still cache the output below (no compute
-                    // wasted) but we must NOT advance the record's
-                    // fingerprints — staleness detection would break and
-                    // mark the node as "Ready" for parameters the user
-                    // has since edited past.
-                    let fingerprint_current = self
-                        .workflow
-                        .execution_cache
-                        .node_runs
-                        .get(&node_uuid)
-                        .and_then(|r| r.current_fingerprint)
-                        == Some(fingerprint);
 
                     let node_label = self
                         .workflow
@@ -567,201 +532,17 @@ impl crate::app::TrxVizApp {
 
                     match result {
                         Ok(output) => {
-                            // Cache the output regardless of currency.
-                            // Downstream evaluators check the cache's own
-                            // `fingerprint` field against the expected
-                            // value, so obsolete entries are naturally
-                            // treated as stale and re-queued.
-                            let summary = match output {
-                                WorkflowJobOutput::ReactiveStreamline(flow) => {
-                                    let s =
-                                        format!("{} streamlines", flow.selected_streamlines.len());
-                                    self.workflow
-                                        .execution_cache
-                                        .derived_streamline_cache
-                                        .insert(node_uuid, CachedDerivedStreamline { flow });
-                                    s
-                                }
-                                WorkflowJobOutput::SurfaceQuery(flow) => {
-                                    let s =
-                                        format!("{} streamlines", flow.selected_streamlines.len());
-                                    self.workflow
-                                        .execution_cache
-                                        .surface_query_cache
-                                        .insert(node_uuid, CachedSurfaceQuery { flow });
-                                    s
-                                }
-                                WorkflowJobOutput::SurfaceMap(map) => {
-                                    let s =
-                                        format!("Surface scalars ({} values)", map.values.len());
-                                    self.workflow
-                                        .execution_cache
-                                        .surface_streamline_map_cache
-                                        .insert(node_uuid, CachedSurfaceStreamlineMap { map });
-                                    s
-                                }
-                                WorkflowJobOutput::TubeGeometry { vertices, indices } => {
-                                    self.workflow.execution_cache.tube_geometry_cache.insert(
-                                        node_uuid,
-                                        CachedTubeGeometry {
-                                            fingerprint,
-                                            vertices,
-                                            indices,
-                                        },
-                                    );
-                                    "Tube geometry ready".to_string()
-                                }
-                                WorkflowJobOutput::BundleSurface { meshes } => {
-                                    let build_summary = if meshes.is_empty() {
-                                        "Bundle surface is empty".to_string()
-                                    } else {
-                                        format!("{} bundle surface mesh(es)", meshes.len())
-                                    };
-                                    self.workflow
-                                        .execution_cache
-                                        .bundle_surface_mesh_cache
-                                        .insert(
-                                            node_uuid,
-                                            CachedBundleSurfaceMeshes {
-                                                fingerprint,
-                                                meshes,
-                                            },
-                                        );
-                                    // Sibling "build node" bookkeeping is
-                                    // only meaningful for current results;
-                                    // advancing it for obsolete ones would
-                                    // falsely mark the build as up-to-date.
-                                    if fingerprint_current
-                                        && let Some(draw) = self
-                                            .workflow
-                                            .runtime
-                                            .scene_plan
-                                            .draws
-                                            .of_type::<trxviz_core::workflow::BundleDrawPlan>()
-                                            .find(|draw| draw.node_uuid == node_uuid)
-                                    {
-                                        let build_fingerprint =
-                                            workflow_bundle_plan_fingerprint(&BundleSurfacePlan {
-                                                build_node_uuid: draw.build_node_uuid,
-                                                label: draw.label.clone(),
-                                                flow: draw.flow.clone(),
-                                                per_group: draw.per_group,
-                                                build_mode: draw.build_mode,
-                                                voxel_size_mm: draw.voxel_size_mm,
-                                                threshold: draw.threshold,
-                                                smooth_sigma: draw.smooth_sigma,
-                                                min_component_volume_mm3: draw
-                                                    .min_component_volume_mm3,
-                                                tube_radius_mm: draw.tube_radius_mm,
-                                                tube_sides: draw.tube_sides,
-                                                opacity: draw.opacity,
-                                            });
-                                        let build_record = self
-                                            .workflow
-                                            .execution_cache
-                                            .node_runs
-                                            .entry(draw.build_node_uuid)
-                                            .or_default();
-                                        mark_expensive_success(
-                                            build_record,
-                                            build_fingerprint,
-                                            build_summary.clone(),
-                                        );
-                                    }
-                                    build_summary
-                                }
-                                WorkflowJobOutput::BoundaryField { field } => {
-                                    if let Some(field) = field {
-                                        self.workflow.execution_cache.boundary_field_cache.insert(
-                                            node_uuid,
-                                            CachedBoundaryField { fingerprint, field },
-                                        );
-                                        "Boundary field ready".to_string()
-                                    } else {
-                                        self.workflow
-                                            .execution_cache
-                                            .boundary_field_cache
-                                            .remove(&node_uuid);
-                                        "Boundary field is empty".to_string()
-                                    }
-                                }
-                                WorkflowJobOutput::DipyTractography { flow } => {
-                                    let s =
-                                        format!("{} streamlines", flow.selected_streamlines.len());
-                                    self.workflow
-                                        .execution_cache
-                                        .dipy_tractography_results
-                                        .insert(
-                                            node_uuid,
-                                            CachedTractographyResult { fingerprint, flow },
-                                        );
-                                    s
-                                }
-                                WorkflowJobOutput::YehTractography { flow } => {
-                                    let s =
-                                        format!("{} streamlines", flow.selected_streamlines.len());
-                                    self.workflow
-                                        .execution_cache
-                                        .yeh_tractography_results
-                                        .insert(
-                                            node_uuid,
-                                            CachedTractographyResult { fingerprint, flow },
-                                        );
-                                    s
-                                }
-                                WorkflowJobOutput::PrepareHausdorffPlan {
-                                    plan,
-                                    seed_mask,
-                                    limiting_mask,
-                                    no_end_mask,
-                                    summary,
-                                } => {
-                                    self.workflow.execution_cache.hausdorff_plan_cache.insert(
-                                        node_uuid,
-                                        trxviz_core::workflow::CachedHausdorffPlan {
-                                            fingerprint,
-                                            plan,
-                                            seed_mask,
-                                            limiting_mask,
-                                            no_end_mask,
-                                            summary: summary.clone(),
-                                        },
-                                    );
-                                    summary
-                                }
-                                WorkflowJobOutput::PreparePyafqPlan {
-                                    plan,
-                                    include_mask,
-                                    exclude_mask,
-                                    start_mask,
-                                    end_mask,
-                                    prob_map,
-                                    summary,
-                                } => {
-                                    self.workflow.execution_cache.pyafq_plan_cache.insert(
-                                        node_uuid,
-                                        trxviz_core::workflow::CachedPyafqPlan {
-                                            fingerprint,
-                                            plan,
-                                            include_mask,
-                                            exclude_mask,
-                                            start_mask,
-                                            end_mask,
-                                            prob_map,
-                                            summary: summary.clone(),
-                                        },
-                                    );
-                                    summary
-                                }
+                            // `None`: the node was removed from the
+                            // document while the job ran; nothing to
+                            // attribute the result to.
+                            let Some(applied) = apply_job_output(
+                                &mut self.workflow.execution_cache,
+                                &receipt,
+                                output,
+                            ) else {
+                                continue;
                             };
-
-                            if fingerprint_current {
-                                if let Some(record) =
-                                    self.workflow.execution_cache.node_runs.get_mut(&node_uuid)
-                                {
-                                    mark_expensive_success(record, fingerprint, summary);
-                                }
-                            } else {
+                            if !applied.fingerprint_current {
                                 self.status_msg = Some(format!(
                                     "'{node_label}' finished but parameters changed — \
                                      result cached; re-run with current settings to refresh"
@@ -771,39 +552,29 @@ impl crate::app::TrxVizApp {
                         }
                         Err(error) => {
                             let err_text = error.to_string();
-                            let is_cancel =
-                                matches!(error, trxviz_core::workflow::WorkflowError::Cancelled);
-                            if fingerprint_current {
-                                if let Some(record) =
-                                    self.workflow.execution_cache.node_runs.get_mut(&node_uuid)
-                                {
-                                    // Cancel gets a dedicated mark so the
-                                    // scheduler doesn't immediately
-                                    // re-dispatch a fresh run at the same
-                                    // fingerprint. Non-cancel errors go
-                                    // through Failed (which keeps the door
-                                    // open for retry — transient errors may
-                                    // resolve on their own).
-                                    if is_cancel {
-                                        trxviz_core::workflow::mark_expensive_cancelled(
-                                            record,
-                                            fingerprint,
-                                        );
-                                    } else {
-                                        mark_expensive_failure(record, fingerprint, &err_text);
-                                    }
-                                }
+                            let Some(applied) = apply_job_error(
+                                &mut self.workflow.execution_cache,
+                                &receipt,
+                                &error,
+                            ) else {
+                                continue;
+                            };
+                            if applied.fingerprint_current {
                                 // Cancellation is a user action, not a
                                 // failure — neutral status toast, not
                                 // a red error.
-                                if is_cancel {
+                                if applied.cancelled {
                                     self.status_msg = Some(format!("'{node_label}' cancelled."));
                                 } else {
                                     self.error_msg =
                                         Some(format!("'{node_label}' failed: {err_text}"));
                                 }
                             } else {
-                                let verb = if is_cancel { "cancelled" } else { "failed" };
+                                let verb = if applied.cancelled {
+                                    "cancelled"
+                                } else {
+                                    "failed"
+                                };
                                 self.status_msg = Some(format!(
                                     "'{node_label}' {verb} for obsolete parameters; \
                                      current run may still succeed"
@@ -821,24 +592,30 @@ impl crate::app::TrxVizApp {
         }
     }
 
-    fn queue_workflow_job(
-        &mut self,
-        node_uuid: WorkflowNodeUuid,
-        fingerprint: u64,
-        kind: WorkflowJobKind,
-        payload: WorkflowJobPayload,
-    ) {
+    /// Hand a scheduled job to a worker thread. The scheduler has
+    /// already decided the job should run; this is only the thread /
+    /// channel / cancel-flag plumbing plus the Queued status mark.
+    fn spawn_workflow_job(&mut self, job: ScheduledJob) {
+        let receipt = job.receipt.clone();
+        let node_uuid = receipt.node_uuid;
+        let fingerprint = receipt.fingerprint;
         if self.workflow.jobs_in_flight.contains_key(&node_uuid) {
             return;
         }
         let Some(record) = self.workflow.execution_cache.node_runs.get_mut(&node_uuid) else {
             return;
         };
-        record.current_fingerprint = Some(fingerprint);
-        record.status = WorkflowExecutionStatus::Queued;
+        mark_expensive_queued(record, fingerprint);
         self.workflow
             .jobs_in_flight
-            .insert(node_uuid, (kind, fingerprint));
+            .insert(node_uuid, (receipt.kind, fingerprint));
+        // The scheduler is GPU-agnostic; the GUI owns the device and
+        // hands it to the worker for jobs that can use it.
+        let gpu = self
+            .gpu_device
+            .clone()
+            .zip(self.gpu_queue.clone())
+            .map(|(device, queue)| trxviz_core::gpu::GpuHandle { device, queue });
         // Fresh CancelFlag per job. The worker gets a clone; the GUI
         // keeps the original in `cancel_flags` so a Cancel click on
         // this node can flip it. Entry is removed when the job
@@ -860,17 +637,14 @@ impl crate::app::TrxVizApp {
                 });
             });
         self.workflow.cancel_flags.insert(node_uuid, cancel.clone());
+        let payload = job.payload;
         std::thread::spawn(move || {
             let _ = tx.send(WorkflowJobMessage::Started {
                 node_uuid,
                 fingerprint,
             });
-            let result = run_workflow_job(payload, cancel);
-            let _ = tx.send(WorkflowJobMessage::Finished {
-                node_uuid,
-                fingerprint,
-                result,
-            });
+            let result = run_workflow_job(payload, cancel, gpu.as_ref());
+            let _ = tx.send(WorkflowJobMessage::Finished { receipt, result });
         });
     }
 
@@ -886,300 +660,34 @@ impl crate::app::TrxVizApp {
         }
     }
 
+    /// Ask the shared scheduler which jobs the settled runtime needs
+    /// and spawn them. Returns `true` when any Expensive-tier job was
+    /// queued (used to keep the run session alive).
     pub(in crate::app) fn queue_workflow_jobs(&mut self) -> bool {
-        for plan in self
-            .workflow
-            .runtime
-            .scene_plan
-            .reactive_streamline_plans
-            .clone()
-        {
-            let fingerprint = workflow_reactive_streamline_fingerprint(&plan);
-            if should_queue_expensive_job(
-                self.workflow.execution_cache.node_runs.get(&plan.node_uuid),
-                fingerprint,
-                &self.workflow.jobs_in_flight,
-                plan.node_uuid,
-            ) {
-                self.queue_workflow_job(
-                    plan.node_uuid,
-                    fingerprint,
-                    WorkflowJobKind::ReactiveStreamline,
-                    WorkflowJobPayload::ReactiveStreamline(plan),
-                );
-            }
+        let run_expensive =
+            self.workflow.run_expensive_requested || self.workflow.run_session_active;
+        let jobs = {
+            let policy = SchedulePolicy {
+                run_expensive,
+                in_flight: &self.workflow.jobs_in_flight,
+                // An explicit Run click retries nodes that were
+                // cancelled or failed at their current fingerprint.
+                retry_blocked: self.workflow.run_expensive_requested,
+                defer_when_upstream_stale: true,
+            };
+            plan_jobs(
+                &self.workflow.runtime,
+                &self.workflow.execution_cache,
+                &policy,
+            )
+        };
+        let queued_any = jobs.iter().any(|job| job.tier == JobTier::Expensive);
+        if run_expensive {
+            self.workflow.run_session_active = true;
         }
-
-        if !self.workflow.run_expensive_requested && !self.workflow.run_session_active {
-            return false;
+        for job in jobs {
+            self.spawn_workflow_job(job);
         }
-
-        // An explicit Run click clears any prior cancellations so the
-        // user can retry at the same fingerprint just by clicking Run
-        // again. Without this, a cancelled node would stay cancelled
-        // until the user edited a param.
-        if self.workflow.run_expensive_requested {
-            for record in self.workflow.execution_cache.node_runs.values_mut() {
-                record.last_cancelled_fingerprint = None;
-            }
-        }
-
-        let mut queued_any = false;
-        self.workflow.run_session_active = true;
-
-        for plan in self.workflow.runtime.scene_plan.surface_query_plans.clone() {
-            let fingerprint =
-                workflow_surface_query_fingerprint(&plan.flow, plan.surface_id, plan.depth_mm);
-            if should_queue_expensive_job(
-                self.workflow.execution_cache.node_runs.get(&plan.node_uuid),
-                fingerprint,
-                &self.workflow.jobs_in_flight,
-                plan.node_uuid,
-            ) {
-                self.queue_workflow_job(
-                    plan.node_uuid,
-                    fingerprint,
-                    WorkflowJobKind::SurfaceQuery,
-                    WorkflowJobPayload::SurfaceQuery(plan),
-                );
-                queued_any = true;
-            }
-        }
-
-        for plan in self.workflow.runtime.scene_plan.surface_map_plans.clone() {
-            let fingerprint = workflow_surface_projection_fingerprint(
-                &plan.flow,
-                plan.surface_id,
-                plan.depth_mm,
-                plan.dps_field.as_ref().map(|field| field.as_str()),
-            );
-            if should_queue_expensive_job(
-                self.workflow.execution_cache.node_runs.get(&plan.node_uuid),
-                fingerprint,
-                &self.workflow.jobs_in_flight,
-                plan.node_uuid,
-            ) {
-                self.queue_workflow_job(
-                    plan.node_uuid,
-                    fingerprint,
-                    WorkflowJobKind::SurfaceMap,
-                    WorkflowJobPayload::SurfaceMap(plan),
-                );
-                queued_any = true;
-            }
-        }
-
-        for draw in self.workflow.runtime.scene_plan.streamline_draws.clone() {
-            if draw.render_style != RenderStyle::Tubes {
-                continue;
-            }
-            let fingerprint = workflow_streamline_fingerprint(&draw);
-            if should_queue_expensive_job(
-                self.workflow.execution_cache.node_runs.get(&draw.node_uuid),
-                fingerprint,
-                &self.workflow.jobs_in_flight,
-                draw.node_uuid,
-            ) {
-                self.queue_workflow_job(
-                    draw.node_uuid,
-                    fingerprint,
-                    WorkflowJobKind::TubeGeometry,
-                    WorkflowJobPayload::TubeGeometry(draw),
-                );
-                queued_any = true;
-            }
-        }
-
-        for plan in self
-            .workflow
-            .runtime
-            .scene_plan
-            .boundary_field_plans
-            .clone()
-        {
-            let fingerprint = workflow_boundary_plan_fingerprint(&plan);
-            if should_queue_expensive_job(
-                self.workflow
-                    .execution_cache
-                    .node_runs
-                    .get(&plan.build_node_uuid),
-                fingerprint,
-                &self.workflow.jobs_in_flight,
-                plan.build_node_uuid,
-            ) {
-                self.queue_workflow_job(
-                    plan.build_node_uuid,
-                    fingerprint,
-                    WorkflowJobKind::BoundaryField,
-                    WorkflowJobPayload::BoundaryField { plan },
-                );
-                queued_any = true;
-            }
-        }
-
-        for plan in self
-            .workflow
-            .runtime
-            .scene_plan
-            .dipy_tractography_plans
-            .clone()
-        {
-            let node_uuid = plan.node_uuid;
-            // The plan is authoritative: its `fingerprint` field was
-            // computed by the op during evaluate() from the op's config
-            // + upstream identity, and travels with the plan through
-            // dispatch / completion. Replaces the previous
-            // `node_runs.current_fingerprint.unwrap_or(0)` fallback that
-            // produced PR 1's silent-discard race on first-run.
-            let fingerprint = plan.fingerprint.0;
-            if should_queue_expensive_job(
-                self.workflow.execution_cache.node_runs.get(&node_uuid),
-                fingerprint,
-                &self.workflow.jobs_in_flight,
-                node_uuid,
-            ) {
-                self.queue_workflow_job(
-                    node_uuid,
-                    fingerprint,
-                    WorkflowJobKind::DipyTractography,
-                    WorkflowJobPayload::DipyTractography {
-                        plan,
-                        device: self.gpu_device.clone(),
-                        queue: self.gpu_queue.clone(),
-                    },
-                );
-                queued_any = true;
-            }
-        }
-
-        for plan in self
-            .workflow
-            .runtime
-            .scene_plan
-            .yeh_tractography_plans
-            .clone()
-        {
-            let node_uuid = plan.node_uuid;
-            // Plan-authoritative fingerprint — see the Dipy queue loop
-            // above for rationale.
-            let fingerprint = plan.fingerprint.0;
-            if should_queue_expensive_job(
-                self.workflow.execution_cache.node_runs.get(&node_uuid),
-                fingerprint,
-                &self.workflow.jobs_in_flight,
-                node_uuid,
-            ) {
-                self.queue_workflow_job(
-                    node_uuid,
-                    fingerprint,
-                    WorkflowJobKind::YehTractography,
-                    WorkflowJobPayload::YehTractography { plan },
-                );
-                queued_any = true;
-            }
-        }
-
-        for job in self.workflow.runtime.scene_plan.hausdorff_plan_jobs.clone() {
-            let node_uuid = job.node_uuid;
-            let fingerprint = job.fingerprint;
-            if should_queue_expensive_job(
-                self.workflow.execution_cache.node_runs.get(&node_uuid),
-                fingerprint,
-                &self.workflow.jobs_in_flight,
-                node_uuid,
-            ) {
-                self.queue_workflow_job(
-                    node_uuid,
-                    fingerprint,
-                    WorkflowJobKind::PrepareHausdorffPlan,
-                    WorkflowJobPayload::PrepareHausdorffPlan(job),
-                );
-                queued_any = true;
-            }
-        }
-
-        for job in self.workflow.runtime.scene_plan.pyafq_plan_jobs.clone() {
-            let node_uuid = job.node_uuid;
-            let fingerprint = job.fingerprint;
-            if should_queue_expensive_job(
-                self.workflow.execution_cache.node_runs.get(&node_uuid),
-                fingerprint,
-                &self.workflow.jobs_in_flight,
-                node_uuid,
-            ) {
-                self.queue_workflow_job(
-                    node_uuid,
-                    fingerprint,
-                    WorkflowJobKind::PreparePyafqPlan,
-                    WorkflowJobPayload::PreparePyafqPlan(job),
-                );
-                queued_any = true;
-            }
-        }
-
-        for draw in self
-            .workflow
-            .runtime
-            .scene_plan
-            .draws
-            .of_type::<trxviz_core::workflow::BundleDrawPlan>()
-            .cloned()
-            .collect::<Vec<_>>()
-        {
-            let boundary_field = draw.boundary_field_node_uuid.and_then(|uuid| {
-                self.workflow
-                    .execution_cache
-                    .boundary_field_cache
-                    .get(&uuid)
-                    .map(|cache| cache.field.clone())
-            });
-            if draw.boundary_field_node_uuid.is_some() && boundary_field.is_none() {
-                continue;
-            }
-            let fingerprint = workflow_bundle_display_fingerprint(
-                &draw,
-                draw.boundary_field_node_uuid.and_then(|uuid| {
-                    self.workflow
-                        .execution_cache
-                        .boundary_field_cache
-                        .get(&uuid)
-                        .map(|cache| cache.fingerprint)
-                }),
-            );
-            if should_queue_expensive_job(
-                self.workflow.execution_cache.node_runs.get(&draw.node_uuid),
-                fingerprint,
-                &self.workflow.jobs_in_flight,
-                draw.node_uuid,
-            ) {
-                let plan = BundleSurfacePlan {
-                    build_node_uuid: draw.build_node_uuid,
-                    label: draw.label.clone(),
-                    flow: draw.flow.clone(),
-                    per_group: draw.per_group,
-                    build_mode: draw.build_mode,
-                    voxel_size_mm: draw.voxel_size_mm,
-                    threshold: draw.threshold,
-                    smooth_sigma: draw.smooth_sigma,
-                    min_component_volume_mm3: draw.min_component_volume_mm3,
-                    tube_radius_mm: draw.tube_radius_mm,
-                    tube_sides: draw.tube_sides,
-                    opacity: draw.opacity,
-                };
-                self.queue_workflow_job(
-                    draw.node_uuid,
-                    fingerprint,
-                    WorkflowJobKind::BundleSurface,
-                    WorkflowJobPayload::BundleSurface {
-                        plan,
-                        color_mode: draw.color_mode,
-                        boundary_field,
-                    },
-                );
-                queued_any = true;
-            }
-        }
-
         self.workflow.run_expensive_requested = false;
         if !queued_any && self.workflow.jobs_in_flight.is_empty() {
             self.workflow.run_session_active = false;
@@ -1716,6 +1224,7 @@ impl crate::app::TrxVizApp {
                                 data: scalars.values.clone(),
                                 dims: scalars.dims,
                                 voxel_to_ras: scalars.voxel_to_ras,
+                                value_range: (0.0, 1.0),
                             })
                         });
                     }
@@ -1868,6 +1377,7 @@ impl crate::app::TrxVizApp {
                     data: Vec::new(),
                     dims: stack.dims,
                     voxel_to_ras: stack.voxel_to_ras,
+                    value_range: (0.0, 1.0),
                 };
                 composite.update_slice(
                     &rs.device,
@@ -2083,6 +1593,7 @@ impl crate::app::TrxVizApp {
             azimuth_deg,
             elevation_deg,
             distance,
+            run_expensive: true,
         };
 
         let workflow = HeadlessWorkflowState {
@@ -2389,39 +1900,6 @@ impl crate::app::TrxVizApp {
             }
         }
     }
-}
-
-fn should_queue_expensive_job(
-    record: Option<&ExpensiveNodeRunRecord>,
-    fingerprint: u64,
-    in_flight: &HashMap<WorkflowNodeUuid, (WorkflowJobKind, u64)>,
-    node_uuid: WorkflowNodeUuid,
-) -> bool {
-    if in_flight
-        .get(&node_uuid)
-        .is_some_and(|(_, queued_fingerprint)| *queued_fingerprint == fingerprint)
-    {
-        return false;
-    }
-    let Some(record) = record else {
-        return true;
-    };
-    // Already succeeded at this fingerprint — don't re-run.
-    if record.last_success_fingerprint == Some(fingerprint) {
-        return false;
-    }
-    // User cancelled at this fingerprint — don't auto-restart. Cleared
-    // on any explicit Run click (see `queue_workflow_jobs` entry) or
-    // when the fingerprint changes.
-    if record.last_cancelled_fingerprint == Some(fingerprint) {
-        return false;
-    }
-    true
-}
-
-fn mark_expensive_failure(record: &mut ExpensiveNodeRunRecord, fingerprint: u64, error: &str) {
-    record.current_fingerprint = Some(fingerprint);
-    record.status = WorkflowExecutionStatus::Failed(error.to_string());
 }
 
 #[cfg(test)]

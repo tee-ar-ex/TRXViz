@@ -59,14 +59,19 @@ fn evaluate_projection(
         .entry(ctx.node.uuid)
         .or_default();
     prime_expensive_record(record, fingerprint);
-    ctx.scene_plan.surface_map_plans.push(SurfaceMapPlan {
-        node_uuid: ctx.node.uuid,
-        flow,
-        surface_id,
-        surface: surface.data.clone(),
-        depth_mm,
-        dps_field: dps_field.clone(),
-    });
+    ctx.scene_plan.request_job(crate::workflow::JobRequest::new(
+        ctx.node.uuid,
+        fingerprint,
+        upstream_stale,
+        crate::workflow::WorkflowJobPayload::SurfaceMap(SurfaceMapPlan {
+            node_uuid: ctx.node.uuid,
+            flow,
+            surface_id,
+            surface: surface.data.clone(),
+            depth_mm,
+            dps_field: dps_field.clone(),
+        }),
+    ));
 
     sync_node_state_from_run_record(ctx.node_state, record);
     if let Some(CachedSurfaceStreamlineMap { map }) = ctx

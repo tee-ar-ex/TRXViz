@@ -19,10 +19,17 @@ pub(crate) fn evaluate_derived_streamline_plan(
     plan: ReactiveStreamlinePlan,
     inputs: &[Option<EvaluatedValue>],
     execution_cache: &mut WorkflowExecutionCache,
+    scene_plan: &mut SceneFramePlan,
     node_state: &mut NodeEvalState,
 ) -> WorkflowResult<Vec<EvaluatedValue>> {
     let fingerprint = workflow_reactive_streamline_fingerprint(&plan);
     let upstream_stale = inputs.iter().flatten().any(|value| value.stale);
+    scene_plan.request_job(crate::workflow::JobRequest::new(
+        node.uuid,
+        fingerprint,
+        upstream_stale,
+        WorkflowJobPayload::ReactiveStreamline(plan),
+    ));
     let record = execution_cache.node_runs.entry(node.uuid).or_default();
     prime_expensive_record(record, fingerprint);
     sync_node_state_from_run_record(node_state, record);

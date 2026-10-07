@@ -595,7 +595,16 @@ fn merge_queues_one_reactive_plan() {
     connect(&mut doc, src_b, 0, merge, 1);
 
     let runtime = eval(&doc, &[trx_a, trx_b]);
-    assert_eq!(runtime.scene_plan.reactive_streamline_plans.len(), 1);
+    assert_eq!(
+        runtime
+            .scene_plan
+            .jobs
+            .iter()
+            .filter(|job| job.receipt.kind
+                == trxviz_core::workflow::WorkflowJobKind::ReactiveStreamline)
+            .count(),
+        1
+    );
 }
 
 // ---------------------------------------------------------------------------

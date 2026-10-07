@@ -60,6 +60,10 @@ pub enum SurfaceColormap {
     BlueWhiteRed = 0,
     Viridis = 1,
     Inferno = 2,
+    /// nilearn stat-map diverging: blue/cyan → black → red/yellow.
+    ColdHot = 3,
+    /// nilearn white-centered variant for light backgrounds.
+    ColdWhiteHot = 4,
 }
 
 impl Default for SurfaceColormap {
@@ -74,10 +78,18 @@ impl SurfaceColormap {
             Self::BlueWhiteRed => "Blue → white → red",
             Self::Viridis => "Viridis",
             Self::Inferno => "Inferno",
+            Self::ColdHot => "Cold → hot",
+            Self::ColdWhiteHot => "Cold → white → hot",
         }
     }
 
-    pub const ALL: [Self; 3] = [Self::BlueWhiteRed, Self::Viridis, Self::Inferno];
+    pub const ALL: [Self; 5] = [
+        Self::BlueWhiteRed,
+        Self::Viridis,
+        Self::Inferno,
+        Self::ColdHot,
+        Self::ColdWhiteHot,
+    ];
 }
 
 #[repr(C)]

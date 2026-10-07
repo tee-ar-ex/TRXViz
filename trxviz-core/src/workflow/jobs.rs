@@ -28,9 +28,16 @@ pub fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
     }
 }
 
+/// Run one job to completion on the calling thread.
+///
+/// `gpu` is used by jobs that have a GPU implementation (Dipy PTT
+/// tracking today); everything else ignores it. Pass `None` on a host
+/// without a usable device and those jobs fall back to CPU where one
+/// exists, or return a descriptive error where it does not.
 pub fn run_workflow_job(
     payload: WorkflowJobPayload,
     cancel: super::tracking::CancelFlag,
+    gpu: Option<&crate::gpu::GpuHandle>,
 ) -> WorkflowResult<WorkflowJobOutput> {
     match payload {
         WorkflowJobPayload::ReactiveStreamline(plan) => Ok(WorkflowJobOutput::ReactiveStreamline(
@@ -136,13 +143,9 @@ pub fn run_workflow_job(
                 boundary_field.as_deref(),
             ),
         }),
-        WorkflowJobPayload::DipyTractography {
-            plan,
-            device,
-            queue,
-        } => {
-            let flow = if let (Some(device), Some(queue)) = (device, queue) {
-                crate::gpu::dipy::run_gpu_dipy(&plan, &device, &queue, &cancel)?
+        WorkflowJobPayload::DipyTractography { plan } => {
+            let flow = if let Some(gpu) = gpu {
+                crate::gpu::dipy::run_gpu_dipy(&plan, &gpu.device, &gpu.queue, &cancel)?
             } else {
                 super::cpu_dipy::run_cpu_dipy(&plan, &cancel)?
             };
@@ -245,9 +248,24 @@ pub fn sync_node_state_from_run_record(
 }
 
 pub fn prime_expensive_record(record: &mut ExpensiveNodeRunRecord, fingerprint: u64) {
+    let previous_fingerprint = record.current_fingerprint;
     record.current_fingerprint = Some(fingerprint);
     if record.last_success_fingerprint == Some(fingerprint) {
         record.status = WorkflowExecutionStatus::Ready;
+    } else if record.last_failed_fingerprint == Some(fingerprint)
+        && matches!(record.status, WorkflowExecutionStatus::Failed(_))
+    {
+        // A deterministic failure at this exact fingerprint stays
+        // visible (and un-dispatched) until the user edits something
+        // or explicitly clicks Run. Without this the next evaluation
+        // would reset the status and the scheduler would re-queue the
+        // same failing job every pass.
+    } else if matches!(
+        record.status,
+        WorkflowExecutionStatus::Queued | WorkflowExecutionStatus::Running
+    ) && previous_fingerprint == Some(fingerprint)
+    {
+        // In flight at this fingerprint: leave the live status alone.
     } else if record.last_success_fingerprint.is_some() {
         record.status = WorkflowExecutionStatus::Stale;
     } else {
@@ -255,10 +273,26 @@ pub fn prime_expensive_record(record: &mut ExpensiveNodeRunRecord, fingerprint: 
     }
 }
 
+pub fn mark_expensive_queued(record: &mut ExpensiveNodeRunRecord, fingerprint: u64) {
+    record.current_fingerprint = Some(fingerprint);
+    record.status = WorkflowExecutionStatus::Queued;
+}
+
+pub fn mark_expensive_running(record: &mut ExpensiveNodeRunRecord, fingerprint: u64) {
+    record.current_fingerprint = Some(fingerprint);
+    record.status = WorkflowExecutionStatus::Running;
+}
+
 pub fn mark_expensive_cancelled(record: &mut ExpensiveNodeRunRecord, fingerprint: u64) {
     record.current_fingerprint = Some(fingerprint);
     record.last_cancelled_fingerprint = Some(fingerprint);
     record.status = WorkflowExecutionStatus::Failed("cancelled by user".to_string());
+}
+
+pub fn mark_expensive_failure(record: &mut ExpensiveNodeRunRecord, fingerprint: u64, error: &str) {
+    record.current_fingerprint = Some(fingerprint);
+    record.last_failed_fingerprint = Some(fingerprint);
+    record.status = WorkflowExecutionStatus::Failed(error.to_string());
 }
 
 pub fn mark_expensive_success(
@@ -272,6 +306,9 @@ pub fn mark_expensive_success(
     // cancellation at the same fingerprint (it's no longer relevant).
     if record.last_cancelled_fingerprint == Some(fingerprint) {
         record.last_cancelled_fingerprint = None;
+    }
+    if record.last_failed_fingerprint == Some(fingerprint) {
+        record.last_failed_fingerprint = None;
     }
     record.status = WorkflowExecutionStatus::Ready;
     record.last_result_summary = Some(result_summary);

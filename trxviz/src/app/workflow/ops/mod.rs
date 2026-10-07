@@ -537,13 +537,15 @@ pub(crate) fn edit_node_op(
             egui::ComboBox::from_id_salt(format!("surface_colormap_{}", node_uuid.0))
                 .selected_text(format!("{projection_colormap:?}"))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        projection_colormap,
+                    for cm in [
                         SurfaceColormap::BlueWhiteRed,
-                        "Blue-White-Red",
-                    );
-                    ui.selectable_value(projection_colormap, SurfaceColormap::Viridis, "Viridis");
-                    ui.selectable_value(projection_colormap, SurfaceColormap::Inferno, "Inferno");
+                        SurfaceColormap::Viridis,
+                        SurfaceColormap::Inferno,
+                        SurfaceColormap::ColdHot,
+                        SurfaceColormap::ColdWhiteHot,
+                    ] {
+                        ui.selectable_value(projection_colormap, cm, surface_colormap_label(cm));
+                    }
                 });
             ui.horizontal(|ui| {
                 ui.add(egui::DragValue::new(range_min).speed(0.1).prefix("Min "));
@@ -802,6 +804,8 @@ pub(crate) fn edit_node_op(
                         workflow::GlyphColormap::Viridis,
                         workflow::GlyphColormap::Inferno,
                         workflow::GlyphColormap::BlueWhiteRed,
+                        workflow::GlyphColormap::ColdHot,
+                        workflow::GlyphColormap::ColdWhiteHot,
                     ] {
                         ui.selectable_value(vertex_colormap, value, format!("{value:?}"));
                     }
@@ -946,6 +950,8 @@ pub(crate) fn edit_node_op(
                         SurfaceColormap::BlueWhiteRed,
                         SurfaceColormap::Viridis,
                         SurfaceColormap::Inferno,
+                        SurfaceColormap::ColdHot,
+                        SurfaceColormap::ColdWhiteHot,
                     ] {
                         ui.selectable_value(colormap, cm, surface_colormap_label(cm));
                     }
@@ -1674,21 +1680,15 @@ fn show_surface_colormap_picker(
     egui::ComboBox::from_id_salt(id_salt)
         .selected_text(surface_colormap_label(*colormap))
         .show_ui(ui, |ui| {
-            ui.selectable_value(
-                colormap,
+            for cm in [
                 SurfaceColormap::BlueWhiteRed,
-                surface_colormap_label(SurfaceColormap::BlueWhiteRed),
-            );
-            ui.selectable_value(
-                colormap,
                 SurfaceColormap::Viridis,
-                surface_colormap_label(SurfaceColormap::Viridis),
-            );
-            ui.selectable_value(
-                colormap,
                 SurfaceColormap::Inferno,
-                surface_colormap_label(SurfaceColormap::Inferno),
-            );
+                SurfaceColormap::ColdHot,
+                SurfaceColormap::ColdWhiteHot,
+            ] {
+                ui.selectable_value(colormap, cm, surface_colormap_label(cm));
+            }
         });
 }
 
@@ -1697,5 +1697,7 @@ fn surface_colormap_label(colormap: SurfaceColormap) -> &'static str {
         SurfaceColormap::BlueWhiteRed => "Blue-White-Red",
         SurfaceColormap::Viridis => "Viridis",
         SurfaceColormap::Inferno => "Inferno",
+        SurfaceColormap::ColdHot => "Cold-Hot",
+        SurfaceColormap::ColdWhiteHot => "Cold-White-Hot",
     }
 }

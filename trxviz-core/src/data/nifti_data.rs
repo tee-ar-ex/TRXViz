@@ -64,6 +64,11 @@ pub struct NiftiVolume {
     pub dims: [usize; 3],
     /// Voxel-to-RAS+ affine (4x4, column-major for glam).
     pub voxel_to_ras: Mat4,
+    /// The file's real intensity range before normalization: a normalized
+    /// sample `t` corresponds to `value_range.0 + t * (value_range.1 -
+    /// value_range.0)`. Synthetic dims-only volumes use `(0.0, 1.0)`, which
+    /// makes the mapping the identity.
+    pub value_range: (f32, f32),
 }
 
 impl NiftiVolume {
@@ -146,11 +151,43 @@ impl NiftiVolume {
             vec![0.0; raw.len()]
         };
 
+        let value_range = if range > 0.0 && min_val.is_finite() && max_val.is_finite() {
+            (min_val, max_val)
+        } else {
+            (0.0, 1.0)
+        };
+
         Ok(Self {
             data,
             dims,
             voxel_to_ras,
+            value_range,
         })
+    }
+
+    /// Nearest-voxel normalized sample at a RAS+ world position, or `None`
+    /// outside the volume. `data` is i-fastest (Fortran order) — see the
+    /// upload note in [`NiftiVolume::load`].
+    pub fn sample_world(&self, world: Vec3) -> Option<f32> {
+        let voxel = self.voxel_to_ras.inverse() * world.extend(1.0);
+        let i = voxel.x.round() as isize;
+        let j = voxel.y.round() as isize;
+        let k = voxel.z.round() as isize;
+        let [ni, nj, nk] = self.dims;
+        if i < 0 || j < 0 || k < 0 || i >= ni as isize || j >= nj as isize || k >= nk as isize {
+            return None;
+        }
+        self.data
+            .get(i as usize + j as usize * ni + k as usize * ni * nj)
+            .copied()
+    }
+
+    /// Like [`sample_world`](Self::sample_world) but converted back to the
+    /// file's real intensity units via `value_range`.
+    pub fn sample_world_real(&self, world: Vec3) -> Option<f32> {
+        let t = self.sample_world(world)?;
+        let (lo, hi) = self.value_range;
+        Some(lo + t * (hi - lo))
     }
 
     /// Compute the half-extents (in world-space mm) for each slice camera axis so the
@@ -289,5 +326,60 @@ impl NiftiVolume {
             _ => Vec3::new(si, cj, ck),
         };
         (normal, self.voxel_to_world(center_voxel))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 2x3x4 volume with a scaled+translated affine; data encodes its own
+    /// (i, j, k) so any indexing-order mistake is caught.
+    fn synthetic_volume() -> NiftiVolume {
+        let dims = [2usize, 3, 4];
+        let mut data = vec![0.0f32; dims[0] * dims[1] * dims[2]];
+        for k in 0..dims[2] {
+            for j in 0..dims[1] {
+                for i in 0..dims[0] {
+                    // Fortran order: i varies fastest.
+                    data[i + j * dims[0] + k * dims[0] * dims[1]] = (i * 100 + j * 10 + k) as f32;
+                }
+            }
+        }
+        NiftiVolume {
+            data,
+            dims,
+            voxel_to_ras: Mat4::from_cols(
+                Vec4::new(2.0, 0.0, 0.0, 0.0),
+                Vec4::new(0.0, 2.0, 0.0, 0.0),
+                Vec4::new(0.0, 0.0, 2.0, 0.0),
+                Vec4::new(-10.0, 5.0, 3.0, 1.0),
+            ),
+            value_range: (100.0, 500.0),
+        }
+    }
+
+    #[test]
+    fn sample_world_fortran_indexing() {
+        let vol = synthetic_volume();
+        // Voxel (1, 2, 3) sits at world (-10 + 2, 5 + 4, 3 + 6).
+        let world = Vec3::new(-8.0, 9.0, 9.0);
+        assert_eq!(vol.sample_world(world), Some(123.0));
+        // Nearest-voxel: a sub-voxel offset rounds to the same voxel.
+        assert_eq!(vol.sample_world(world + Vec3::splat(0.9)), Some(123.0));
+        // Out of bounds on each side.
+        assert_eq!(vol.sample_world(Vec3::new(-13.0, 9.0, 9.0)), None);
+        assert_eq!(vol.sample_world(Vec3::new(-8.0, 12.0, 9.0)), None);
+        assert_eq!(vol.sample_world(Vec3::new(-8.0, 9.0, 12.0)), None);
+    }
+
+    #[test]
+    fn sample_world_real_applies_value_range() {
+        let mut vol = synthetic_volume();
+        // Normalized 0.5 at voxel (0,0,0)'s world position.
+        vol.data[0] = 0.5;
+        let world = Vec3::new(-10.0, 5.0, 3.0);
+        assert_eq!(vol.sample_world(world), Some(0.5));
+        assert_eq!(vol.sample_world_real(world), Some(300.0));
     }
 }
