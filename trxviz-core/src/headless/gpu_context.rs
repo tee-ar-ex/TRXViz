@@ -286,7 +286,7 @@ pub(super) fn build_gpu_resources(
     let mut fixels_2d = FixelResources::new(device, TARGET_FORMAT);
 
     // ODX ODF glyphs and fixels — driven by the evaluated workflow plan.
-    let axial_slice = scene.slice_indices[2] as u32;
+    let axial_slice = scene.slice_indices[0] as u32;
     let odf_plan = workflow.runtime.scene_plan.active_odf_glyph_draw();
     if let Some(plan) = odf_plan {
         let odx = &plan.field.scene;

@@ -662,20 +662,7 @@ impl ViewportState {
         index: usize,
     ) -> f32 {
         if let Some(nf) = nifti_files.first() {
-            let vol = &nf.volume;
-            let idx = index as f32;
-            let world = match axis_index {
-                0 => vol.voxel_to_world(Vec3::new(0.0, 0.0, idx)),
-                1 => vol.voxel_to_world(Vec3::new(0.0, idx, 0.0)),
-                2 => vol.voxel_to_world(Vec3::new(idx, 0.0, 0.0)),
-                _ => Vec3::ZERO,
-            };
-            match axis_index {
-                0 => world.z,
-                1 => world.y,
-                2 => world.x,
-                _ => 0.0,
-            }
+            nf.volume.slice_world_position(axis_index, index)
         } else {
             self.slices.slice_world_offsets[axis_index]
         }
@@ -712,17 +699,8 @@ impl ViewportState {
                 // Mirror the new index into world space so per-volume
                 // slice updates (which resolve from world offsets) move
                 // in lockstep with the anchor NIfTI.
-                let probe = match axis_index {
-                    0 => Vec3::new(0.0, 0.0, new_idx as f32),
-                    1 => Vec3::new(0.0, new_idx as f32, 0.0),
-                    _ => Vec3::new(new_idx as f32, 0.0, 0.0),
-                };
-                let world = vol.voxel_to_world(probe);
-                self.slices.slice_world_offsets[axis_index] = match axis_index {
-                    0 => world.z,
-                    1 => world.y,
-                    _ => world.x,
-                };
+                self.slices.slice_world_offsets[axis_index] =
+                    vol.slice_world_position(axis_index, new_idx);
                 self.slices.slices_dirty = true;
                 return true;
             }
@@ -741,17 +719,13 @@ impl ViewportState {
             if new_idx != self.slices.slice_indices[axis_index] {
                 self.slices.slice_indices[axis_index] = new_idx;
                 if let Some(affine) = odx_voxel_to_ras {
-                    let v = match axis_index {
-                        0 => glam::Vec3::new(0.0, 0.0, new_idx as f32),
-                        1 => glam::Vec3::new(0.0, new_idx as f32, 0.0),
-                        _ => glam::Vec3::new(new_idx as f32, 0.0, 0.0),
-                    };
-                    let world = affine.transform_point3(v);
-                    self.slices.slice_world_offsets[axis_index] = match axis_index {
-                        0 => world.z,
-                        1 => world.y,
-                        _ => world.x,
-                    };
+                    self.slices.slice_world_offsets[axis_index] =
+                        trxviz_core::data::nifti_data::slice_world_position(
+                            &affine,
+                            dims.map(|d| d as usize),
+                            axis_index,
+                            new_idx,
+                        );
                 }
                 self.slices.slices_dirty = true;
                 return true;

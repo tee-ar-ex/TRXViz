@@ -7,6 +7,7 @@ use trxviz_core::data::gifti_data::GiftiSurfaceData;
 use trxviz_core::data::loaded_files::{
     FileId, LoadedCifti, LoadedNifti, LoadedTrx, StreamlineBacking, VolumeColormap,
 };
+use trxviz_core::data::nifti_data::slice_world_position;
 use trxviz_core::data::odx_data::OdxScene;
 use trxviz_core::data::orientation_field::BoundaryContactField;
 use trxviz_core::renderer::background_renderer::BackgroundResources;
@@ -602,10 +603,11 @@ impl super::TrxVizApp {
             }
             self.viewport.set_slice_indices(mid);
             let affine = scene.voxel_to_ras();
-            let w0 = affine.transform_point3(Vec3::new(0.0, 0.0, mid[0] as f32));
-            let w1 = affine.transform_point3(Vec3::new(0.0, mid[1] as f32, 0.0));
-            let w2 = affine.transform_point3(Vec3::new(mid[2] as f32, 0.0, 0.0));
-            self.viewport.set_slice_world_offsets([w0.z, w1.y, w2.x]);
+            let dims = dims.map(|d| d as usize);
+            self.viewport
+                .set_slice_world_offsets(std::array::from_fn(|axis_index| {
+                    slice_world_position(&affine, dims, axis_index, mid[axis_index])
+                }));
         }
 
         let scene = Arc::new(scene);
@@ -613,12 +615,15 @@ impl super::TrxVizApp {
             let current_axial = self.viewport.slice_index(0) as u32;
             if let Some(nonempty_axial) = scene.nearest_nonempty_slice(2, current_axial) {
                 self.viewport.set_slice_index(0, nonempty_axial as usize);
-                let w = scene.voxel_to_ras().transform_point3(Vec3::new(
-                    0.0,
-                    0.0,
-                    nonempty_axial as f32,
-                ));
-                self.viewport.set_slice_world_offset(0, w.z);
+                self.viewport.set_slice_world_offset(
+                    0,
+                    slice_world_position(
+                        &scene.voxel_to_ras(),
+                        dims.map(|d| d as usize),
+                        0,
+                        nonempty_axial as usize,
+                    ),
+                );
             }
         }
         if scene.glyph_source_kind() == Some(trxviz_core::data::odx_data::OdxGlyphSourceKind::Odf)

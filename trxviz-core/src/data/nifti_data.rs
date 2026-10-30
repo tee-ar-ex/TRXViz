@@ -56,6 +56,64 @@ fn quatern_to_mat44(
     )
 }
 
+/// Voxel axis and world axis of a view's slices: axial slices step along `k`
+/// and sit at a world z, coronal along `j` at a y, sagittal along `i` at an x.
+fn slice_axes(axis_index: usize) -> (usize, usize) {
+    match axis_index {
+        0 => (2, 2),
+        1 => (1, 1),
+        _ => (0, 0),
+    }
+}
+
+/// The middle voxel of the volume, moved to `index` along `voxel_axis`.
+fn centre_voxel(dims: [usize; 3], voxel_axis: usize, index: f32) -> Vec3 {
+    let mut voxel = Vec3::new(
+        dims[0].saturating_sub(1) as f32 * 0.5,
+        dims[1].saturating_sub(1) as f32 * 0.5,
+        dims[2].saturating_sub(1) as f32 * 0.5,
+    );
+    voxel[voxel_axis] = index;
+    voxel
+}
+
+/// World position of slice `index` along the view axis (z for axial, y for
+/// coronal, x for sagittal), taken where the slice crosses the line of voxel
+/// centres through the middle of the volume. [`nearest_slice_index`] inverts
+/// it exactly. Both use the same point because on an oblique grid a slice's
+/// world z changes across the slice.
+pub fn slice_world_position(
+    voxel_to_ras: &Mat4,
+    dims: [usize; 3],
+    axis_index: usize,
+    index: usize,
+) -> f32 {
+    let (voxel_axis, world_axis) = slice_axes(axis_index);
+    voxel_to_ras.transform_point3(centre_voxel(dims, voxel_axis, index as f32))[world_axis]
+}
+
+/// The slice whose [`slice_world_position`] is nearest `world_pos`, clamped to
+/// the volume.
+pub fn nearest_slice_index(
+    voxel_to_ras: &Mat4,
+    dims: [usize; 3],
+    axis_index: usize,
+    world_pos: f32,
+) -> usize {
+    let (voxel_axis, world_axis) = slice_axes(axis_index);
+    let base = voxel_to_ras.transform_point3(centre_voxel(dims, voxel_axis, 0.0))[world_axis];
+    let step = voxel_to_ras.col(voxel_axis)[world_axis];
+    let coord = if step.abs() > 1e-6 {
+        (world_pos - base) / step
+    } else {
+        // The slice axis lies in the view plane, so no world position picks
+        // a slice; keep the middle one.
+        dims[voxel_axis].saturating_sub(1) as f32 * 0.5
+    };
+    let max = dims[voxel_axis].saturating_sub(1) as isize;
+    (coord.round() as isize).clamp(0, max) as usize
+}
+
 /// NIfTI volume data ready for GPU upload.
 pub struct NiftiVolume {
     /// 3D voxel data normalized to `[0, 1]` as `f32`, stored in `\[i]\[j]\[k]` order.
@@ -189,25 +247,14 @@ impl NiftiVolume {
         Vec3::new(v.x, v.y, v.z)
     }
 
+    /// See the free function [`slice_world_position`].
+    pub fn slice_world_position(&self, axis_index: usize, index: usize) -> f32 {
+        slice_world_position(&self.voxel_to_ras, self.dims, axis_index, index)
+    }
+
+    /// See the free function [`nearest_slice_index`].
     pub fn nearest_slice_index(&self, axis_index: usize, world_pos: f32) -> usize {
-        let world_to_voxel = self.voxel_to_ras.inverse();
-        let probe = match axis_index {
-            0 => Vec3::new(0.0, 0.0, world_pos),
-            1 => Vec3::new(0.0, world_pos, 0.0),
-            _ => Vec3::new(world_pos, 0.0, 0.0),
-        };
-        let voxel = world_to_voxel * probe.extend(1.0);
-        let coord = match axis_index {
-            0 => voxel.z,
-            1 => voxel.y,
-            _ => voxel.x,
-        };
-        let max = match axis_index {
-            0 => self.dims[2].saturating_sub(1),
-            1 => self.dims[1].saturating_sub(1),
-            _ => self.dims[0].saturating_sub(1),
-        } as isize;
-        (coord.round() as isize).clamp(0, max) as usize
+        nearest_slice_index(&self.voxel_to_ras, self.dims, axis_index, world_pos)
     }
 
     /// Compute the 4 corner positions (in RAS+ space) of an axial slice at voxel index k.
@@ -289,5 +336,70 @@ impl NiftiVolume {
             _ => Vec3::new(si, cj, ck),
         };
         (normal, self.voxel_to_world(center_voxel))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::{EulerRot, Mat4, Quat, Vec3, Vec4};
+
+    use super::{nearest_slice_index, slice_world_position};
+
+    /// Like odf-testdata's `slab`: 1.5 mm voxels stored LAS, the grid rotated
+    /// by (12, -7, 5) degrees, 10 axial slices.
+    fn oblique_slab() -> (Mat4, [usize; 3]) {
+        let rotation = Quat::from_euler(
+            EulerRot::XYZ,
+            12f32.to_radians(),
+            -7f32.to_radians(),
+            5f32.to_radians(),
+        );
+        let affine = Mat4::from_rotation_translation(rotation, Vec3::new(70.0, -95.0, 20.0))
+            * Mat4::from_scale(Vec3::new(-1.5, 1.5, 1.5));
+        (affine, [94, 126, 10])
+    }
+
+    #[test]
+    fn slice_positions_round_trip_on_an_oblique_grid() {
+        let (affine, dims) = oblique_slab();
+        for (axis, n) in [(0, dims[2]), (1, dims[1]), (2, dims[0])] {
+            for index in 0..n {
+                let world = slice_world_position(&affine, dims, axis, index);
+                assert_eq!(nearest_slice_index(&affine, dims, axis, world), index);
+            }
+        }
+    }
+
+    #[test]
+    fn oblique_axial_slices_line_up_across_storage_orders() {
+        // The same grid with j reversed, as DSI Studio stores an LAS image.
+        let (las, dims) = oblique_slab();
+        let flip_j = Mat4::from_cols(
+            Vec4::X,
+            -Vec4::Y,
+            Vec4::Z,
+            Vec4::new(0.0, (dims[1] - 1) as f32, 0.0, 1.0),
+        );
+        let lps = las * flip_j;
+        for k in 0..dims[2] {
+            let world = slice_world_position(&las, dims, 0, k);
+            assert_eq!(nearest_slice_index(&lps, dims, 0, world), k);
+        }
+    }
+
+    #[test]
+    fn axis_aligned_slices_sit_at_their_world_coordinate() {
+        let affine = Mat4::from_cols(
+            Vec4::new(-2.0, 0.0, 0.0, 0.0),
+            Vec4::new(0.0, 2.0, 0.0, 0.0),
+            Vec4::new(0.0, 0.0, 2.0, 0.0),
+            Vec4::new(90.0, -126.0, -72.0, 1.0),
+        );
+        let dims = [91, 109, 91];
+        assert_eq!(slice_world_position(&affine, dims, 0, 5), -62.0);
+        assert_eq!(slice_world_position(&affine, dims, 2, 3), 84.0);
+        assert_eq!(nearest_slice_index(&affine, dims, 0, -61.6), 5);
+        assert_eq!(nearest_slice_index(&affine, dims, 2, 84.9), 3);
+        assert_eq!(nearest_slice_index(&affine, dims, 0, 1000.0), 90);
     }
 }
