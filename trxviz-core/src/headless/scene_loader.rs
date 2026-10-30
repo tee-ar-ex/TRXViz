@@ -193,36 +193,31 @@ pub(super) fn load_asset_args_state(
         };
         let show_fixel_3d_by_default = odx_scene.glyph_source_kind().is_none();
         let dims = odx_scene.dimensions();
-        let header = odx_rs::OdxDataset::open(path)
-            .ok()
-            .map(|ds| ds.header().clone());
-        if let Some(h) = &header {
-            let affine = &h.voxel_to_rasmm;
-            let mid = [
-                dims[0] as f64 * 0.5,
-                dims[1] as f64 * 0.5,
-                dims[2] as f64 * 0.5,
-            ];
-            let cx = (affine[0][0] * mid[0]
-                + affine[0][1] * mid[1]
-                + affine[0][2] * mid[2]
-                + affine[0][3]) as f32;
-            let cy = (affine[1][0] * mid[0]
-                + affine[1][1] * mid[1]
-                + affine[1][2] * mid[2]
-                + affine[1][3]) as f32;
-            let cz = (affine[2][0] * mid[0]
-                + affine[2][1] * mid[1]
-                + affine[2][2] * mid[2]
-                + affine[2][3]) as f32;
-            scene.volume_center = Vec3::new(cx, cy, cz);
-            let dx = (affine[0][0].powi(2) + affine[1][0].powi(2) + affine[2][0].powi(2)).sqrt();
-            scene.volume_extent = (dims[0].max(dims[1]).max(dims[2]) as f64 * dx) as f32;
-        }
+        // The loaded scene's header, so DSI Studio, MRtrix and dipy inputs
+        // (which `OdxDataset::open` cannot read) are centred too.
+        let affine = &odx_scene.dataset().header().voxel_to_rasmm;
+        let mid = [
+            dims[0] as f64 * 0.5,
+            dims[1] as f64 * 0.5,
+            dims[2] as f64 * 0.5,
+        ];
+        let cx =
+            (affine[0][0] * mid[0] + affine[0][1] * mid[1] + affine[0][2] * mid[2] + affine[0][3])
+                as f32;
+        let cy =
+            (affine[1][0] * mid[0] + affine[1][1] * mid[1] + affine[1][2] * mid[2] + affine[1][3])
+                as f32;
+        let cz =
+            (affine[2][0] * mid[0] + affine[2][1] * mid[1] + affine[2][2] * mid[2] + affine[2][3])
+                as f32;
+        scene.volume_center = Vec3::new(cx, cy, cz);
+        let dx = (affine[0][0].powi(2) + affine[1][0].powi(2) + affine[2][0].powi(2)).sqrt();
+        scene.volume_extent = (dims[0].max(dims[1]).max(dims[2]) as f64 * dx) as f32;
+        // Viewport order (axial, coronal, sagittal), as for NIfTI inputs.
         scene.slice_indices = [
-            dims[0] as usize / 2,
-            dims[1] as usize / 2,
             dims[2] as usize / 2,
+            dims[1] as usize / 2,
+            dims[0] as usize / 2,
         ];
         let odx_arc = Arc::new(odx_scene);
         let id = scene.next_file_id;

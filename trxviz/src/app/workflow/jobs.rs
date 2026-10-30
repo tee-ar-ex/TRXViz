@@ -1761,10 +1761,10 @@ impl crate::app::TrxVizApp {
                     let dims = vol.dims;
                     let mid = [dims[2] / 2, dims[1] / 2, dims[0] / 2];
                     self.viewport.set_slice_indices(mid);
-                    let w0 = vol.voxel_to_world(glam::Vec3::new(0.0, 0.0, mid[0] as f32));
-                    let w1 = vol.voxel_to_world(glam::Vec3::new(0.0, mid[1] as f32, 0.0));
-                    let w2 = vol.voxel_to_world(glam::Vec3::new(mid[2] as f32, 0.0, 0.0));
-                    self.viewport.set_slice_world_offsets([w0.z, w1.y, w2.x]);
+                    self.viewport
+                        .set_slice_world_offsets(std::array::from_fn(|axis_index| {
+                            vol.slice_world_position(axis_index, mid[axis_index])
+                        }));
                     let no_other_geometry = self.scene.trx_files.is_empty()
                         && self.scene.gifti_surfaces.is_empty()
                         && self.scene.odx_scene.is_none();
