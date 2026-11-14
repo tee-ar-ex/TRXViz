@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use trxviz_core::data::loaded_files::VolumeColormap;
+use trxviz_core::data::loaded_files::{VolumeColormap, VolumeRender3DMode};
 use trxviz_core::data::orientation_field::{
     BoundaryGlyphColorMode, BoundaryGlyphNormalization, DirectionFieldBinningMode,
 };
@@ -344,7 +344,15 @@ pub(crate) fn edit_node_op(
             opacity,
             window_center,
             window_width,
+            render_3d_mode,
         } => {
+            egui::ComboBox::from_id_salt(format!("volume_3d_mode_{}", node_uuid.0))
+                .selected_text(render_3d_mode.label())
+                .show_ui(ui, |ui| {
+                    for value in VolumeRender3DMode::ALL {
+                        ui.selectable_value(render_3d_mode, *value, value.label());
+                    }
+                });
             egui::ComboBox::from_id_salt(format!("volume_colormap_{}", node_uuid.0))
                 .selected_text(colormap.label())
                 .show_ui(ui, |ui| {

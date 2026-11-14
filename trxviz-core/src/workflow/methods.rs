@@ -554,6 +554,7 @@ pub fn all_op_doc_info() -> Vec<OpDocInfo> {
             opacity: vd.opacity,
             window_center: vd.window_center,
             window_width: vd.window_width,
+            render_3d_mode: vd.render_3d_mode,
         },
     ));
     // SurfaceOverlayStack has dynamic ports — surface `None` so the

@@ -947,6 +947,27 @@ impl super::super::TrxVizApp {
                 fog_far,
             },
         ));
+        let has_2d_slice_volume = render_data.volumes.volume_draws.iter().any(|vd| {
+            vd.render_3d_mode == trxviz_core::data::loaded_files::VolumeRender3DMode::Off
+                && vd.opacity > 0.01
+        });
+        if has_2d_slice_volume {
+            let slice_visible = self.viewport.slice_visible();
+            for axis_index in 0..3 {
+                if slice_visible[axis_index] {
+                    let slice_pos = self
+                        .viewport
+                        .slice_world_position(&self.scene.nifti_files, axis_index);
+                    self.draw_mesh_intersections_with_mode(
+                        ui, rect, axis_index, vp, slice_pos, true,
+                    );
+                    self.draw_bundle_mesh_intersections_with_mode(
+                        ui, rect, axis_index, vp, slice_pos, true,
+                    );
+                    self.draw_voxel_mask_mesh_intersections(ui, rect, axis_index, vp, slice_pos);
+                }
+            }
+        }
         self.draw_3d_axes(ui, rect, vp);
     }
 
@@ -1236,6 +1257,7 @@ impl super::super::TrxVizApp {
                 window_width: draw.window_width,
                 colormap: draw.colormap.as_u32(),
                 opacity: draw.opacity,
+                render_3d_mode: draw.render_3d_mode,
             })
             .collect::<Vec<_>>();
 

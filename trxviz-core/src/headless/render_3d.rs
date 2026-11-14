@@ -2,18 +2,31 @@ use std::path::Path;
 
 use super::HeadlessRenderData;
 use super::gpu_context::{GpuSceneResources, TARGET_FORMAT};
-use super::readback::readback_texture_to_png;
+use super::readback::{collect_slice_contour_segments, readback_texture_to_png_with_overlays};
 use crate::data::trx_data::RenderStyle;
 use crate::lighting::WorkflowRender3D;
 use crate::renderer::camera::OrbitCamera;
 use crate::renderer::viewport::ViewportIndex;
+use crate::scene::{HeadlessScene, HeadlessWorkflowState};
+
+fn slice_world_position_3d(scene: &HeadlessScene, axis_index: usize) -> f32 {
+    if let Some(nf) = scene.nifti_files.first() {
+        nf.volume
+            .slice_world_position(axis_index, scene.slice_indices[axis_index])
+    } else {
+        scene.slice_world_offsets[axis_index]
+    }
+}
 
 #[cfg(feature = "png-export")]
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_scene3d_to_png(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     resources: &mut GpuSceneResources,
     render_data: &HeadlessRenderData,
+    scene: &HeadlessScene,
+    workflow: &HeadlessWorkflowState,
     camera: &OrbitCamera,
     render_3d: &WorkflowRender3D,
     slice_visible: [bool; 3],
@@ -81,15 +94,28 @@ pub(super) fn render_scene3d_to_png(
         {
             match slice {
                 crate::renderer::slice_renderer::SliceResourceKind::Scalar(s) => {
-                    s.update_uniforms(
-                        queue,
-                        viewport_3d,
-                        view_proj,
-                        volume.window_center,
-                        volume.window_width,
-                        volume.colormap,
-                        volume.opacity,
-                    );
+                    if volume.render_3d_mode == crate::data::loaded_files::VolumeRender3DMode::Off {
+                        s.update_uniforms(
+                            queue,
+                            viewport_3d,
+                            view_proj,
+                            volume.window_center,
+                            volume.window_width,
+                            volume.colormap,
+                            volume.opacity,
+                        );
+                    } else {
+                        s.update_raymarch_uniforms(
+                            queue,
+                            view_proj,
+                            camera_pos,
+                            volume.render_3d_mode.as_u32(),
+                            volume.window_center,
+                            volume.window_width,
+                            volume.colormap,
+                            volume.opacity,
+                        );
+                    }
                 }
                 crate::renderer::slice_renderer::SliceResourceKind::Composite(c) => {
                     c.update_uniforms(queue, viewport_3d, view_proj, volume.opacity);
@@ -251,6 +277,7 @@ pub(super) fn render_scene3d_to_png(
         render_pass.set_viewport(0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
         resources.background.paint(render_pass);
 
+        // Pass 1: 2D orthogonal slice planes (Off / Composite) in background
         for volume in &render_data.volume_draws {
             if let Some((_, slice)) = resources
                 .slices
@@ -260,18 +287,22 @@ pub(super) fn render_scene3d_to_png(
             {
                 match slice {
                     crate::renderer::slice_renderer::SliceResourceKind::Scalar(s) => {
-                        render_pass.set_pipeline(&s.pipeline);
-                        render_pass.set_bind_group(0, s.bind_group(viewport_3d), &[]);
-                        render_pass.set_index_buffer(
-                            s.quad_index_buffer.slice(..),
-                            wgpu::IndexFormat::Uint16,
-                        );
-                        for i in 0..3 {
-                            if !slice_visible[i] {
-                                continue;
+                        if volume.render_3d_mode
+                            == crate::data::loaded_files::VolumeRender3DMode::Off
+                        {
+                            render_pass.set_pipeline(&s.pipeline);
+                            render_pass.set_bind_group(0, s.bind_group(viewport_3d), &[]);
+                            render_pass.set_index_buffer(
+                                s.quad_index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            for i in 0..3 {
+                                if !slice_visible[i] {
+                                    continue;
+                                }
+                                render_pass.set_vertex_buffer(0, s.quad_buffers[i].slice(..));
+                                render_pass.draw_indexed(0..6, 0, 0..1);
                             }
-                            render_pass.set_vertex_buffer(0, s.quad_buffers[i].slice(..));
-                            render_pass.draw_indexed(0..6, 0, 0..1);
                         }
                     }
                     crate::renderer::slice_renderer::SliceResourceKind::Composite(c) => {
@@ -294,6 +325,27 @@ pub(super) fn render_scene3d_to_png(
                             render_pass.draw_indexed(0..6, 0, 0..1);
                         }
                     }
+                }
+            }
+        }
+
+        // Pass 2: 3D Volume Ray-Marching (DirectVolume glass brain first, then Mip bundle glow)
+        for mode_pass in [
+            crate::data::loaded_files::VolumeRender3DMode::DirectVolume,
+            crate::data::loaded_files::VolumeRender3DMode::Mip,
+        ] {
+            for volume in &render_data.volume_draws {
+                if volume.render_3d_mode != mode_pass || volume.opacity <= 0.001 {
+                    continue;
+                }
+                if let Some((_, crate::renderer::slice_renderer::SliceResourceKind::Scalar(s))) =
+                    resources
+                        .slices
+                        .entries
+                        .iter()
+                        .find(|(id, _)| *id == volume.slice_key)
+                {
+                    s.paint_raymarch(render_pass);
                 }
             }
         }
@@ -373,5 +425,41 @@ pub(super) fn render_scene3d_to_png(
         }
     }
 
-    readback_texture_to_png(device, queue, encoder, &texture, width, height, output_path)
+    let mut overlays = Vec::new();
+    let has_2d_slice_volume = render_data.volume_draws.iter().any(|vd| {
+        vd.render_3d_mode == crate::data::loaded_files::VolumeRender3DMode::Off && vd.opacity > 0.01
+    });
+    if has_2d_slice_volume {
+        let slice_positions_3d = [
+            slice_world_position_3d(scene, 0),
+            slice_world_position_3d(scene, 1),
+            slice_world_position_3d(scene, 2),
+        ];
+        for axis_index in 0..3 {
+            if slice_visible[axis_index] {
+                overlays.extend(collect_slice_contour_segments(
+                    scene,
+                    workflow,
+                    axis_index,
+                    slice_positions_3d[axis_index],
+                    view_proj,
+                    [0, 0, width, height],
+                    Some(camera_pos),
+                    slice_visible,
+                    slice_positions_3d,
+                ));
+            }
+        }
+    }
+
+    readback_texture_to_png_with_overlays(
+        device,
+        queue,
+        encoder,
+        &texture,
+        width,
+        height,
+        &overlays,
+        output_path,
+    )
 }

@@ -57,6 +57,7 @@ pub(super) fn build_render_data(
                 window_width: draw.window_width,
                 colormap: draw.colormap.as_u32(),
                 opacity: draw.opacity,
+                render_3d_mode: draw.render_3d_mode,
             })
             .collect::<Vec<_>>()
     };

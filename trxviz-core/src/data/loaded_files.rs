@@ -25,13 +25,20 @@ pub struct LoadedTrx {
     pub import_warnings: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum VolumeColormap {
+    #[default]
     Grayscale,
     Hot,
     Cool,
     RedYellow,
     BlueLightblue,
+    Inferno,
+    Magma,
+    Plasma,
+    Viridis,
 }
 
 impl VolumeColormap {
@@ -42,6 +49,10 @@ impl VolumeColormap {
             VolumeColormap::Cool => 2,
             VolumeColormap::RedYellow => 3,
             VolumeColormap::BlueLightblue => 4,
+            VolumeColormap::Inferno => 5,
+            VolumeColormap::Magma => 6,
+            VolumeColormap::Plasma => 7,
+            VolumeColormap::Viridis => 8,
         }
     }
 
@@ -52,6 +63,10 @@ impl VolumeColormap {
             VolumeColormap::Cool => "Cool",
             VolumeColormap::RedYellow => "Red-Yellow",
             VolumeColormap::BlueLightblue => "Blue-Lightblue",
+            VolumeColormap::Inferno => "Inferno",
+            VolumeColormap::Magma => "Magma",
+            VolumeColormap::Plasma => "Plasma",
+            VolumeColormap::Viridis => "Viridis",
         }
     }
 
@@ -61,6 +76,48 @@ impl VolumeColormap {
         VolumeColormap::Cool,
         VolumeColormap::RedYellow,
         VolumeColormap::BlueLightblue,
+        VolumeColormap::Inferno,
+        VolumeColormap::Magma,
+        VolumeColormap::Plasma,
+        VolumeColormap::Viridis,
+    ];
+}
+
+/// How a scalar volume is rendered in the 3D viewport.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum VolumeRender3DMode {
+    /// Traditional orthogonal 2D slice quads in 3D space.
+    #[default]
+    Off,
+    /// 3D Maximum Intensity Projection (MIP) ray-marched through the volume.
+    Mip,
+    /// 3D Front-to-Back Alpha-Composited Direct Volume Rendering (DVR) with ray-gradient edge cues.
+    DirectVolume,
+}
+
+impl VolumeRender3DMode {
+    pub fn as_u32(&self) -> u32 {
+        match self {
+            VolumeRender3DMode::Off => 0,
+            VolumeRender3DMode::Mip => 1,
+            VolumeRender3DMode::DirectVolume => 2,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            VolumeRender3DMode::Off => "2D Slices Only",
+            VolumeRender3DMode::Mip => "3D MIP (Max Intensity)",
+            VolumeRender3DMode::DirectVolume => "3D Volume (Direct Glow)",
+        }
+    }
+
+    pub const ALL: &[VolumeRender3DMode] = &[
+        VolumeRender3DMode::Off,
+        VolumeRender3DMode::Mip,
+        VolumeRender3DMode::DirectVolume,
     ];
 }
 

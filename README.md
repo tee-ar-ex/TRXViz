@@ -23,6 +23,8 @@ Built with Rust, [egui](https://github.com/emilk/egui), and [wgpu](https://wgpu.
 ## Features
 
 - **4-viewport layout** — 3D perspective view with axial, coronal, and sagittal slice views
+- **3D GPU volume ray-marching** — render NIfTI or in-memory scalar volumes in the 3D scene as 2D orthogonal slices (`Off`), 3D Maximum Intensity Projection (`Mip`), or 3D Direct Volume Rendering (`DirectVolume`) with `Grayscale`, `Hot`, `Jet`, `Cool`, `Inferno`, `Magma`, `Plasma`, and `Viridis` colormaps and transparent zero-background slice compositing
+- **Cross-sectional bundle surfaces & slice contours** — wrap streamline bundles or branch arbors in translucent 3D cross-sectional shells (via GIFTI `.surf.gii` iso-surfaces in `SurfaceDisplay` or native Marching Cubes density surfaces in `BundleSurfaceBuild` / `BundleSurfaceDisplay` with Nadaraya-Watson source color interpolation) and automatically draw their intersection contour lines on 3D and 2D anatomical slices
 - **ODX visualization** — load ODX orientation files and display ODF glyphs, fixel lines (3D and on-slice), and color fixels by per-fixel scalars
 - **Tractography** — track streamlines directly from ODF or fixel data: Dipy/GPUStreamlines ODF tracking (probabilistic or GPU PTT) and Yeh-style fixel tracking
 - **CIFTI support** — load `.dscalar.nii`, `.dtseries.nii`, `.dlabel.nii`, and `.pscalar.nii`
@@ -47,8 +49,12 @@ commands below if you want to build from source.
 # GUI — open a tractogram with an optional background volume
 cargo run -p trxviz --release -- tractogram.trx background.nii.gz
 
-# CLI — render a saved workflow project to PNG
-cargo run -p trxviz-cli -- render --project workflow.json --out scene.png
+# GUI — open a saved workflow project (.trxviz or .json) directly
+cargo run -p trxviz --release -- workflow.trxviz
+
+# CLI — render a saved workflow project to PNG (3D or 2D Ortho slice view)
+cargo run -p trxviz-cli -- render --project workflow.trxviz --out scene_3d.png
+cargo run -p trxviz-cli -- render --project workflow.trxviz --view 2d --out scene_2d.png
 
 # CLI — render the inflated stage from a saved workflow project
 cargo run -p trxviz-cli -- render --project workflow.json --view stage --out stage.png

@@ -114,7 +114,7 @@ use super::{
     default_surface_overlay_layers, default_true, default_workflow_slice_view_kind,
 };
 use crate::data::cifti::CiftiStructure;
-use crate::data::loaded_files::{FileId, VolumeColormap};
+use crate::data::loaded_files::{FileId, VolumeColormap, VolumeRender3DMode};
 use crate::data::orientation_field::{BoundaryGlyphColorMode, BoundaryGlyphNormalization};
 use crate::data::trx_data::RenderStyle;
 use crate::error::WorkflowError;
@@ -268,6 +268,8 @@ pub enum WorkflowNodeKind {
         opacity: f32,
         window_center: f32,
         window_width: f32,
+        #[serde(default)]
+        render_3d_mode: VolumeRender3DMode,
     },
     VolumeOverlayStack {
         #[serde(default = "crate::workflow::types::default_volume_overlay_layers")]
@@ -853,12 +855,14 @@ macro_rules! with_workflow_op {
                 opacity,
                 window_center,
                 window_width,
+                render_3d_mode,
             } => {
                 let $op = volume_display::VolumeDisplayOp {
                     colormap: *colormap,
                     opacity: *opacity,
                     window_center: *window_center,
                     window_width: *window_width,
+                    render_3d_mode: *render_3d_mode,
                 };
                 $body
             }
@@ -1459,6 +1463,7 @@ pub(super) fn validate_registry() -> WorkflowResult<()> {
             opacity: 1.0,
             window_center: 0.0,
             window_width: 1.0,
+            render_3d_mode: crate::data::loaded_files::VolumeRender3DMode::Off,
         }
         .tag(),
         surface_display::SurfaceOverlayStackOp { layers: Vec::new() }.tag(),

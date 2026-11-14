@@ -16,8 +16,11 @@ fn load_icon() -> egui::IconData {
 fn main() -> eframe::Result {
     env_logger::init();
 
-    let trx_path = std::env::args().nth(1);
-    let nifti_path = std::env::args().nth(2);
+    let startup_paths: Vec<std::path::PathBuf> = std::env::args()
+        .skip(1)
+        .filter(|arg| arg != "--workflow" && arg != "-w")
+        .map(std::path::PathBuf::from)
+        .collect();
 
     let icon = load_icon();
 
@@ -58,6 +61,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "TRXViz",
         options,
-        Box::new(move |cc| Ok(Box::new(app::TrxVizApp::new(cc, trx_path, nifti_path)))),
+        Box::new(move |cc| Ok(Box::new(app::TrxVizApp::new(cc, startup_paths)))),
     )
 }

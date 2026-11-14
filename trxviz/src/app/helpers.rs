@@ -5,6 +5,7 @@ use trxviz_core::asset_loader::{AssetKind, detect_asset_kind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DroppedPathKind {
+    OpenWorkflowProject,
     OpenTrx,
     ImportTractogram(Format),
     OpenNifti,
@@ -16,6 +17,11 @@ pub(super) enum DroppedPathKind {
 }
 
 pub(super) fn classify_dropped_path(path: &Path) -> DroppedPathKind {
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        if ext.eq_ignore_ascii_case("trxviz") || ext.eq_ignore_ascii_case("json") {
+            return DroppedPathKind::OpenWorkflowProject;
+        }
+    }
     match detect_asset_kind(path) {
         AssetKind::Odx => DroppedPathKind::OpenOdx,
         AssetKind::Streamlines => DroppedPathKind::OpenTrx,

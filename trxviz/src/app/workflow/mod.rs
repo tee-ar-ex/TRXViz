@@ -126,12 +126,14 @@ mod tests {
             opacity: 1.0,
             window_center: 0.5,
             window_width: 1.0,
+            render_3d_mode: trxviz_core::data::loaded_files::VolumeRender3DMode::Off,
         };
         let after = WorkflowNodeKind::VolumeDisplay {
             colormap: VolumeColormap::Grayscale,
             opacity: 0.25,
             window_center: 0.5,
             window_width: 1.0,
+            render_3d_mode: trxviz_core::data::loaded_files::VolumeRender3DMode::Mip,
         };
         assert!(is_render_only_change(&before, &after));
     }

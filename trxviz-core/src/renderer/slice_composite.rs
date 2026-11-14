@@ -648,6 +648,30 @@ pub fn composite_slice_into(
 
 /// CPU mirror of the WGSL colormap functions in `slice.wgsl`.
 fn colormap_sample(cmap: VolumeColormap, t: f32) -> [f32; 3] {
+    fn interp9(stops: [[f32; 3]; 9], t: f32) -> [f32; 3] {
+        let x = t.clamp(0.0, 1.0) * 8.0;
+        let i = (x.floor() as usize).min(7);
+        let f = x.fract();
+        let a = stops[i];
+        let b = stops[i + 1];
+        [
+            a[0] + (b[0] - a[0]) * f,
+            a[1] + (b[1] - a[1]) * f,
+            a[2] + (b[2] - a[2]) * f,
+        ]
+    }
+    fn interp10(stops: [[f32; 3]; 10], t: f32) -> [f32; 3] {
+        let x = t.clamp(0.0, 1.0) * 9.0;
+        let i = (x.floor() as usize).min(8);
+        let f = x.fract();
+        let a = stops[i];
+        let b = stops[i + 1];
+        [
+            a[0] + (b[0] - a[0]) * f,
+            a[1] + (b[1] - a[1]) * f,
+            a[2] + (b[2] - a[2]) * f,
+        ]
+    }
     match cmap {
         VolumeColormap::Grayscale => [t, t, t],
         VolumeColormap::Hot => [
@@ -658,6 +682,64 @@ fn colormap_sample(cmap: VolumeColormap, t: f32) -> [f32; 3] {
         VolumeColormap::Cool => [t, 1.0 - t, 1.0],
         VolumeColormap::RedYellow => [1.0, t, 0.0],
         VolumeColormap::BlueLightblue => [0.0, t, 1.0],
+        VolumeColormap::Inferno => interp9(
+            [
+                [0.001, 0.000, 0.014],
+                [0.125, 0.047, 0.290],
+                [0.302, 0.073, 0.488],
+                [0.511, 0.121, 0.561],
+                [0.709, 0.212, 0.486],
+                [0.865, 0.316, 0.347],
+                [0.962, 0.471, 0.212],
+                [0.988, 0.683, 0.139],
+                [0.978, 0.893, 0.306],
+            ],
+            t,
+        ),
+        VolumeColormap::Magma => interp9(
+            [
+                [0.001, 0.000, 0.014],
+                [0.113, 0.065, 0.276],
+                [0.275, 0.063, 0.485],
+                [0.445, 0.122, 0.507],
+                [0.625, 0.185, 0.498],
+                [0.805, 0.251, 0.443],
+                [0.944, 0.378, 0.365],
+                [0.992, 0.606, 0.419],
+                [0.987, 0.848, 0.608],
+            ],
+            t,
+        ),
+        VolumeColormap::Plasma => interp10(
+            [
+                [0.050, 0.030, 0.528],
+                [0.255, 0.014, 0.615],
+                [0.417, 0.001, 0.658],
+                [0.563, 0.052, 0.642],
+                [0.693, 0.165, 0.565],
+                [0.798, 0.280, 0.470],
+                [0.881, 0.393, 0.383],
+                [0.949, 0.518, 0.295],
+                [0.988, 0.652, 0.211],
+                [0.940, 0.975, 0.131],
+            ],
+            t,
+        ),
+        VolumeColormap::Viridis => interp10(
+            [
+                [0.267, 0.005, 0.329],
+                [0.283, 0.141, 0.458],
+                [0.254, 0.265, 0.530],
+                [0.207, 0.372, 0.553],
+                [0.164, 0.471, 0.558],
+                [0.128, 0.567, 0.551],
+                [0.135, 0.659, 0.518],
+                [0.267, 0.749, 0.441],
+                [0.478, 0.821, 0.318],
+                [0.741, 0.873, 0.150],
+            ],
+            t,
+        ),
     }
 }
 

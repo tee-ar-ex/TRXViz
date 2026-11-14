@@ -59,3 +59,16 @@ receive CIFTI overlays, streamline-derived overlays, or both.
 For non-anatomical cortical viewing, set the corresponding `SurfaceDisplay.space` to `Stage`.
 Surface assets whose filenames contain bounded `inflated` or `sphere` may default to `Stage`
 automatically when their initial workflow branch is created.
+
+## 3D Volume Ray-Marching & Cross-Sectional Surface Workflows
+
+A single workflow project (`.trxviz` or `.json`) can combine background anatomical slices, 3D GPU ray-marched scalar volumes, colored streamline arbors, and cross-sectional surfaces with slice intersection contours:
+
+- **Background Anatomy (`T1w`)**: `VolumeSource` $\to$ `VolumeDisplay` with `render_3d_mode: "Off"` (for 2D orthogonal slices with transparent zero-background discard) or `render_3d_mode: "DirectVolume"` at low opacity (`0.18`) for a 3D glass brain.
+- **3D Volumetric Bundle Glow**: `VolumeSource` $\to$ `VolumeDisplay` with `render_3d_mode: "Mip"` or `"DirectVolume"` and a perceptual colormap (`Inferno`, `Magma`, `Plasma`, or `Viridis`).
+- **Streamtubes + Native Cross-Sectional Envelope**:
+  - `StreamlineSource` $\to$ `ColorByDpv` $\to$ `StreamlineDisplay` (`style: "Tubes"`)
+  - `ColorByDpv` $\to$ `BundleSurfaceBuild` (`build_mode: "MarchingCubes"`) $\to$ `BundleSurfaceDisplay` (`color_mode: "SourceColors"`, `outline_thickness: 2.8`)
+- **Nested GIFTI Iso-Shells**: `SurfaceSource` $\to$ `SurfaceOverlayStack` $\to$ `SurfaceDisplay` (`opacity: 0.14–0.22`, `outline_thickness: 2.4–3.0`).
+
+Both the interactive GUI (`trxviz project.trxviz`) and the headless CLI (`trxviz-cli render --project project.trxviz --view 3d|2d`) evaluate and render all of these layers—including the 3D and 2D slice contour lines—identically.

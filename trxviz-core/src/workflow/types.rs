@@ -9,7 +9,7 @@ use super::ops::WorkflowNodeKind;
 use crate::data::bundle_mesh::BundleMesh;
 use crate::data::cifti::{CiftiIntent, CiftiStructure, SurfaceScalars, VolumeScalars};
 use crate::data::gifti_data::GiftiSurfaceData;
-use crate::data::loaded_files::{FileId, StreamlineBacking, VolumeColormap};
+use crate::data::loaded_files::{FileId, StreamlineBacking, VolumeColormap, VolumeRender3DMode};
 use crate::data::orientation_field::{
     BoundaryContactField, BoundaryGlyphColorMode, BoundaryGlyphNormalization,
 };
@@ -1301,6 +1301,7 @@ pub struct VolumeDrawPlan {
     pub opacity: f32,
     pub window_center: f32,
     pub window_width: f32,
+    pub render_3d_mode: VolumeRender3DMode,
 }
 
 #[derive(Clone)]

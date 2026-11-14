@@ -5,12 +5,12 @@ use glam::Vec3;
 
 use super::HeadlessRenderData;
 use super::gpu_context::{GpuSceneResources, TARGET_FORMAT};
-use super::readback::readback_texture_to_png;
+use super::readback::{collect_slice_contour_segments, readback_texture_to_png_with_overlays};
 use crate::lighting::{SceneLightingParams, WorkflowRender3D};
 use crate::renderer::camera::OrthoSliceCamera;
 use crate::renderer::slice_renderer::SliceAxis;
 use crate::renderer::viewport::ViewportIndex;
-use crate::scene::HeadlessScene;
+use crate::scene::{HeadlessScene, HeadlessWorkflowState};
 use crate::workflow::{
     WorkflowOrthoSliceCamera, WorkflowSliceViewKind, WorkflowSliceViewUi, WorkflowView2DMode,
 };
@@ -32,6 +32,7 @@ struct SlicePanel {
 }
 
 #[cfg(feature = "png-export")]
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_scene2d_to_png(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -39,6 +40,7 @@ pub(super) fn render_scene2d_to_png(
     render_data: &HeadlessRenderData,
     slice_view_ui: Option<WorkflowSliceViewUi>,
     scene: &HeadlessScene,
+    workflow: &HeadlessWorkflowState,
     width: u32,
     height: u32,
     output_path: &Path,
@@ -220,9 +222,9 @@ pub(super) fn render_scene2d_to_png(
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 1.0,
-                        g: 1.0,
-                        b: 1.0,
+                        r: 0.05,
+                        g: 0.06,
+                        b: 0.08,
                         a: 1.0,
                     }),
                     store: wgpu::StoreOp::Store,
@@ -333,7 +335,40 @@ pub(super) fn render_scene2d_to_png(
         }
     }
 
-    readback_texture_to_png(device, queue, encoder, &texture, width, height, output_path)
+    let mut overlays = Vec::new();
+    for panel in &panels {
+        let aspect = panel.rect.width as f32 / panel.rect.height.max(1) as f32;
+        let camera = &slice_view_ui.slice_cameras[panel.axis_index];
+        let view_proj =
+            build_slice_camera(panel.axis_index, camera).view_projection(aspect, panel.slice_pos);
+        overlays.extend(collect_slice_contour_segments(
+            scene,
+            workflow,
+            panel.axis_index,
+            panel.slice_pos,
+            view_proj,
+            [
+                panel.rect.x,
+                panel.rect.y,
+                panel.rect.width,
+                panel.rect.height,
+            ],
+            None,
+            [false; 3],
+            [0.0; 3],
+        ));
+    }
+
+    readback_texture_to_png_with_overlays(
+        device,
+        queue,
+        encoder,
+        &texture,
+        width,
+        height,
+        &overlays,
+        output_path,
+    )
 }
 
 fn build_2d_panels(

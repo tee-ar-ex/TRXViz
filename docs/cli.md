@@ -20,10 +20,15 @@ trxviz-cli render --out scene.png [input options]
 ## Workflow Project Rendering
 
 ```bash
-trxviz-cli render --project workflow.json --out scene.png
+trxviz-cli render --project workflow.trxviz --out scene.png
 ```
 
-This is the preferred path for reproducible figure generation.
+This is the preferred path for reproducible figure generation. Both `.trxviz` and `.json` project files are supported (and can also be opened directly in the desktop GUI via `trxviz workflow.trxviz` or `trxviz --workflow workflow.trxviz`).
+
+Headless 3D and 2D project renders support the full rendering pipeline, including:
+
+- **3D GPU Volume Ray-Marching** (`VolumeDisplay.render_3d_mode`: `Mip` and `DirectVolume`) composited over 2D anatomical slices (`Off`)
+- **3D & 2D Slice Intersection Contours** from visible `SurfaceDisplay` and `BundleSurfaceDisplay` nodes with `outline_thickness > 0` (including inter-slice brain occlusion in 3D views)
 
 If the workflow project contains `document.camera_3d` and `document.slice_view_3d`,
 `trxviz-cli` uses those saved 3D view settings by default. Command-line camera flags override the

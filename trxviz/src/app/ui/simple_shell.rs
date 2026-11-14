@@ -2,7 +2,7 @@ use crate::app::workflow::{
     self, SimpleDisplayBinding, SimpleStreamlineBinding, SimpleSurfaceBinding,
     WorkflowAssetDocument, WorkflowNodeKind, WorkflowNodeUuid, classify_workflow_editability,
 };
-use trxviz_core::data::loaded_files::VolumeColormap;
+use trxviz_core::data::loaded_files::{VolumeColormap, VolumeRender3DMode};
 
 impl super::super::TrxVizApp {
     pub(in crate::app) fn show_simple_shell(&mut self, ctx: &egui::Context) -> bool {
@@ -270,16 +270,30 @@ impl super::super::TrxVizApp {
                     opacity,
                     window_center,
                     window_width,
+                    render_3d_mode,
                 }) = self.workflow_node_op_mut(binding.display)
                 {
                     opacity_checkbox(ui, opacity, "Visible");
-                    egui::ComboBox::from_id_salt(("simple_volume_colormap", binding.display.0))
-                        .selected_text(colormap.label())
-                        .show_ui(ui, |ui| {
-                            for choice in VolumeColormap::ALL {
-                                ui.selectable_value(colormap, *choice, choice.label());
-                            }
-                        });
+                    ui.horizontal(|ui| {
+                        ui.label("3D Mode");
+                        egui::ComboBox::from_id_salt(("simple_volume_3d_mode", binding.display.0))
+                            .selected_text(render_3d_mode.label())
+                            .show_ui(ui, |ui| {
+                                for choice in VolumeRender3DMode::ALL {
+                                    ui.selectable_value(render_3d_mode, *choice, choice.label());
+                                }
+                            });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Colormap");
+                        egui::ComboBox::from_id_salt(("simple_volume_colormap", binding.display.0))
+                            .selected_text(colormap.label())
+                            .show_ui(ui, |ui| {
+                                for choice in VolumeColormap::ALL {
+                                    ui.selectable_value(colormap, *choice, choice.label());
+                                }
+                            });
+                    });
                     ui.add(egui::Slider::new(opacity, 0.0..=1.0).text("Opacity"));
                     ui.add(egui::Slider::new(window_center, 0.0..=1.0).text("Window center"));
                     ui.add(egui::Slider::new(window_width, 0.01..=2.0).text("Window width"));

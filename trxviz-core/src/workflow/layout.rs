@@ -666,6 +666,7 @@ mod tests {
                     opacity: 1.0,
                     window_center: 0.5,
                     window_width: 1.0,
+                    render_3d_mode: crate::data::loaded_files::VolumeRender3DMode::Off,
                 },
             },
             GraphPos::new(500.0, 400.0),

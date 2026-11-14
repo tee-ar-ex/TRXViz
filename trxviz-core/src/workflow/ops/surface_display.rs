@@ -79,6 +79,12 @@ impl WorkflowOp for SurfaceOverlayStackOp {
         OpCategory::Display
     }
 
+    fn describe(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(
+            "Composes a `SurfaceAppearance` from a target GIFTI surface and an ordered stack of base-color and scalar/label overlay layers.",
+        )
+    }
+
     fn evaluate(
         &self,
         ctx: &mut EvalCtx<'_, '_>,
@@ -130,6 +136,12 @@ impl WorkflowOp for SurfaceDisplayOp {
 
     fn category(&self) -> OpCategory {
         OpCategory::Display
+    }
+
+    fn describe(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(
+            "Renders a GIFTI surface appearance in the 3D anatomical viewer (`Anatomical`) or `Inflated Stage` (`Stage`), and draws cross-sectional slice-intersection contour lines (`outline_color`, `outline_thickness`) on active 3D and 2D anatomical slices.",
+        )
     }
 
     fn evaluate(

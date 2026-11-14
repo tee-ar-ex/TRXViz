@@ -327,11 +327,10 @@ fn fold_volume_draws_into_composite(
     if scene_plan.draws.of_type::<VolumeDrawPlan>().count() < 2 {
         return;
     }
-    if scene_plan
-        .draws
-        .of_type::<VolumeDrawPlan>()
-        .any(|d| matches!(d.source, VolumeBacking::Composite { .. }))
-    {
+    if scene_plan.draws.of_type::<VolumeDrawPlan>().any(|d| {
+        matches!(d.source, VolumeBacking::Composite { .. })
+            || d.render_3d_mode != crate::data::loaded_files::VolumeRender3DMode::Off
+    }) {
         return;
     }
 
@@ -389,6 +388,7 @@ fn fold_volume_draws_into_composite(
         opacity: 1.0,
         window_center: 0.5,
         window_width: 1.0,
+        render_3d_mode: crate::data::loaded_files::VolumeRender3DMode::Off,
     };
     // Drop the per-volume draws (keeping every other draw in push order)
     // and append the merged composite.

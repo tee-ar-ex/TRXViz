@@ -48,6 +48,7 @@ pub(super) struct VolumeDrawInfo {
     pub window_width: f32,
     pub colormap: u32,
     pub opacity: f32,
+    pub render_3d_mode: trxviz_core::data::loaded_files::VolumeRender3DMode,
 }
 
 #[derive(Clone)]
@@ -157,15 +158,32 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
             for vd in &self.volume_draws {
                 if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.slice_key) {
                     match sr {
-                        SliceResourceKind::Scalar(s) => s.update_uniforms(
-                            queue,
-                            0,
-                            self.view_proj,
-                            vd.window_center,
-                            vd.window_width,
-                            vd.colormap,
-                            vd.opacity,
-                        ),
+                        SliceResourceKind::Scalar(s) => {
+                            if vd.render_3d_mode
+                                == trxviz_core::data::loaded_files::VolumeRender3DMode::Off
+                            {
+                                s.update_uniforms(
+                                    queue,
+                                    0,
+                                    self.view_proj,
+                                    vd.window_center,
+                                    vd.window_width,
+                                    vd.colormap,
+                                    vd.opacity,
+                                );
+                            } else {
+                                s.update_raymarch_uniforms(
+                                    queue,
+                                    self.view_proj,
+                                    self.camera_pos,
+                                    vd.render_3d_mode.as_u32(),
+                                    vd.window_center,
+                                    vd.window_width,
+                                    vd.colormap,
+                                    vd.opacity,
+                                );
+                            }
+                        }
                         SliceResourceKind::Composite(c) => {
                             c.update_uniforms(queue, 0, self.view_proj, vd.opacity);
                         }
@@ -316,22 +334,27 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
 
         if let Some(all) = callback_resources.get::<AllSliceResources>() {
             let viewport_3d: usize = ViewportIndex::Perspective3D.into();
+            // Pass 1: 2D orthogonal slice planes (Off / Composite) in background
             for vd in &self.volume_draws {
                 if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.slice_key) {
                     match sr {
                         SliceResourceKind::Scalar(s) => {
-                            render_pass.set_pipeline(&s.pipeline);
-                            render_pass.set_bind_group(0, s.bind_group(viewport_3d), &[]);
-                            render_pass.set_index_buffer(
-                                s.quad_index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint16,
-                            );
-                            for i in 0..3 {
-                                if !self.slice_visible[i] {
-                                    continue;
+                            if vd.render_3d_mode
+                                == trxviz_core::data::loaded_files::VolumeRender3DMode::Off
+                            {
+                                render_pass.set_pipeline(&s.pipeline);
+                                render_pass.set_bind_group(0, s.bind_group(viewport_3d), &[]);
+                                render_pass.set_index_buffer(
+                                    s.quad_index_buffer.slice(..),
+                                    wgpu::IndexFormat::Uint16,
+                                );
+                                for i in 0..3 {
+                                    if !self.slice_visible[i] {
+                                        continue;
+                                    }
+                                    render_pass.set_vertex_buffer(0, s.quad_buffers[i].slice(..));
+                                    render_pass.draw_indexed(0..6, 0, 0..1);
                                 }
-                                render_pass.set_vertex_buffer(0, s.quad_buffers[i].slice(..));
-                                render_pass.draw_indexed(0..6, 0, 0..1);
                             }
                         }
                         SliceResourceKind::Composite(c) => {
@@ -354,6 +377,23 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
                                 render_pass.draw_indexed(0..6, 0, 0..1);
                             }
                         }
+                    }
+                }
+            }
+
+            // Pass 2: 3D Volume Ray-Marching (DirectVolume glass brain first, then Mip bundle glow)
+            for mode_pass in [
+                trxviz_core::data::loaded_files::VolumeRender3DMode::DirectVolume,
+                trxviz_core::data::loaded_files::VolumeRender3DMode::Mip,
+            ] {
+                for vd in &self.volume_draws {
+                    if vd.render_3d_mode != mode_pass || vd.opacity <= 0.001 {
+                        continue;
+                    }
+                    if let Some((_, SliceResourceKind::Scalar(s))) =
+                        all.entries.iter().find(|(id, _)| *id == vd.slice_key)
+                    {
+                        s.paint_raymarch(render_pass);
                     }
                 }
             }

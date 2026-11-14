@@ -632,9 +632,24 @@ pub fn build_bundle_mesh(
         grid.zz_sum[i] += dir.z * dir.z;
     }
 
-    // ── 4. Gaussian blur of density field ───────────────────────────────────
-    // Color grid is kept unblurred so per-vertex colors stay accurate.
-    let blurred_density = gaussian_blur_3d(&grid.density, nx, ny, nz, smooth_sigma);
+    // ── 4. Gaussian blur of density and color/tensor fields ─────────────────
+    // Blurring both numerator (color/tensor sums) and denominator (density)
+    // with the same Gaussian kernel implements Nadaraya-Watson kernel
+    // interpolation, so iso-surface vertices in the smoothed halo inherit
+    // the exact local streamline color instead of falling back to grey.
+    if smooth_sigma >= 0.5 {
+        grid.density = gaussian_blur_3d(&grid.density, nx, ny, nz, smooth_sigma);
+        grid.r_sum = gaussian_blur_3d(&grid.r_sum, nx, ny, nz, smooth_sigma);
+        grid.g_sum = gaussian_blur_3d(&grid.g_sum, nx, ny, nz, smooth_sigma);
+        grid.b_sum = gaussian_blur_3d(&grid.b_sum, nx, ny, nz, smooth_sigma);
+        grid.xx_sum = gaussian_blur_3d(&grid.xx_sum, nx, ny, nz, smooth_sigma);
+        grid.xy_sum = gaussian_blur_3d(&grid.xy_sum, nx, ny, nz, smooth_sigma);
+        grid.xz_sum = gaussian_blur_3d(&grid.xz_sum, nx, ny, nz, smooth_sigma);
+        grid.yy_sum = gaussian_blur_3d(&grid.yy_sum, nx, ny, nz, smooth_sigma);
+        grid.yz_sum = gaussian_blur_3d(&grid.yz_sum, nx, ny, nz, smooth_sigma);
+        grid.zz_sum = gaussian_blur_3d(&grid.zz_sum, nx, ny, nz, smooth_sigma);
+    }
+    let blurred_density = grid.density.clone();
 
     // Scale the MC iso-threshold to account for the blur spreading density.
     // After a normalized 3-D separable Gaussian blur with 1-D center weight k0,

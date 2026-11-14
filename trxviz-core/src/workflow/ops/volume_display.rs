@@ -2,10 +2,10 @@ use super::super::{
     DrawPrimitive, EvalCtx, EvaluatedValue, PortKind, VolumeBacking, VolumeDrawPlan,
     WorkflowNodeKind, WorkflowOp, WorkflowValue,
 };
-use crate::data::loaded_files::VolumeColormap;
+use crate::data::loaded_files::{VolumeColormap, VolumeRender3DMode};
 use crate::workflow::methods::OpCategory;
 
-/// Renders a volume as orthogonal slices in the 3D viewport. Accepts a
+/// Renders a volume as orthogonal slices or 3D ray-marched MIP / Direct Volume Rendering in the 3D viewport. Accepts a
 /// single `Volume` input which can be either a file-backed NIfTI
 /// (`VolumeBacking::File`) or an in-memory scalar volume
 /// (`VolumeBacking::InMemory`, produced by e.g. pyAFQ probability maps,
@@ -16,6 +16,7 @@ pub struct VolumeDisplayOp {
     pub opacity: f32,
     pub window_center: f32,
     pub window_width: f32,
+    pub render_3d_mode: VolumeRender3DMode,
 }
 
 impl Default for VolumeDisplayOp {
@@ -25,6 +26,7 @@ impl Default for VolumeDisplayOp {
             opacity: 1.0,
             window_center: 0.5,
             window_width: 1.0,
+            render_3d_mode: VolumeRender3DMode::Off,
         }
     }
 }
@@ -48,6 +50,12 @@ impl WorkflowOp for VolumeDisplayOp {
 
     fn category(&self) -> OpCategory {
         OpCategory::Display
+    }
+
+    fn describe(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(
+            "Renders a scalar or composite volume as 2D orthogonal slices (`Off`), 3D GPU Maximum Intensity Projection (`Mip`), or 3D Direct Volume Rendering (`DirectVolume`) with configurable windowing, opacity, and scientific colormaps (`Grayscale`, `Hot`, `Jet`, `Cool`, `Inferno`, `Magma`, `Plasma`, `Viridis`).",
+        )
     }
 
     fn evaluate(
@@ -86,6 +94,7 @@ impl WorkflowOp for VolumeDisplayOp {
             opacity: self.opacity,
             window_center: self.window_center,
             window_width: self.window_width,
+            render_3d_mode: self.render_3d_mode,
         });
         Ok(Vec::new())
     }
@@ -112,6 +121,7 @@ impl From<VolumeDisplayOp> for WorkflowNodeKind {
             opacity: op.opacity,
             window_center: op.window_center,
             window_width: op.window_width,
+            render_3d_mode: op.render_3d_mode,
         }
     }
 }

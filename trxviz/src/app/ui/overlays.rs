@@ -209,6 +209,40 @@ impl crate::app::TrxVizApp {
         painter.line_segment([project(v_p1), project(v_p2)], stroke);
     }
 
+    pub(super) fn is_point_occluded_by_other_3d_slices(
+        &self,
+        p: glam::Vec3,
+        axis_index: usize,
+    ) -> bool {
+        let slice_visible = self.viewport.slice_visible();
+        let cam = self.viewport.camera_3d().eye();
+        let first_nifti = self.scene.nifti_files.first().map(|nf| &nf.volume);
+        for other_axis in 0..3 {
+            if other_axis == axis_index || !slice_visible[other_axis] {
+                continue;
+            }
+            let other_pos = self
+                .viewport
+                .slice_world_position(&self.scene.nifti_files, other_axis);
+            let cam_c = tri_axis_value(cam, other_axis);
+            let p_c = tri_axis_value(p, other_axis);
+            let d_cam = cam_c - other_pos;
+            let d_p = p_c - other_pos;
+            if d_cam * d_p < 0.0 && (cam_c - p_c).abs() > 1e-5 {
+                let t_hit = d_cam / (cam_c - p_c);
+                if t_hit > 0.0 && t_hit < 1.0 {
+                    let p_hit = cam + (p - cam) * t_hit;
+                    if let Some(vol) = first_nifti {
+                        if vol.sample_world_nearest(p_hit) > 1e-6 {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     pub(super) fn draw_mesh_intersections(
         &self,
         ui: &egui::Ui,
@@ -216,6 +250,18 @@ impl crate::app::TrxVizApp {
         axis_index: usize,
         view_proj: glam::Mat4,
         slice_pos: f32,
+    ) {
+        self.draw_mesh_intersections_with_mode(ui, rect, axis_index, view_proj, slice_pos, false);
+    }
+
+    pub(super) fn draw_mesh_intersections_with_mode(
+        &self,
+        ui: &egui::Ui,
+        rect: egui::Rect,
+        axis_index: usize,
+        view_proj: glam::Mat4,
+        slice_pos: f32,
+        is_3d: bool,
     ) {
         if self.scene.gifti_surfaces.is_empty() {
             return;
@@ -239,7 +285,7 @@ impl crate::app::TrxVizApp {
             .scene_plan
             .surface_draws(trxviz_core::workflow::SurfaceDisplaySpace::Anatomical)
         {
-            if draw.opacity <= 0.01 {
+            if draw.opacity <= 0.01 || draw.outline_thickness <= 0.01 {
                 continue;
             }
             let Some(surface) = self
@@ -277,6 +323,7 @@ impl crate::app::TrxVizApp {
                 .as_deref()
                 .filter(|vc| vc.len() == surface.data.vertices.len());
             let thickness = draw.outline_thickness.clamp(0.25, 8.0);
+            let contour_opacity = draw.opacity.max(0.92).clamp(0.0, 1.0);
 
             for tri in surface.data.indices.chunks_exact(3) {
                 let ia = tri[0] as usize;
@@ -339,6 +386,12 @@ impl crate::app::TrxVizApp {
                     best
                 };
 
+                if is_3d
+                    && self.is_point_occluded_by_other_3d_slices(0.5 * (e0.0 + e1.0), axis_index)
+                {
+                    continue;
+                }
+
                 // Segment color = mean of the two endpoint colors.
                 // Per-vertex colors are linear and need an sRGB convert
                 // for egui; the `outline_color` fallback is already in
@@ -350,9 +403,9 @@ impl crate::app::TrxVizApp {
                     0.5 * (e0.1[3] + e1.1[3]),
                 ];
                 let stroke_color = if vertex_colors.is_some() {
-                    color32_from_linear(seg, draw.opacity)
+                    color32_from_linear(seg, contour_opacity)
                 } else {
-                    color32_from_display(seg, draw.opacity)
+                    color32_from_display(seg, contour_opacity)
                 };
                 let stroke = egui::Stroke::new(thickness, stroke_color);
                 painter.line_segment([project(e0.0), project(e1.0)], stroke);
@@ -367,6 +420,20 @@ impl crate::app::TrxVizApp {
         axis_index: usize,
         view_proj: glam::Mat4,
         slice_pos: f32,
+    ) {
+        self.draw_bundle_mesh_intersections_with_mode(
+            ui, rect, axis_index, view_proj, slice_pos, false,
+        );
+    }
+
+    pub(super) fn draw_bundle_mesh_intersections_with_mode(
+        &self,
+        ui: &egui::Ui,
+        rect: egui::Rect,
+        axis_index: usize,
+        view_proj: glam::Mat4,
+        slice_pos: f32,
+        is_3d: bool,
     ) {
         if self
             .workflow
@@ -400,17 +467,30 @@ impl crate::app::TrxVizApp {
             .draws
             .of_type::<trxviz_core::workflow::BundleDrawPlan>()
         {
-            if draw.opacity <= 0.01 {
+            if draw.opacity <= 0.01 || draw.outline_thickness <= 0.01 {
                 continue;
             }
-            let Some(runtime) = self.workflow.display_runtimes.get(&draw.node_uuid) else {
-                continue;
-            };
-            if runtime.bundle_meshes_cpu.is_empty() {
-                continue;
-            }
+            let cached_meshes: Vec<&trxviz_core::data::bundle_mesh::BundleMesh> =
+                if let Some(runtime) = self
+                    .workflow
+                    .display_runtimes
+                    .get(&draw.node_uuid)
+                    .filter(|rt| !rt.bundle_meshes_cpu.is_empty())
+                {
+                    runtime.bundle_meshes_cpu.iter().collect()
+                } else if let Some(cache) = self
+                    .workflow
+                    .execution_cache
+                    .bundle_surface_mesh_cache
+                    .get(&draw.node_uuid)
+                {
+                    cache.meshes.iter().map(|(m, _)| m).collect()
+                } else {
+                    continue;
+                };
 
-            for mesh in &runtime.bundle_meshes_cpu {
+            let contour_opacity = draw.opacity.max(0.92).clamp(0.0, 1.0);
+            for mesh in cached_meshes {
                 if mesh.vertices.is_empty() || mesh.indices.is_empty() {
                     continue;
                 }
@@ -468,7 +548,7 @@ impl crate::app::TrxVizApp {
                         (rgb[0].clamp(0.0, 1.0) * 255.0) as u8,
                         (rgb[1].clamp(0.0, 1.0) * 255.0) as u8,
                         (rgb[2].clamp(0.0, 1.0) * 255.0) as u8,
-                        (draw.opacity.clamp(0.0, 1.0) * 255.0) as u8,
+                        (contour_opacity * 255.0) as u8,
                     );
                     let stroke = egui::Stroke::new(draw.outline_thickness.clamp(0.25, 8.0), color);
 
@@ -505,6 +585,12 @@ impl crate::app::TrxVizApp {
                         }
                         best
                     };
+
+                    if is_3d
+                        && self.is_point_occluded_by_other_3d_slices(0.5 * (p0 + p1), axis_index)
+                    {
+                        continue;
+                    }
 
                     painter.line_segment([project(p0), project(p1)], stroke);
                 }

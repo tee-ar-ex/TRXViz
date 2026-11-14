@@ -144,6 +144,36 @@ scalar value falls below Thresh min or above Thresh max are skipped (not colored
 layer beneath show through. Defaults to −∞ / +∞ (no thresholding). Useful for masking
 low-density regions or clipping outliers.
 
+## 3D Volume Rendering (`2D Slices Only` / `3D MIP` / `3D Direct Volume`)
+
+Every `VolumeDisplay` node (accessible in both Simple mode and Advanced mode) exposes a **3D Render Mode** selector (`render_3d_mode`) alongside eight scientific colormaps (`Grayscale`, `Hot`, `Jet`, `Cool`, `Inferno`, `Magma`, `Plasma`, and `Viridis`):
+
+- **`Off` (`2D Slices Only`)**: Renders axial, coronal, and sagittal slice planes in the 3D viewport and 2D slice panels. Zero-intensity background voxels (`intensity <= 1e-6`) are discarded in the fragment shader so skull-stripped anatomical volumes (`T1w`) and masked scalar maps never occlude 3D streamlines or 3D ray-marched volumes with black bounding-box corners.
+- **`Mip` (`3D MIP`)**: Performs 160-step GPU ray-marching through the 3D volume bounding box in RAS+ space, accumulating Maximum Intensity Projection and subtle emission glow along each ray (`pow(max_val, 0.75)` alpha curve). Ideal for continuous bundle density fields (e.g., AFD or probability maps) where fine offshoots and branches should glow in 3D without hard iso-surface thresholding.
+- **`DirectVolume` (`3D Direct Volume`)**: Performs front-to-back emission-absorption compositing through the 3D volume. Can be used either for dense volumetric clouds or at low opacity (`0.15–0.22`) on a `T1w` volume to create a translucent 3D **glass brain** shell around internal tracts.
+
+When a scene combines 2D anatomical slices (`Off`) with 3D ray-marched volumes (`Mip` or `DirectVolume`), TRXViz renders the 2D slice planes first with depth writes enabled, then composites the 3D ray-marched proxy cubes over the scene with depth-read enabled and depth-write disabled.
+
+![T1w Orthogonal Slices + 3D Volume MIP + 3D Branch Arbor Tubes](assets/images/volume-mip-and-branches-3d.png)
+
+![3D Translucent Glass-Brain T1w + 3D Bundle MIP + Branch Arbor Tubes](assets/images/glass-brain-3d.png)
+
+## Cross-Sectional Bundle Surfaces & Slice Intersection Contours
+
+To visually parse how a 3D streamline bundle or branching arbor passes through the 2D anatomical slices, TRXViz supports surrounding streamlines with translucent 3D cross-sectional surfaces that automatically project crisp **contour lines** onto every intersecting axial, coronal, and sagittal slice plane:
+
+1. **Native Streamline Density Envelope (`BundleSurfaceBuild` $\to$ `BundleSurfaceDisplay`)**:
+   - `BundleSurfaceBuild` (`build_mode: MarchingCubes`) voxellizes the input streamlines onto a 3D density grid, applies 3D Gaussian smoothing (`smooth_sigma`), and extracts a Marching Cubes boundary mesh.
+   - When `smooth_sigma >= 0.5`, the per-voxel streamline color accumulators (`r_sum`, `g_sum`, `b_sum`) and tangent covariance sums are Gaussian-blurred alongside the density field (Nadaraya-Watson kernel interpolation). Setting `BundleSurfaceDisplay.color_mode` to `SourceColors` therefore colors both the 3D translucent shell and its slice contour rings by the exact local streamline color (such as a `Viridis` harmonic coordinate or DPV scalar).
+2. **External GIFTI Iso-Surfaces (`SurfaceSource` $\to$ `SurfaceOverlayStack` $\to$ `SurfaceDisplay`)**:
+   - Load one or more `.surf.gii` meshes (for example, nested 50% core and 82% outer AFD mass iso-shells) and configure `color`, `opacity`, `outline_color`, and `outline_thickness` on each `SurfaceDisplay`.
+
+Whenever `outline_thickness > 0`, TRXViz intersects every visible `SurfaceDisplay` and `BundleSurfaceDisplay` mesh with the active slice planes (`intersect_mesh_with_plane`) and draws the resulting contour rings in both the **3D perspective viewport** and the **2D slice viewports** (as well as in headless `trxviz-cli render --view 3d` and `--view 2d` PNG exports). In the 3D viewport, contour segments on one slice plane are automatically occluded when passing behind non-zero brain voxels of another visible slice plane in front of the camera.
+
+![3D Cross-Sectional Shells and Slice Contours](assets/images/cross-section-shells-3d.png)
+
+![2D Ortho Slice Cross-Section Contours](assets/images/cross-section-shells-2d-ortho.png)
+
 ## Saving And Reusing The 3D Camera
 
 Workflow project saves now include the current 3D camera under `document.camera_3d` and the 3D

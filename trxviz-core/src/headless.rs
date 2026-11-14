@@ -149,6 +149,7 @@ pub(super) struct VolumeDrawInfo {
     window_width: f32,
     colormap: u32,
     opacity: f32,
+    render_3d_mode: crate::data::loaded_files::VolumeRender3DMode,
 }
 
 struct StreamlineDrawInfo {
@@ -258,6 +259,7 @@ fn render_loaded_scene(
             &render_data,
             workflow.document.slice_view_ui.clone(),
             &scene,
+            &workflow,
             options.width,
             options.height,
             output_path,
@@ -279,6 +281,8 @@ fn render_loaded_scene(
         &gpu.queue,
         &mut resources,
         &render_data,
+        &scene,
+        &workflow,
         &camera,
         &render_3d,
         if options.view == HeadlessView::InflatedStage {

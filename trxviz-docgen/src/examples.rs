@@ -33,7 +33,11 @@ pub struct Example {
 }
 
 pub fn all_examples(repo_root: &Path) -> anyhow::Result<Vec<Example>> {
-    let mut examples = vec![save_streamlines_example(), purifibre_pipeline_example()];
+    let mut examples = vec![
+        save_streamlines_example(),
+        purifibre_pipeline_example(),
+        volume_mip_and_bundle_cross_section_example(),
+    ];
     examples.extend(load_saved_examples(repo_root)?);
     Ok(examples)
 }
@@ -205,6 +209,208 @@ fn purifibre_pipeline_example() -> Example {
                 (trim + spherical smoothing) and then saved. The Purifibre op \
                 has two outputs — the cleaned streamlines and the rejected \
                 ones — so the diagram shows how multi-output nodes lay out.",
+        document: doc,
+        commentary: None,
+    }
+}
+
+fn volume_mip_and_bundle_cross_section_example() -> Example {
+    use trxviz_core::data::loaded_files::{VolumeColormap, VolumeRender3DMode};
+    use trxviz_core::data::trx_data::RenderStyle;
+    use trxviz_core::renderer::mesh_renderer::SurfaceColormap;
+    use trxviz_core::units::Millimeters;
+    use trxviz_core::workflow::{BundleSurfaceBuildMode, BundleSurfaceColorMode, DpvFieldName};
+
+    let mut doc = default_document();
+    let t1_src = WorkflowNodeUuid(1);
+    let t1_disp = WorkflowNodeUuid(2);
+    let vol_src = WorkflowNodeUuid(3);
+    let vol_disp = WorkflowNodeUuid(4);
+    let trx_src = WorkflowNodeUuid(5);
+    let color_dpv = WorkflowNodeUuid(6);
+    let trx_disp = WorkflowNodeUuid(7);
+    let bsurf_build = WorkflowNodeUuid(8);
+    let bsurf_disp = WorkflowNodeUuid(9);
+
+    doc.graph.insert_node(
+        WorkflowNode {
+            uuid: t1_src,
+            op: WorkflowNodeKind::VolumeSource { source_id: 1 },
+            label: "T1w Volume".into(),
+        },
+        GraphPos::new(0.0, 0.0),
+    );
+    doc.graph.insert_node(
+        WorkflowNode {
+            uuid: t1_disp,
+            op: WorkflowNodeKind::VolumeDisplay {
+                colormap: VolumeColormap::Grayscale,
+                opacity: 0.9,
+                window_center: 0.45,
+                window_width: 0.85,
+                render_3d_mode: VolumeRender3DMode::Off,
+            },
+            label: "T1w 2D Slices".into(),
+        },
+        GraphPos::new(0.0, 0.0),
+    );
+    doc.graph.connect(
+        OutPort {
+            node: t1_src,
+            output: 0,
+        },
+        InPort {
+            node: t1_disp,
+            input: 0,
+        },
+    );
+
+    doc.graph.insert_node(
+        WorkflowNode {
+            uuid: vol_src,
+            op: WorkflowNodeKind::VolumeSource { source_id: 2 },
+            label: "Bundle AFD Volume".into(),
+        },
+        GraphPos::new(0.0, 0.0),
+    );
+    doc.graph.insert_node(
+        WorkflowNode {
+            uuid: vol_disp,
+            op: WorkflowNodeKind::VolumeDisplay {
+                colormap: VolumeColormap::Inferno,
+                opacity: 0.85,
+                window_center: 0.22,
+                window_width: 0.44,
+                render_3d_mode: VolumeRender3DMode::Mip,
+            },
+            label: "3D Volume MIP".into(),
+        },
+        GraphPos::new(0.0, 0.0),
+    );
+    doc.graph.connect(
+        OutPort {
+            node: vol_src,
+            output: 0,
+        },
+        InPort {
+            node: vol_disp,
+            input: 0,
+        },
+    );
+
+    doc.graph.insert_node(
+        WorkflowNode {
+            uuid: trx_src,
+            op: WorkflowNodeKind::StreamlineSource { source_id: 3 },
+            label: "Branch Arbor (.trx)".into(),
+        },
+        GraphPos::new(0.0, 0.0),
+    );
+    doc.graph.insert_node(
+        WorkflowNode {
+            uuid: color_dpv,
+            op: WorkflowNodeKind::ColorByDPV {
+                field: DpvFieldName("q_harmonic".into()),
+                colormap: SurfaceColormap::Viridis,
+            },
+            label: "Color by q_harmonic".into(),
+        },
+        GraphPos::new(0.0, 0.0),
+    );
+    doc.graph.insert_node(
+        WorkflowNode {
+            uuid: trx_disp,
+            op: WorkflowNodeKind::StreamlineDisplay {
+                enabled: true,
+                render_style: RenderStyle::Tubes,
+                tube_radius_mm: Millimeters(0.55),
+                tube_sides: 8,
+                slab_half_width_mm: Millimeters(2.0),
+                opacity: 0.96,
+            },
+            label: "Branch Streamtubes".into(),
+        },
+        GraphPos::new(0.0, 0.0),
+    );
+    doc.graph.insert_node(
+        WorkflowNode {
+            uuid: bsurf_build,
+            op: WorkflowNodeKind::BundleSurfaceBuild {
+                per_group: false,
+                build_mode: BundleSurfaceBuildMode::MarchingCubes,
+                voxel_size_mm: Millimeters(1.5),
+                threshold: 0.75,
+                smooth_sigma: 1.1,
+                min_component_volume_mm3: Millimeters(8.0),
+                tube_radius_mm: Millimeters(1.4),
+                tube_sides: 12,
+                opacity: 0.22,
+            },
+            label: "Cross-Section Surface".into(),
+        },
+        GraphPos::new(0.0, 0.0),
+    );
+    doc.graph.insert_node(
+        WorkflowNode {
+            uuid: bsurf_disp,
+            op: WorkflowNodeKind::BundleSurfaceDisplay {
+                color_mode: BundleSurfaceColorMode::SourceColors,
+                outline_thickness: 2.8,
+            },
+            label: "Shell + Slice Contours".into(),
+        },
+        GraphPos::new(0.0, 0.0),
+    );
+    doc.graph.connect(
+        OutPort {
+            node: trx_src,
+            output: 0,
+        },
+        InPort {
+            node: color_dpv,
+            input: 0,
+        },
+    );
+    doc.graph.connect(
+        OutPort {
+            node: color_dpv,
+            output: 0,
+        },
+        InPort {
+            node: trx_disp,
+            input: 0,
+        },
+    );
+    doc.graph.connect(
+        OutPort {
+            node: color_dpv,
+            output: 0,
+        },
+        InPort {
+            node: bsurf_build,
+            input: 0,
+        },
+    );
+    doc.graph.connect(
+        OutPort {
+            node: bsurf_build,
+            output: 0,
+        },
+        InPort {
+            node: bsurf_disp,
+            input: 0,
+        },
+    );
+    doc.next_node_uuid = 10;
+
+    Example {
+        slug: "volume-mip-and-bundle-cross-section",
+        title: "3D Volume MIP + Branch Tubes + Cross-Section Contours",
+        intro: "Combines 2D T1w orthogonal slices (`VolumeRender3DMode::Off`), \
+                a 3D GPU ray-marched bundle density MIP (`VolumeRender3DMode::Mip`), \
+                DPV-colored branch streamtubes, and a Marching Cubes cross-sectional \
+                envelope (`BundleSurfaceBuild` -> `BundleSurfaceDisplay`) that projects \
+                local streamline-colored contour rings onto the intersecting T1w slices.",
         document: doc,
         commentary: None,
     }

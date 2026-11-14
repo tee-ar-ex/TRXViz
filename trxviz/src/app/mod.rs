@@ -343,7 +343,7 @@ impl TrxVizApp {
             .add_filter(
                 "TRXViz files",
                 &[
-                    "trx", "trk", "tck", "vtk", "tt", "gz", "nii", "gii", "gifti",
+                    "trxviz", "json", "trx", "trk", "tck", "vtk", "tt", "gz", "nii", "gii", "gifti",
                 ],
             )
             .pick_files()
@@ -359,6 +359,9 @@ impl TrxVizApp {
 
     fn open_path(&mut self, path: PathBuf, auto_import_streamlines: bool) {
         match helpers::classify_dropped_path(&path) {
+            helpers::DroppedPathKind::OpenWorkflowProject => {
+                self.workflow.pending_project_open = Some(path);
+            }
             helpers::DroppedPathKind::OpenTrx => self.begin_load_trx(path),
             helpers::DroppedPathKind::ImportTractogram(_) if auto_import_streamlines => {
                 self.begin_import_streamlines_path(path);
@@ -378,11 +381,7 @@ impl TrxVizApp {
         }
     }
 
-    pub fn new(
-        cc: &eframe::CreationContext<'_>,
-        trx_path: Option<String>,
-        nifti_path: Option<String>,
-    ) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, startup_paths: Vec<PathBuf>) -> Self {
         let (worker_tx, worker_rx) = std::sync::mpsc::channel();
         let (workflow_job_tx, workflow_job_rx) = std::sync::mpsc::channel();
         let mut app = Self {
@@ -407,11 +406,8 @@ impl TrxVizApp {
         };
 
         if cc.wgpu_render_state.is_some() {
-            if let Some(path) = trx_path {
-                app.begin_load_trx(PathBuf::from(path));
-            }
-            if let Some(path) = nifti_path {
-                app.begin_load_nifti(PathBuf::from(path));
+            for path in startup_paths {
+                app.open_path(path, true);
             }
         }
 
@@ -421,6 +417,9 @@ impl TrxVizApp {
 
 impl eframe::App for TrxVizApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if let Some(project_path) = self.workflow.pending_project_open.take() {
+            self.open_workflow_project(project_path, frame);
+        }
         self.poll_worker_messages(frame);
         self.poll_workflow_job_messages();
 
@@ -608,7 +607,7 @@ impl eframe::App for TrxVizApp {
         }
         if menu_action.open_workflow_project {
             if let Some(path) = rfd::FileDialog::new()
-                .add_filter("Workflow Project", &["json"])
+                .add_filter("Workflow Project", &["trxviz", "json"])
                 .pick_file()
             {
                 self.open_workflow_project(path, frame);

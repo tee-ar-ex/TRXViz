@@ -129,6 +129,12 @@ impl WorkflowOp for BundleSurfaceBuildOp {
         OpCategory::Surface
     }
 
+    fn describe(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(
+            "Constructs a 3D cross-sectional envelope surface (`MarchingCubes` density iso-surface with 3D Gaussian smoothing and Nadaraya-Watson streamline color/orientation interpolation, or explicit `Streamtubes`) around an input streamline bundle or branching arbor.",
+        )
+    }
+
     fn evaluate(
         &self,
         ctx: &mut EvalCtx<'_, '_>,
@@ -236,6 +242,12 @@ impl WorkflowOp for BundleSurfaceDisplayOp {
 
     fn category(&self) -> OpCategory {
         OpCategory::Display
+    }
+
+    fn describe(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(
+            "Renders a `BundleSurface` in the 3D scene (`Solid`, `DirectionRgb`, `SourceColors`, or `BoundaryAngle`) and projects its cross-sectional intersection contour lines (`outline_thickness`) onto active 3D and 2D anatomical slice planes.",
+        )
     }
 
     fn evaluate(

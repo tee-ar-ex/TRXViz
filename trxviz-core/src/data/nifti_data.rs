@@ -247,6 +247,26 @@ impl NiftiVolume {
         Vec3::new(v.x, v.y, v.z)
     }
 
+    /// Sample the normalized `[0, 1]` voxel value at a RAS+ world position
+    /// using nearest-neighbor lookup, returning `0.0` outside the volume.
+    pub fn sample_world_nearest(&self, world: Vec3) -> f32 {
+        let vox = self.voxel_to_ras.inverse().transform_point3(world);
+        let i = vox.x.round() as isize;
+        let j = vox.y.round() as isize;
+        let k = vox.z.round() as isize;
+        if i < 0
+            || j < 0
+            || k < 0
+            || i >= self.dims[0] as isize
+            || j >= self.dims[1] as isize
+            || k >= self.dims[2] as isize
+        {
+            return 0.0;
+        }
+        let idx = i as usize + self.dims[0] * (j as usize + self.dims[1] * k as usize);
+        self.data.get(idx).copied().unwrap_or(0.0)
+    }
+
     /// See the free function [`slice_world_position`].
     pub fn slice_world_position(&self, axis_index: usize, index: usize) -> f32 {
         slice_world_position(&self.voxel_to_ras, self.dims, axis_index, index)
