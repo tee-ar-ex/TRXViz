@@ -1408,6 +1408,234 @@ pub(crate) fn edit_node_op(
                 }
             });
         }
+        workflow::WorkflowNodeKind::MpatTransitions {
+            working_dir,
+            python_path,
+            preset,
+            angle_deg,
+            step_vox,
+            double_odf,
+            fod_thresh,
+            fod_power,
+            stop_mass_tau,
+            curv_sigma_deg,
+            probe_radius_vox,
+            max_length_mm,
+            wm_threshold,
+        } => {
+            use trxviz_core::workflow::{MpatPreset, resolve_mpat_python};
+
+            ui.label("Python environment");
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(python_path)
+                        .hint_text("Auto (--python-env / $MPAT_PYTHON / python3)")
+                        .desired_width(180.0),
+                );
+                if ui
+                    .button("📂")
+                    .on_hover_text("Browse Python binary")
+                    .clicked()
+                    && let Some(file) = rfd::FileDialog::new().pick_file()
+                {
+                    *python_path = file.to_string_lossy().into_owned();
+                }
+            });
+            let resolved_py = resolve_mpat_python(python_path);
+            ui.small(format!("Active Python: {resolved_py}"));
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label("Working dir / .npz");
+                if ui
+                    .button("📂 Dir…")
+                    .on_hover_text(
+                        "Select subject or cache directory (stores mpat_transitions_<hash>.npz)",
+                    )
+                    .clicked()
+                    && let Some(dir) = rfd::FileDialog::new().pick_folder()
+                {
+                    *working_dir = dir.to_string_lossy().into_owned();
+                }
+                if ui
+                    .button("📄 .npz…")
+                    .on_hover_text("Load a precomputed mpat_transitions_<hash>.npz file directly")
+                    .clicked()
+                    && let Some(file) = rfd::FileDialog::new()
+                        .add_filter("MPAT Transitions / ODF", &["npz", "odx", "nii", "gz"])
+                        .pick_file()
+                {
+                    *working_dir = file.to_string_lossy().into_owned();
+                }
+            });
+            ui.add(
+                egui::TextEdit::singleline(working_dir)
+                    .hint_text("Subject dir or precomputed mpat_transitions_<hash>.npz")
+                    .desired_width(f32::INFINITY),
+            );
+            ui.small("Transitions are saved & auto-loaded as mpat_transitions_<hash>.npz.");
+            if working_dir.trim().ends_with(".odx") {
+                ui.small(
+                    "A transitions .odx keeps the settings it was built with: the settings below \
+                     must match it, and mask inputs can't be applied.",
+                );
+            }
+
+            ui.separator();
+            let prev_preset = *preset;
+            ui.horizontal(|ui| {
+                ui.label("Transition preset");
+                egui::ComboBox::from_id_salt(("mpat_preset", node_uuid))
+                    .selected_text(preset.label())
+                    .show_ui(ui, |ui| {
+                        for p in [MpatPreset::Standard, MpatPreset::Ptt] {
+                            ui.selectable_value(preset, p, p.label());
+                        }
+                    });
+            });
+            if *preset != prev_preset {
+                match *preset {
+                    // The defaults `mpat run` uses without and with --ptt.
+                    MpatPreset::Standard => {
+                        *fod_thresh = 0.05;
+                        *fod_power = 1.0;
+                        *stop_mass_tau = 0.0;
+                        *curv_sigma_deg = 0.0;
+                        *probe_radius_vox = 0.0;
+                    }
+                    MpatPreset::Ptt => {
+                        *fod_thresh = 0.08;
+                        *fod_power = 1.5;
+                        *stop_mass_tau = 1e-4;
+                        *curv_sigma_deg = 18.0;
+                        *probe_radius_vox = 0.5;
+                    }
+                }
+            }
+
+            ui.add(egui::Slider::new(angle_deg, 10.0..=90.0).text("Max angle (°)"));
+            ui.add(egui::Slider::new(step_vox, 0.25..=2.0).text("Step size (vox)"));
+            ui.checkbox(double_odf, "Double-ODF transitions");
+            ui.add(egui::Slider::new(fod_thresh, 0.0..=0.5).text("FOD threshold"));
+            ui.add(egui::Slider::new(fod_power, 0.25..=4.0).text("FOD power"));
+            ui.add(egui::Slider::new(stop_mass_tau, 0.0..=2.0).text("Stop mass τ"));
+            ui.add(egui::Slider::new(curv_sigma_deg, 0.0..=60.0).text("Curvature σ (°)"));
+            ui.add(egui::Slider::new(probe_radius_vox, 0.0..=2.0).text("Probe radius (vox)"));
+            ui.add(egui::Slider::new(max_length_mm, 20.0..=500.0).text("Max length (mm)"));
+            ui.add(egui::Slider::new(wm_threshold, 0.0..=1.0).text("WM threshold (fallback)"));
+
+            ui.separator();
+            if ui.button("Build MPAT Transitions").clicked() {
+                result.run_expensive_requested = true;
+            }
+        }
+        workflow::WorkflowNodeKind::MpatTractography {
+            python_path,
+            seal_26,
+            midline_exclusion,
+            midline_tol_mm,
+            solver_tol,
+            solver_accel,
+            extract_streamlines,
+            extract_arbor,
+            n_streamlines,
+            n_arbor_branches,
+            step_vox,
+            min_length_mm,
+            max_length_mm,
+        } => {
+            use trxviz_core::workflow::{MpatSolverAccel, resolve_mpat_python};
+
+            ui.label("Python environment");
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(python_path)
+                        .hint_text("Auto (--python-env / $MPAT_PYTHON / python3)")
+                        .desired_width(180.0),
+                );
+                if ui
+                    .button("📂")
+                    .on_hover_text("Browse Python binary")
+                    .clicked()
+                    && let Some(file) = rfd::FileDialog::new().pick_file()
+                {
+                    *python_path = file.to_string_lossy().into_owned();
+                }
+            });
+            let resolved_py = resolve_mpat_python(python_path);
+            ui.small(format!("Active Python: {resolved_py}"));
+
+            ui.separator();
+            ui.label("Markov Boundary & Solver");
+            ui.checkbox(seal_26, "26-connected ROI shell sealing")
+                .on_hover_text(
+                    "Dilates waypoint and avoid ROIs by their 6-neighbours so diagonal steps \
+                     can't slip through a one-voxel sheet. Turn off for masks MPAT exported \
+                     (desc-include/exclude_mask), which are already sealed.",
+                );
+            ui.checkbox(midline_exclusion, "Midline sagittal exclusion")
+                .on_hover_text(
+                    "Keeps a one-sided bundle in its hemisphere (the side of its ROIs), as MPAT does \
+                     for bundles with cross_midline=False. Turn off for commissural bundles.",
+                );
+            ui.add_enabled_ui(*midline_exclusion, |ui| {
+                ui.add(
+                    egui::DragValue::new(midline_tol_mm)
+                        .range(0.0..=30.0)
+                        .speed(0.5)
+                        .suffix(" mm past midline"),
+                )
+                .on_hover_text(
+                    "How far past x = 0 the bundle may go before the other hemisphere is excluded. \
+                     MPAT uses 10 mm for the corticospinal tracts, which run next to the midline \
+                     in the brainstem; 0 is a strict cut.",
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Acceleration");
+                egui::ComboBox::from_id_salt(("mpat_accel", node_uuid))
+                    .selected_text(solver_accel.label())
+                    .show_ui(ui, |ui| {
+                        for a in [
+                            MpatSolverAccel::MinimalResidual,
+                            MpatSolverAccel::Aitken,
+                            MpatSolverAccel::None,
+                        ] {
+                            ui.selectable_value(solver_accel, a, a.label());
+                        }
+                    });
+            });
+            ui.add(
+                egui::Slider::new(solver_tol, 1e-9..=1e-3)
+                    .logarithmic(true)
+                    .text("Solver tolerance"),
+            );
+
+            ui.separator();
+            ui.label("Flux Streamlines & Branch Arbor");
+            ui.checkbox(extract_streamlines, "Extract RK4 flux streamlines");
+            if *extract_streamlines {
+                ui.add(egui::Slider::new(n_streamlines, 50..=5000).text("Max streamlines"));
+                ui.add(egui::Slider::new(step_vox, 0.1..=1.0).text("RK4 step (vox)"));
+                ui.add(egui::Slider::new(min_length_mm, 5.0..=150.0).text("Min length (mm)"))
+                    .on_hover_text("A tracking plan's min length overrides this.");
+                ui.add(egui::Slider::new(max_length_mm, 20.0..=500.0).text("Max length (mm)"))
+                    .on_hover_text(
+                        "Caps the extracted flux streamlines (a tracking plan's max length \
+                         overrides this). The Markov solve's length limit is set when the \
+                         transitions are built.",
+                    );
+            }
+            ui.checkbox(extract_arbor, "Extract sub-voxel branch arbor");
+            if *extract_arbor {
+                ui.add(egui::Slider::new(n_arbor_branches, 1..=20).text("Arbor branches per end"));
+            }
+
+            ui.separator();
+            if ui.button("Run MPAT Tractography").clicked() {
+                result.run_expensive_requested = true;
+            }
+        }
         _ => {
             ui.small("This node has no editable parameters yet.");
         }

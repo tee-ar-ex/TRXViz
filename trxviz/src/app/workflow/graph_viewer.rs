@@ -722,6 +722,20 @@ impl SnarlViewer<WorkflowNode> for WorkflowGraphViewer<'_> {
                 ui,
                 snarl,
                 pos,
+                MpatTransitionsOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
+                MpatTractographyOp::default().into(),
+                measured_node_sizes,
+            );
+            add_node_button(
+                ui,
+                snarl,
+                pos,
                 RoiFromParcelOp::default().into(),
                 measured_node_sizes,
             );
@@ -1045,6 +1059,7 @@ fn pin_info_for_port(port: PortKind) -> PinInfo {
         PortKind::OdxCatalog => egui::Color32::from_rgb(160, 120, 220),
         PortKind::VoxelMask => egui::Color32::from_rgb(112, 220, 160),
         PortKind::TrackingPlan => egui::Color32::from_rgb(200, 180, 96),
+        PortKind::MpatTransitions => egui::Color32::from_rgb(88, 212, 220),
     };
     PinInfo::circle().with_fill(color)
 }

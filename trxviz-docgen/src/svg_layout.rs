@@ -359,6 +359,7 @@ fn port_fill(kind: PortKind) -> &'static str {
         PortKind::OdxCatalog => "#a078dc",
         PortKind::VoxelMask => "#70dca0",
         PortKind::TrackingPlan => "#c8b460",
+        PortKind::MpatTransitions => "#58d4dc",
     }
 }
 

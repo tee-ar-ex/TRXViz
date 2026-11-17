@@ -13,11 +13,24 @@ use crate::workflow::{
     workflow_surface_query_fingerprint,
 };
 
+/// Upper bound on evaluate → run-jobs passes. Each pass runs every job whose inputs are
+/// ready, so real graphs settle in a handful; a graph that keeps producing new output on
+/// every evaluation would otherwise spin forever.
+const MAX_WORKFLOW_PASSES: usize = 64;
+
 pub(super) fn execute_workflow_to_completion(
     scene: &HeadlessScene,
     workflow: &mut HeadlessWorkflowState,
 ) -> anyhow::Result<()> {
+    let mut passes = 0usize;
     loop {
+        passes += 1;
+        if passes > MAX_WORKFLOW_PASSES {
+            bail!(
+                "workflow did not settle after {MAX_WORKFLOW_PASSES} passes: some node produces \
+                 new output on every evaluation"
+            );
+        }
         refresh_workflow_runtime(scene, workflow);
         if let Some(error) = &workflow.runtime.graph_error {
             bail!("{error}");
@@ -231,6 +244,50 @@ pub(super) fn execute_workflow_to_completion(
             ran_job = true;
         }
 
+        // MPAT (MPAT) jobs: run the Python bridge synchronously. Tractography waits on
+        // its transitions node, so it appears in a later pass once those are cached.
+        for job in workflow.runtime.scene_plan.mpat_transitions_jobs.clone() {
+            let (node_uuid, fingerprint) = (job.node_uuid, job.fingerprint);
+            let record = workflow
+                .execution_cache
+                .node_runs
+                .entry(node_uuid)
+                .or_default();
+            if record.last_success_fingerprint == Some(fingerprint) {
+                continue;
+            }
+            log::info!("running MPAT transitions for '{}'", job.label);
+            apply_job_result(
+                &mut workflow.execution_cache,
+                node_uuid,
+                fingerprint,
+                run_workflow_job(WorkflowJobPayload::MpatTransitions(job), CancelFlag::new())
+                    .map_err(|err| anyhow!(err))?,
+            );
+            ran_job = true;
+        }
+
+        for job in workflow.runtime.scene_plan.mpat_tractography_jobs.clone() {
+            let (node_uuid, fingerprint) = (job.node_uuid, job.fingerprint);
+            let record = workflow
+                .execution_cache
+                .node_runs
+                .entry(node_uuid)
+                .or_default();
+            if record.last_success_fingerprint == Some(fingerprint) {
+                continue;
+            }
+            log::info!("running MPAT tractography for '{}'", job.label);
+            apply_job_result(
+                &mut workflow.execution_cache,
+                node_uuid,
+                fingerprint,
+                run_workflow_job(WorkflowJobPayload::MpatTractography(job), CancelFlag::new())
+                    .map_err(|err| anyhow!(err))?,
+            );
+            ran_job = true;
+        }
+
         if !ran_job {
             break;
         }
@@ -415,6 +472,28 @@ fn apply_job_result(
                     end_mask,
                     prob_map,
                     summary: summary.clone(),
+                },
+            );
+            mark_expensive_success(record, fingerprint, summary);
+        }
+        WorkflowJobOutput::MpatTransitions(output) => {
+            let summary = output.summary.clone();
+            cache.mpat_transitions_cache.insert(
+                node_uuid,
+                crate::workflow::CachedMpatTransitions {
+                    fingerprint,
+                    output,
+                },
+            );
+            mark_expensive_success(record, fingerprint, summary);
+        }
+        WorkflowJobOutput::MpatTractography(output) => {
+            let summary = output.summary.clone();
+            cache.mpat_tractography_cache.insert(
+                node_uuid,
+                crate::workflow::CachedMpatTractography {
+                    fingerprint,
+                    output,
                 },
             );
             mark_expensive_success(record, fingerprint, summary);

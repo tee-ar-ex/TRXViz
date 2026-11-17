@@ -131,6 +131,22 @@ impl WorkflowOp for RoiFromVolumeOp {
         ctx: &mut EvalCtx<'_, '_>,
     ) -> WorkflowResult<Vec<super::super::EvaluatedValue>> {
         let backing = expect_volume_input(ctx.inputs, self.title())?;
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            std::mem::discriminant(&backing).hash(&mut h);
+            backing.slice_key().hash(&mut h);
+            self.threshold.to_bits().hash(&mut h);
+            h.finish()
+        };
+        if let Some((cached_key, mask)) = ctx
+            .execution_cache
+            .roi_from_volume_cache
+            .get(&ctx.node.uuid)
+            && *cached_key == key
+        {
+            return Ok(vec![WorkflowValue::VoxelMask(mask.clone()).into()]);
+        }
         let scalars = ctx.scalars_for(&backing)?;
         let [nx, ny, nz] = scalars.dims;
         let n_voxels = nx * ny * nz;
@@ -147,15 +163,16 @@ impl WorkflowOp for RoiFromVolumeOp {
             }
         }
 
-        Ok(vec![
-            WorkflowValue::VoxelMask(Arc::new(VoxelMask {
-                dims: [nx as u32, ny as u32, nz as u32],
-                voxel_to_ras: scalars.voxel_to_ras,
-                data,
-                ..Default::default()
-            }))
-            .into(),
-        ])
+        let mask = Arc::new(VoxelMask {
+            dims: [nx as u32, ny as u32, nz as u32],
+            voxel_to_ras: scalars.voxel_to_ras,
+            data,
+            ..Default::default()
+        });
+        ctx.execution_cache
+            .roi_from_volume_cache
+            .insert(ctx.node.uuid, (key, mask.clone()));
+        Ok(vec![WorkflowValue::VoxelMask(mask).into()])
     }
 }
 

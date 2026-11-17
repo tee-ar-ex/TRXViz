@@ -16,6 +16,7 @@ mod graph;
 mod jobs;
 mod layout;
 pub mod methods;
+pub mod mpat_bridge;
 mod op;
 pub(crate) mod ops;
 pub mod port_labels;
@@ -75,6 +76,7 @@ pub(crate) use evaluate::{
     expect_surface_input, optional_group_selection_input, optional_volume_input,
     resolve_selected_labels, summarize_value, volume_scalars_from_nifti_volume,
 };
+pub use mpat_bridge::{cli_python_path, resolve_mpat_python, set_cli_python_path};
 pub(crate) use op::EvalCtx;
 pub use op::WorkflowOp;
 pub use ops::{
@@ -82,15 +84,16 @@ pub use ops::{
     AddTermOp, BoundaryGlyphDisplayOp, BundleSurfaceBuildOp, BundleSurfaceDisplayOp, CiftiSourceOp,
     CiftiStructureOp, ColorByDirectionOp, ColorByDpsOp, ColorByDpvOp, ColorByFixelScalarsOp,
     ColorByGroupOp, DipyTractographyOp, Fixel2DDisplayOp, Fixel3DDisplayOp, GroupSelectOp,
-    LimitStreamlinesOp, MergeOp, MetaGroupSelectOp, OdfGlyphRendererOp, OdxFixelScalarSelectOp,
-    OdxSourceOp, OdxVolumeSelectOp, ParcelCropOp, ParcelEndOp, ParcelRoaOp, ParcelRoiOp,
-    ParcelSelectOp, ParcelSurfaceBuildOp, ParcellationDisplayOp, ParcellationSourceOp,
-    PrepareHausdorffPlanOp, PreparePyafqPlanOp, PrepareSimplePlanOp, PurifibreOp, RandomSubsetOp,
-    RemoveDuplicatesOp, RoiFromParcelOp, RoiFromShapeOp, RoiFromVolumeOp, RoiShape,
-    SampleVolumeAlongStreamlineOp, SaveStreamlinesOp, SphereQueryOp, StreamlineDirectionFieldOp,
-    StreamlineDisplayOp, StreamlineSourceOp, SurfaceDepthQueryOp, SurfaceDisplayOp,
-    SurfaceOverlayStackOp, SurfaceProjectionDensityOp, SurfaceProjectionMeanDpsOp, SurfaceSourceOp,
-    TipPruneOp, TriangleFundusOp, UniformColorOp, VolumeDisplayOp, VolumeOverlayStackOp,
-    VolumeSourceOp, VoxelMaskDisplayOp, WorkflowNodeKind, YehTractographyOp,
+    LimitStreamlinesOp, MergeOp, MetaGroupSelectOp, MpatTractographyOp, MpatTransitionsOp,
+    OdfGlyphRendererOp, OdxFixelScalarSelectOp, OdxSourceOp, OdxVolumeSelectOp, ParcelCropOp,
+    ParcelEndOp, ParcelRoaOp, ParcelRoiOp, ParcelSelectOp, ParcelSurfaceBuildOp,
+    ParcellationDisplayOp, ParcellationSourceOp, PrepareHausdorffPlanOp, PreparePyafqPlanOp,
+    PrepareSimplePlanOp, PurifibreOp, RandomSubsetOp, RemoveDuplicatesOp, RoiFromParcelOp,
+    RoiFromShapeOp, RoiFromVolumeOp, RoiShape, SampleVolumeAlongStreamlineOp, SaveStreamlinesOp,
+    SphereQueryOp, StreamlineDirectionFieldOp, StreamlineDisplayOp, StreamlineSourceOp,
+    SurfaceDepthQueryOp, SurfaceDisplayOp, SurfaceOverlayStackOp, SurfaceProjectionDensityOp,
+    SurfaceProjectionMeanDpsOp, SurfaceSourceOp, TipPruneOp, TriangleFundusOp, UniformColorOp,
+    VolumeDisplayOp, VolumeOverlayStackOp, VolumeSourceOp, VoxelMaskDisplayOp, WorkflowNodeKind,
+    YehTractographyOp,
 };
 pub(crate) use types::{EvaluatedValue, WorkflowValue};

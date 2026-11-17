@@ -697,6 +697,9 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
         );
 
         if let Some(all) = callback_resources.get::<AllSliceResources>() {
+            let has_2d_slice_vol = self.volume_draws.iter().any(|vd| {
+                vd.render_3d_mode == trxviz_core::data::loaded_files::VolumeRender3DMode::Off
+            });
             for vd in &self.volume_draws {
                 if let Some((_, sr)) = all.entries.iter().find(|(id, _)| *id == vd.slice_key) {
                     let axis = match self.quad_index {
@@ -706,6 +709,12 @@ impl egui_wgpu::CallbackTrait for SliceViewCallback {
                     };
                     match sr {
                         SliceResourceKind::Scalar(s) => {
+                            if has_2d_slice_vol
+                                && vd.render_3d_mode
+                                    != trxviz_core::data::loaded_files::VolumeRender3DMode::Off
+                            {
+                                continue;
+                            }
                             render_pass.set_pipeline(&s.pipeline);
                             render_pass.set_bind_group(0, s.bind_group(self.viewport.into()), &[]);
                             render_pass.set_index_buffer(

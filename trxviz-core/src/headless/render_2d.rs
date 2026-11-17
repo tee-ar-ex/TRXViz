@@ -152,7 +152,8 @@ pub(super) fn render_scene2d_to_png(
                 );
             }
         }
-        if render_data.glyph_visible || render_data.odx_visible {
+        if render_data.glyph_visible || (render_data.odx_visible && render_data.odx_glyphs_visible)
+        {
             resources.glyphs.update_uniforms(
                 queue,
                 viewport.into(),
@@ -261,6 +262,10 @@ pub(super) fn render_scene2d_to_png(
                 panel.rect.height,
             );
 
+            let has_2d_slice_vol = render_data
+                .volume_draws
+                .iter()
+                .any(|vd| vd.render_3d_mode == crate::data::loaded_files::VolumeRender3DMode::Off);
             for volume in &render_data.volume_draws {
                 if let Some((_, slice)) = resources
                     .slices
@@ -275,6 +280,12 @@ pub(super) fn render_scene2d_to_png(
                     };
                     match slice {
                         crate::renderer::slice_renderer::SliceResourceKind::Scalar(s) => {
+                            if has_2d_slice_vol
+                                && volume.render_3d_mode
+                                    != crate::data::loaded_files::VolumeRender3DMode::Off
+                            {
+                                continue;
+                            }
                             render_pass.set_pipeline(&s.pipeline);
                             render_pass.set_bind_group(0, s.bind_group(viewport.into()), &[]);
                             render_pass.set_index_buffer(
@@ -324,7 +335,9 @@ pub(super) fn render_scene2d_to_png(
                     }
                 }
             }
-            if render_data.glyph_visible || render_data.odx_visible {
+            if render_data.glyph_visible
+                || (render_data.odx_visible && render_data.odx_glyphs_visible)
+            {
                 resources.glyphs.paint(render_pass, viewport.into(), true);
             }
             if render_data.odx_visible && render_data.odx_fixel_2d_visible {

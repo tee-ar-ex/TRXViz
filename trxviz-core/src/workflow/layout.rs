@@ -496,6 +496,7 @@ fn port_kind_label(port: super::PortKind) -> &'static str {
         super::PortKind::OdxCatalog => "ODX Catalog",
         super::PortKind::VoxelMask => "Voxel Mask",
         super::PortKind::TrackingPlan => "Tracking Plan",
+        super::PortKind::MpatTransitions => "MPAT Transitions",
     }
 }
 

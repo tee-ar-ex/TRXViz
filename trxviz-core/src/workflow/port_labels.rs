@@ -38,6 +38,7 @@ pub fn port_name(port: PortKind) -> &'static str {
         PortKind::OdxCatalog => "ODX Catalog",
         PortKind::VoxelMask => "Voxel Mask",
         PortKind::TrackingPlan => "Tracking Plan",
+        PortKind::MpatTransitions => "MPAT Transitions",
     }
 }
 
@@ -47,6 +48,18 @@ pub fn input_port_label(
     port: PortKind,
 ) -> String {
     match node_kind {
+        WorkflowNodeKind::MpatTransitions { .. } => match input_index {
+            0 => "ODF Field (optional)".to_string(),
+            1 => "Transient WM Mask".to_string(),
+            2 => "Absorbing Mask".to_string(),
+            _ => port_name(port).to_string(),
+        },
+        WorkflowNodeKind::MpatTractography { .. } => match input_index {
+            0 => "Transitions".to_string(),
+            1 => "Seed Mask".to_string(),
+            2 => "Tracking Plan".to_string(),
+            _ => port_name(port).to_string(),
+        },
         WorkflowNodeKind::OdfGlyphRenderer { .. } => match input_index {
             0 => "ODF Field".to_string(),
             1 => "Opacity Scalars".to_string(),
@@ -108,6 +121,29 @@ pub fn output_port_label(
             3 => "Start Mask".to_string(),
             4 => "End Mask".to_string(),
             5 => "Probability Map".to_string(),
+            _ => port_name(port).to_string(),
+        },
+        WorkflowNodeKind::MpatTransitions { .. } => match output_index {
+            0 => "Transitions".to_string(),
+            1 => "CoDI (Double-ODF)".to_string(),
+            2 => "CoDI (Single-ODF)".to_string(),
+            3 => "CoAsy (Asymmetry)".to_string(),
+            4 => "P(Terminate Double)".to_string(),
+            5 => "P(Terminate Single)".to_string(),
+            6 => "Total ODF Amplitude".to_string(),
+            7 => "KL Divergence (Single)".to_string(),
+            8 => "Chain Dead-State Prob".to_string(),
+            _ => port_name(port).to_string(),
+        },
+        WorkflowNodeKind::MpatTractography { .. } => match output_index {
+            0 => "Flux Streamlines & Arbor".to_string(),
+            1 => "AFD Map (Analytical SIFT2)".to_string(),
+            2 => "Visitation Density".to_string(),
+            3 => "Physical TDI (mm)".to_string(),
+            4 => "Harmonic Coordinate (q)".to_string(),
+            5 => "Flux Coherence".to_string(),
+            6 => "Branching K_eff".to_string(),
+            7 => "Endpoints Map".to_string(),
             _ => port_name(port).to_string(),
         },
         WorkflowNodeKind::Purifibre { .. } => match output_index {

@@ -96,26 +96,21 @@ pub(super) fn build_gpu_resources(
     let mut slices = AllSliceResources {
         entries: Vec::new(),
     };
+    // Each volume is sliced at its own index for the shared world position, so volumes
+    // on different grids (a 1 mm T1 under 1.7 mm masks) line up as they do in the GUI.
+    let upload_slices = |slice_resources: &SliceResources,
+                         volume: &crate::data::nifti_data::NiftiVolume| {
+        for (axis_index, axis) in [SliceAxis::Axial, SliceAxis::Coronal, SliceAxis::Sagittal]
+            .into_iter()
+            .enumerate()
+        {
+            let index = scene.slice_index_on_grid(axis_index, &volume.voxel_to_ras, volume.dims);
+            slice_resources.update_slice(queue, axis, index, volume);
+        }
+    };
     for nifti in &scene.nifti_files {
         let slice_resources = SliceResources::new(device, queue, TARGET_FORMAT, &nifti.volume);
-        slice_resources.update_slice(
-            queue,
-            SliceAxis::Axial,
-            scene.slice_indices[0],
-            &nifti.volume,
-        );
-        slice_resources.update_slice(
-            queue,
-            SliceAxis::Coronal,
-            scene.slice_indices[1],
-            &nifti.volume,
-        );
-        slice_resources.update_slice(
-            queue,
-            SliceAxis::Sagittal,
-            scene.slice_indices[2],
-            &nifti.volume,
-        );
+        upload_slices(&slice_resources, &nifti.volume);
         slices.entries.push((
             nifti.id,
             crate::renderer::slice_renderer::SliceResourceKind::Scalar(slice_resources),
@@ -155,9 +150,7 @@ pub(super) fn build_gpu_resources(
             voxel_to_ras: scalars.voxel_to_ras,
         };
         let slice_resources = SliceResources::new(device, queue, TARGET_FORMAT, &volume);
-        slice_resources.update_slice(queue, SliceAxis::Axial, scene.slice_indices[0], &volume);
-        slice_resources.update_slice(queue, SliceAxis::Coronal, scene.slice_indices[1], &volume);
-        slice_resources.update_slice(queue, SliceAxis::Sagittal, scene.slice_indices[2], &volume);
+        upload_slices(&slice_resources, &volume);
         slices.entries.push((
             key,
             crate::renderer::slice_renderer::SliceResourceKind::Scalar(slice_resources),
@@ -285,8 +278,16 @@ pub(super) fn build_gpu_resources(
     let mut fixels_3d = FixelResources::new(device, TARGET_FORMAT);
     let mut fixels_2d = FixelResources::new(device, TARGET_FORMAT);
 
-    // ODX ODF glyphs and fixels — driven by the evaluated workflow plan.
-    let axial_slice = scene.slice_indices[0] as u32;
+    // ODX ODF glyphs and fixels — driven by the evaluated workflow plan. Slice indices
+    // are resolved on the ODX's own grid (see `HeadlessScene::slice_index_on_grid`).
+    let odx_slice = |odx: &crate::data::odx_data::OdxScene, viewport_axis: usize| -> u32 {
+        let d = odx.dimensions();
+        scene.slice_index_on_grid(
+            viewport_axis,
+            &odx.voxel_to_ras(),
+            [d[0] as usize, d[1] as usize, d[2] as usize],
+        ) as u32
+    };
     let odf_plan = workflow.runtime.scene_plan.active_odf_glyph_draw();
     if let Some(plan) = odf_plan {
         let odx = &plan.field.scene;
@@ -297,7 +298,7 @@ pub(super) fn build_gpu_resources(
                     .odf_render_geometry()
                     .expect("ODF geometry should exist for ODF glyph mode");
                 let use_slice_local = odx_odf_exceeds_binding_limit(odx, device);
-                let slice_index = scene.slice_indices[plan.slice_axis.viewport_index()] as u32;
+                let slice_index = odx_slice(odx, plan.slice_axis.viewport_index());
                 let instances = if use_slice_local {
                     odx.glyph_instances_for_slice(
                         plan.slice_axis.odx_axis(),
@@ -346,7 +347,7 @@ pub(super) fn build_gpu_resources(
                 }
             }
             Some(OdxGlyphSourceKind::Sh) => {
-                let slice_index = scene.slice_indices[plan.slice_axis.viewport_index()] as u32;
+                let slice_index = odx_slice(odx, plan.slice_axis.viewport_index());
                 let detail = clamped_sh_detail_for_slice(
                     odx,
                     plan.detail,
@@ -399,6 +400,7 @@ pub(super) fn build_gpu_resources(
             expand(Vec3::from(center));
         }
     } else if let Some(odx) = &scene.odx_scene {
+        let axial_slice = odx_slice(odx, 0);
         let conditioning = OdfAmplitudeConditioning::new(true, false);
         match odx.glyph_source_kind() {
             Some(OdxGlyphSourceKind::Odf) => {

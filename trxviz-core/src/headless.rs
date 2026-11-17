@@ -123,6 +123,8 @@ struct HeadlessRenderData {
     glyph_density_3d_step: u32,
     glyph_slice_density_step: u32,
     odx_visible: bool,
+    /// ODF glyphs: the ODF Glyph node's `visible`, or on when the workflow has no such node.
+    odx_glyphs_visible: bool,
     odx_fixel_3d_visible: bool,
     odx_fixel_2d_visible: bool,
     fixel_3d_line_width: f32,

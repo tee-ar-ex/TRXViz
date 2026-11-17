@@ -16,11 +16,24 @@ fn load_icon() -> egui::IconData {
 fn main() -> eframe::Result {
     env_logger::init();
 
-    let startup_paths: Vec<std::path::PathBuf> = std::env::args()
-        .skip(1)
-        .filter(|arg| arg != "--workflow" && arg != "-w")
-        .map(std::path::PathBuf::from)
-        .collect();
+    let mut startup_paths: Vec<std::path::PathBuf> = Vec::new();
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--workflow" || arg == "-w" {
+            continue;
+        } else if arg == "--python-env" || arg == "--mpat-python" {
+            if let Some(py_path) = args.next() {
+                trxviz_core::workflow::set_cli_python_path(py_path);
+            }
+        } else if let Some(py_path) = arg
+            .strip_prefix("--python-env=")
+            .or_else(|| arg.strip_prefix("--mpat-python="))
+        {
+            trxviz_core::workflow::set_cli_python_path(py_path.to_string());
+        } else {
+            startup_paths.push(std::path::PathBuf::from(arg));
+        }
+    }
 
     let icon = load_icon();
 
