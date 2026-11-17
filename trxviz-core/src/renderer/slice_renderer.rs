@@ -34,6 +34,19 @@ pub enum SliceAxis {
 /// We maintain one uniform/bind-group pair per viewport so different
 /// view-projection matrices can be active simultaneously, plus a dedicated
 /// 3D ray-marching pipeline and oriented bounding-box mesh.
+/// Maps ray-march texture coordinates (`[0, 1]³` over the whole volume) to world space.
+/// Texel `i` is sampled at its centre, `(i + 0.5) / n` (see `sample_trilinear` in
+/// `slice.wgsl`), and `voxel_to_ras` maps voxel `i` to that voxel's centre, so texture
+/// coordinate `t` is voxel `t·n − 0.5`: the box spans voxels `-0.5 .. n - 0.5`.
+pub fn raymarch_texture_to_world(voxel_to_ras: glam::Mat4, dims: [usize; 3]) -> glam::Mat4 {
+    let scale = glam::Mat4::from_scale(glam::Vec3::new(
+        dims[0].max(1) as f32,
+        dims[1].max(1) as f32,
+        dims[2].max(1) as f32,
+    ));
+    voxel_to_ras * glam::Mat4::from_translation(glam::Vec3::splat(-0.5)) * scale
+}
+
 pub struct SliceResources {
     pub pipeline: wgpu::RenderPipeline,
     pub raymarch_pipeline: wgpu::RenderPipeline,
@@ -334,12 +347,7 @@ impl SliceResources {
         ];
 
         // 3D bounding box vertices and indices for volume ray-marching
-        let scale_to_vox = glam::Mat4::from_scale(glam::Vec3::new(
-            dims[0].max(1) as f32,
-            dims[1].max(1) as f32,
-            dims[2].max(1) as f32,
-        ));
-        let tex_to_world = volume.voxel_to_ras * scale_to_vox;
+        let tex_to_world = raymarch_texture_to_world(volume.voxel_to_ras, dims);
         let world_to_tex = tex_to_world.inverse();
 
         let unit_corners: [[f32; 3]; 8] = [
@@ -527,4 +535,33 @@ pub enum SliceResourceKind {
 /// egui_wgpu::CallbackResources is a TypeMap.
 pub struct AllSliceResources {
     pub entries: Vec<(usize, SliceResourceKind)>, // (slice_key, resources)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::raymarch_texture_to_world;
+
+    #[test]
+    fn raymarch_texel_centres_land_on_voxel_centres() {
+        // The shader samples texel i at (i + 0.5) / n; that point must be voxel i's centre.
+        let aff = glam::Mat4::from_cols_array(&[
+            -1.7, 0.0, 0.0, 0.0, 0.0, -1.7, 0.0, 0.0, 0.0, 0.0, 1.7, 0.0, 79.9, 80.75, -80.0, 1.0,
+        ]);
+        let dims = [95usize, 116, 101];
+        let tex_to_world = raymarch_texture_to_world(aff, dims);
+        for ijk in [[0usize, 0, 0], [40, 57, 63], [94, 115, 100]] {
+            let tc = glam::Vec3::new(
+                (ijk[0] as f32 + 0.5) / dims[0] as f32,
+                (ijk[1] as f32 + 0.5) / dims[1] as f32,
+                (ijk[2] as f32 + 0.5) / dims[2] as f32,
+            );
+            let want =
+                aff.transform_point3(glam::Vec3::new(ijk[0] as f32, ijk[1] as f32, ijk[2] as f32));
+            let got = tex_to_world.transform_point3(tc);
+            assert!(
+                (got - want).abs().max_element() < 1e-3,
+                "{ijk:?}: {got:?} vs {want:?}"
+            );
+        }
+    }
 }
