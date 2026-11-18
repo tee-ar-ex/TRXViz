@@ -131,6 +131,13 @@ pub(crate) fn summarize_value(value: &WorkflowValue) -> String {
                 format!("tracking plan ({})", active.join(", "))
             }
         }
+        WorkflowValue::MpatTransitions(h) => {
+            if h.summary.is_empty() {
+                "MPAT transitions".to_string()
+            } else {
+                h.summary.clone()
+            }
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 //! Runtime methods-boilerplate generation primitives.
 //!
-//! Ops opt in to the methods-boilerplate system through three
+//! Ops opt in to the methods-boilerplate system through four
 //! default-impl methods on [`WorkflowOp`](super::WorkflowOp):
 //!
 //! - [`WorkflowOp::citation_keys`](super::WorkflowOp::citation_keys) —
@@ -13,6 +13,11 @@
 //! - [`WorkflowOp::describe`](super::WorkflowOp::describe) — a
 //!   parameter-free short description used by the per-op reference
 //!   documentation.
+//! - [`WorkflowOp::runs_original_software`](super::WorkflowOp::runs_original_software)
+//!   — true for ops that run the cited software itself (MPAT) rather
+//!   than a TRXViz re-implementation. A methods section made only of
+//!   such ops credits that software instead of TRXViz and carries no
+//!   non-endorsement notice.
 //!
 //! The assembly that walks a [`WorkflowDocument`](super::types::WorkflowDocument)
 //! and emits a final `methods.md` + `references.bib` pair lives in
@@ -126,10 +131,13 @@ pub struct MethodsReport {
     /// Markdown body, in Pandoc-citeproc-compatible form. Starts with
     /// the non-endorsement notice (as a blockquote), followed by a
     /// `## Methods` heading, the TRXViz preamble sentence, and one
-    /// sentence per opted-in op in topological order.
+    /// sentence per opted-in op in topological order. When every op
+    /// with a sentence runs original software (see
+    /// [`MethodsReport::credits_trxviz`]), the notice and the TRXViz
+    /// preamble are left out.
     pub body_markdown: String,
     /// BibTeX keys actually referenced by `body_markdown`, in
-    /// order-of-first-appearance (TRXViz itself is always first).
+    /// order-of-first-appearance (TRXViz first when it is credited).
     /// De-duplicated.
     pub citation_keys: Vec<String>,
     /// Filtered [`CITATIONS_BIB`] containing only entries whose keys
@@ -137,6 +145,11 @@ pub struct MethodsReport {
     /// `@string` macros, unused entries — is stripped so the emitted
     /// `.bib` has nothing the user didn't actually use.
     pub bibtex: String,
+    /// Whether the report credits TRXViz and carries the
+    /// non-endorsement notice. False when the workflow's methods
+    /// sentences all come from ops that run the original software
+    /// (MPAT), which TRXViz doesn't re-implement.
+    pub credits_trxviz: bool,
 }
 
 /// Per-op information captured for documentation generation. Populated
@@ -163,6 +176,10 @@ pub struct OpDocInfo {
     /// probabilistic) surface the default-configuration set here;
     /// per-variant detail belongs in the boilerplate sentence.
     pub citation_keys: &'static [&'static str],
+    /// True when the op runs the cited software itself rather than a
+    /// TRXViz re-implementation, so its page skips the non-endorsement
+    /// notice (from `WorkflowOp::runs_original_software`).
+    pub runs_original_software: bool,
     /// Input ports. `None` for ops with dynamic port counts
     /// (`SurfaceOverlayStack`); the doc page explains the shape in prose.
     pub input_ports: Option<&'static [super::PortKind]>,
@@ -256,6 +273,7 @@ pub fn all_op_doc_info() -> Vec<OpDocInfo> {
             describe: op.describe(),
             category: op.category(),
             citation_keys: op.citation_keys(),
+            runs_original_software: op.runs_original_software(),
             input_ports: Some(op.input_ports()),
             output_ports: op.output_ports(),
             parameters: reflect_parameters(&kind),
@@ -569,6 +587,7 @@ pub fn all_op_doc_info() -> Vec<OpDocInfo> {
         describe: overlay.describe(),
         category: overlay.category(),
         citation_keys: overlay.citation_keys(),
+        runs_original_software: overlay.runs_original_software(),
         input_ports: None,
         output_ports: overlay.output_ports(),
         parameters: reflect_parameters(&overlay_kind),
@@ -721,6 +740,13 @@ pub fn all_op_doc_info() -> Vec<OpDocInfo> {
             direction_getter: dipy.direction_getter,
         },
     ));
+    let mpat_transitions = MpatTransitionsOp::default();
+    v.push(describe(&mpat_transitions, mpat_transitions.clone().into()));
+    let mpat_tractography = MpatTractographyOp::default();
+    v.push(describe(
+        &mpat_tractography,
+        mpat_tractography.clone().into(),
+    ));
     let yeh = YehTractographyOp::default();
     v.push(describe(
         &yeh,
@@ -760,12 +786,12 @@ pub fn generate_methods_report(doc: &super::types::WorkflowDocument) -> MethodsR
     let order = topo_sort(&doc.graph);
 
     let mut sentences: Vec<String> = Vec::new();
-    let mut keys_in_order: Vec<String> = Vec::new();
-    let mut keys_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    // TRXViz itself always gets cited via the preamble.
-    keys_seen.insert("trxviz".to_string());
-    keys_in_order.push("trxviz".to_string());
+    let mut op_keys: Vec<&'static str> = Vec::new();
+    // TRXViz is credited unless every sentence comes from an op that
+    // runs the original software (MPAT): those methods are the cited
+    // package's own, not a TRXViz port, so the package is what gets
+    // credited. A workflow with no sentences at all still credits TRXViz.
+    let mut any_ported_sentence = false;
 
     for uuid in &order {
         let Some(node) = doc.graph.get(*uuid) else {
@@ -773,11 +799,18 @@ pub fn generate_methods_report(doc: &super::types::WorkflowDocument) -> MethodsR
         };
         if let Some(text) = super::ops::boilerplate(&node.op) {
             sentences.push(text);
+            any_ported_sentence |= !super::ops::runs_original_software(&node.op);
         }
-        for k in super::ops::citation_keys(&node.op) {
-            if keys_seen.insert((*k).to_string()) {
-                keys_in_order.push((*k).to_string());
-            }
+        op_keys.extend_from_slice(super::ops::citation_keys(&node.op));
+    }
+    let credits_trxviz = sentences.is_empty() || any_ported_sentence;
+
+    let mut keys_in_order: Vec<String> = Vec::new();
+    let mut keys_seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let preamble_keys: &[&str] = if credits_trxviz { &["trxviz"] } else { &[] };
+    for k in preamble_keys.iter().chain(op_keys.iter()) {
+        if keys_seen.insert(k) {
+            keys_in_order.push((*k).to_string());
         }
     }
 
@@ -785,17 +818,20 @@ pub fn generate_methods_report(doc: &super::types::WorkflowDocument) -> MethodsR
     body.push_str(
         "<!-- TRXViz methods section. Generated automatically — do not edit by hand. -->\n\n",
     );
-    // Non-endorsement notice. Blockquote so Pandoc renders it as a
-    // callout rather than blending it into the methods prose.
-    body.push_str("> **Not the authoritative implementation.** ");
-    body.push_str(NON_ENDORSEMENT_NOTICE);
-    body.push_str("\n\n");
-    body.push_str("## Methods\n\n");
-    body.push_str("The following analysis was performed using TRXViz [@trxviz].");
-    if !sentences.is_empty() {
-        body.push(' ');
-        body.push_str(&sentences.join(" "));
+    if credits_trxviz {
+        // Non-endorsement notice. Blockquote so Pandoc renders it as a
+        // callout rather than blending it into the methods prose.
+        body.push_str("> **Not the authoritative implementation.** ");
+        body.push_str(NON_ENDORSEMENT_NOTICE);
+        body.push_str("\n\n");
     }
+    body.push_str("## Methods\n\n");
+    let mut prose: Vec<&str> = Vec::new();
+    if credits_trxviz {
+        prose.push("The following analysis was performed using TRXViz [@trxviz].");
+    }
+    prose.extend(sentences.iter().map(String::as_str));
+    body.push_str(&prose.join(" "));
     body.push('\n');
 
     let used: std::collections::HashSet<&str> = keys_in_order.iter().map(|s| s.as_str()).collect();
@@ -805,6 +841,7 @@ pub fn generate_methods_report(doc: &super::types::WorkflowDocument) -> MethodsR
         body_markdown: body,
         citation_keys: keys_in_order,
         bibtex,
+        credits_trxviz,
     }
 }
 
@@ -1290,6 +1327,65 @@ mod tests {
         assert!(report.body_markdown.contains("[@trxviz]"));
         assert!(report.body_markdown.contains("Not the authoritative"));
         assert!(report.bibtex.contains("trxviz"));
+        assert!(report.credits_trxviz);
+    }
+
+    fn document_with_ops(ops: Vec<WorkflowNodeKind>) -> super::super::types::WorkflowDocument {
+        use super::super::WorkflowNode;
+        use super::super::graph::GraphPos;
+        use super::super::types::{WorkflowNodeUuid, default_document};
+
+        let mut doc = default_document();
+        for (i, op) in ops.into_iter().enumerate() {
+            doc.graph.insert_node(
+                WorkflowNode {
+                    uuid: WorkflowNodeUuid(i as u64 + 1),
+                    op,
+                    label: format!("op{i}"),
+                },
+                GraphPos::ZERO,
+            );
+        }
+        doc
+    }
+
+    #[test]
+    fn generate_methods_report_for_mpat_only_credits_mpat_instead_of_trxviz() {
+        let doc = document_with_ops(vec![
+            ops::MpatTransitionsOp::default().into(),
+            ops::MpatTractographyOp::default().into(),
+        ]);
+        let report = generate_methods_report(&doc);
+
+        // MPAT runs as itself, so its paper is credited and TRXViz's
+        // re-implementation notice doesn't apply.
+        assert!(!report.credits_trxviz);
+        assert_eq!(report.citation_keys, vec!["mpat".to_string()]);
+        assert!(report.body_markdown.contains("[@mpat]"));
+        assert!(!report.body_markdown.contains("[@trxviz]"));
+        assert!(!report.body_markdown.contains("Not the authoritative"));
+        assert!(report.bibtex.contains("{mpat,"));
+        assert!(report.bibtex.contains("10.64898/2026.11.12.766276"));
+        assert!(!report.bibtex.contains("{trxviz,"));
+    }
+
+    #[test]
+    fn generate_methods_report_mixing_mpat_and_ported_methods_credits_both() {
+        let doc = document_with_ops(vec![
+            ops::MpatTractographyOp::default().into(),
+            ops::DipyTractographyOp::default().into(),
+        ]);
+        let report = generate_methods_report(&doc);
+
+        // DIPY tracking is a TRXViz port, so TRXViz and its notice stay.
+        assert!(report.credits_trxviz);
+        assert_eq!(
+            report.citation_keys.first().map(String::as_str),
+            Some("trxviz")
+        );
+        assert!(report.citation_keys.contains(&"mpat".to_string()));
+        assert!(report.body_markdown.contains("Not the authoritative"));
+        assert!(report.body_markdown.contains("[@mpat]"));
     }
 
     #[test]

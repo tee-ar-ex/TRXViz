@@ -131,6 +131,14 @@ pub(super) fn build_render_data(
         .unwrap_or(scene.odx_scene.is_some());
     let fixel_3d_draw = active_fixel_draw_3d(workflow);
     let fixel_2d_draw = active_fixel_draw_2d(workflow);
+    // Once the workflow has an ODF Glyph node it decides how the ODX is shown, as in the
+    // GUI's Advanced mode: no default fixels behind a hidden glyph node. With no node at
+    // all, keep the default ODX view.
+    let odf_node_present = workflow
+        .runtime
+        .scene_plan
+        .active_odf_glyph_draw()
+        .is_some();
 
     HeadlessRenderData {
         any_visible_streamlines: streamline_draws.iter().any(|draw| draw.visible),
@@ -158,11 +166,14 @@ pub(super) fn build_render_data(
                 .next()
                 .is_some()
             || workflow.runtime.scene_plan.has_fixel_draws(),
-        odx_fixel_3d_visible: fixel_3d_draw.map(|p| p.visible).unwrap_or(true)
+        odx_glyphs_visible: odx_glyphs_active,
+        odx_fixel_3d_visible: fixel_3d_draw
+            .map(|p| p.visible)
+            .unwrap_or(!odf_node_present)
             && !(odx_has_glyph_field && odx_glyphs_active),
         odx_fixel_2d_visible: fixel_2d_draw
             .map(|p| p.visible)
-            .unwrap_or(scene.odx_scene.is_some()),
+            .unwrap_or(scene.odx_scene.is_some() && !odf_node_present),
         fixel_3d_line_width: fixel_3d_draw.map(|p| p.line_width).unwrap_or(0.006),
         fixel_3d_opacity: fixel_3d_draw.map(|p| p.opacity).unwrap_or(1.0),
         fixel_3d_colormap_code: fixel_3d_draw.map(|p| p.colormap_code).unwrap_or(0),

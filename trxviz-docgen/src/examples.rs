@@ -46,14 +46,24 @@ pub fn all_examples(repo_root: &Path) -> anyhow::Result<Vec<Example>> {
 /// (or bare documents) are a better advertisement than hand-built
 /// graphs, and they exercise the loader's tolerant parsing.
 fn load_saved_examples(repo_root: &Path) -> anyhow::Result<Vec<Example>> {
-    let entries: &[(&str, &str, &str, &str)] = &[(
-        "autotrack",
-        "docs/assets/workflows/autotrack.json",
-        "Autotrack",
-        "A saved autotrack workflow. Loaded from the checked-in JSON via \
-         the tolerant project loader and laid out by the same engine that \
-         renders the programmatic examples above.",
-    )];
+    let entries: &[(&str, &str, &str, &str)] = &[
+        (
+            "autotrack",
+            "docs/assets/workflows/autotrack.json",
+            "Autotrack",
+            "A saved autotrack workflow. Loaded from the checked-in JSON via \
+             the tolerant project loader and laid out by the same engine that \
+             renders the programmatic examples above.",
+        ),
+        (
+            "mpat-live-bundle",
+            "docs/assets/workflows/mpat-live-bundle.json",
+            "MPAT live bundle",
+            "The template from the [MPAT guide](../mpat.md): solve one bundle \
+             with MPAT and watch its density build up as the solver runs. \
+             [Download the workflow](../assets/workflows/mpat-live-bundle.json).",
+        ),
+    ];
     let mut out = Vec::new();
     for (slug, rel_path, title, intro) in entries {
         let path: PathBuf = repo_root.join(rel_path);

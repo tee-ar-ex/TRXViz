@@ -307,6 +307,13 @@ impl TrxVizApp {
                                 cancel_requests.push(*node_uuid);
                             }
                         });
+                        // A job's live status line (MPAT's solver frames), while it runs.
+                        if let Some(live_summary) = self.workflow.job_live_status.get(node_uuid) {
+                            ui.small(
+                                egui::RichText::new(live_summary)
+                                    .color(egui::Color32::from_rgb(255, 196, 84)),
+                            );
+                        }
                         // Render a progress bar whenever the worker
                         // has reported at least one `(done, total)`
                         // pair for this node. Jobs that finish before

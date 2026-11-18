@@ -13,6 +13,8 @@ mod group_select;
 mod limit_streamlines;
 mod merge;
 mod meta_group_select;
+mod mpat_tractography;
+mod mpat_transitions;
 mod odf_glyph_renderer;
 mod odx_select;
 mod odx_source;
@@ -66,6 +68,8 @@ pub use group_select::GroupSelectOp;
 pub use limit_streamlines::LimitStreamlinesOp;
 pub use merge::MergeOp;
 pub use meta_group_select::MetaGroupSelectOp;
+pub use mpat_tractography::MpatTractographyOp;
+pub use mpat_transitions::MpatTransitionsOp;
 pub use odf_glyph_renderer::OdfGlyphRendererOp;
 pub use odx_select::{OdxFixelScalarSelectOp, OdxVolumeSelectOp};
 pub use odx_source::OdxSourceOp;
@@ -73,6 +77,7 @@ pub use parcel_reactive::{ParcelCropOp, ParcelEndOp, ParcelRoaOp, ParcelRoiOp};
 pub use parcel_select::ParcelSelectOp;
 pub use parcellation_display::ParcellationDisplayOp;
 pub use parcellation_source::ParcellationSourceOp;
+pub(crate) use plan_add::union_masks;
 pub use plan_add::{AddEndRegionOp, AddLimitingOp, AddNoEndOp, AddRoaOp, AddRoiOp, AddTermOp};
 pub use prepare_hausdorff::PrepareHausdorffPlanOp;
 pub use prepare_pyafq::PreparePyafqPlanOp;
@@ -536,6 +541,62 @@ pub enum WorkflowNodeKind {
         max_seed_attempts: u32,
         #[serde(default)]
         rng_seed: u64,
+    },
+    MpatTransitions {
+        #[serde(default)]
+        working_dir: String,
+        #[serde(default)]
+        python_path: String,
+        #[serde(default)]
+        preset: super::types::MpatPreset,
+        #[serde(default = "mpat_transitions::default_mpat_angle_deg")]
+        angle_deg: f32,
+        #[serde(default = "mpat_transitions::default_mpat_step_vox")]
+        step_vox: f32,
+        #[serde(default = "mpat_transitions::default_mpat_double_odf")]
+        double_odf: bool,
+        #[serde(default = "mpat_transitions::default_mpat_fod_thresh")]
+        fod_thresh: f32,
+        #[serde(default = "mpat_transitions::default_mpat_fod_power")]
+        fod_power: f32,
+        #[serde(default = "mpat_transitions::default_mpat_stop_mass_tau")]
+        stop_mass_tau: f32,
+        #[serde(default = "mpat_transitions::default_mpat_curv_sigma_deg")]
+        curv_sigma_deg: f32,
+        #[serde(default = "mpat_transitions::default_mpat_probe_radius_vox")]
+        probe_radius_vox: f32,
+        #[serde(default = "mpat_transitions::default_mpat_max_length_mm")]
+        max_length_mm: f32,
+        #[serde(default = "mpat_transitions::default_mpat_wm_threshold")]
+        wm_threshold: f32,
+    },
+    MpatTractography {
+        #[serde(default)]
+        python_path: String,
+        #[serde(default = "mpat_tractography::default_mpat_seal_26")]
+        seal_26: bool,
+        #[serde(default = "mpat_tractography::default_mpat_midline_exclusion")]
+        midline_exclusion: bool,
+        #[serde(default)]
+        midline_tol_mm: f32,
+        #[serde(default = "mpat_tractography::default_mpat_solver_tol")]
+        solver_tol: f32,
+        #[serde(default)]
+        solver_accel: super::types::MpatSolverAccel,
+        #[serde(default = "mpat_tractography::default_mpat_extract_streamlines")]
+        extract_streamlines: bool,
+        #[serde(default = "mpat_tractography::default_mpat_extract_arbor")]
+        extract_arbor: bool,
+        #[serde(default = "mpat_tractography::default_mpat_n_streamlines")]
+        n_streamlines: u32,
+        #[serde(default = "mpat_tractography::default_mpat_n_arbor_branches")]
+        n_arbor_branches: u32,
+        #[serde(default = "mpat_tractography::default_mpat_rk4_step_vox")]
+        step_vox: f32,
+        #[serde(default = "mpat_tractography::default_mpat_min_len_mm")]
+        min_length_mm: f32,
+        #[serde(default = "mpat_tractography::default_mpat_max_len_mm")]
+        max_length_mm: f32,
     },
 }
 
@@ -1237,6 +1298,70 @@ macro_rules! with_workflow_op {
                 };
                 $body
             }
+            WorkflowNodeKind::MpatTransitions {
+                working_dir,
+                python_path,
+                preset,
+                angle_deg,
+                step_vox,
+                double_odf,
+                fod_thresh,
+                fod_power,
+                stop_mass_tau,
+                curv_sigma_deg,
+                probe_radius_vox,
+                max_length_mm,
+                wm_threshold,
+            } => {
+                let $op = mpat_transitions::MpatTransitionsOp {
+                    working_dir: working_dir.clone(),
+                    python_path: python_path.clone(),
+                    preset: *preset,
+                    angle_deg: *angle_deg,
+                    step_vox: *step_vox,
+                    double_odf: *double_odf,
+                    fod_thresh: *fod_thresh,
+                    fod_power: *fod_power,
+                    stop_mass_tau: *stop_mass_tau,
+                    curv_sigma_deg: *curv_sigma_deg,
+                    probe_radius_vox: *probe_radius_vox,
+                    max_length_mm: *max_length_mm,
+                    wm_threshold: *wm_threshold,
+                };
+                $body
+            }
+            WorkflowNodeKind::MpatTractography {
+                python_path,
+                seal_26,
+                midline_exclusion,
+                midline_tol_mm,
+                solver_tol,
+                solver_accel,
+                extract_streamlines,
+                extract_arbor,
+                n_streamlines,
+                n_arbor_branches,
+                step_vox,
+                min_length_mm,
+                max_length_mm,
+            } => {
+                let $op = mpat_tractography::MpatTractographyOp {
+                    python_path: python_path.clone(),
+                    seal_26: *seal_26,
+                    midline_exclusion: *midline_exclusion,
+                    midline_tol_mm: *midline_tol_mm,
+                    solver_tol: *solver_tol,
+                    solver_accel: *solver_accel,
+                    extract_streamlines: *extract_streamlines,
+                    extract_arbor: *extract_arbor,
+                    n_streamlines: *n_streamlines,
+                    n_arbor_branches: *n_arbor_branches,
+                    step_vox: *step_vox,
+                    min_length_mm: *min_length_mm,
+                    max_length_mm: *max_length_mm,
+                };
+                $body
+            }
         }
     };
 }
@@ -1265,6 +1390,10 @@ pub fn fingerprint(kind: &WorkflowNodeKind, ctx: &super::FingerprintCtx) -> supe
 #[allow(dead_code)]
 pub fn citation_keys(kind: &WorkflowNodeKind) -> &'static [&'static str] {
     with_workflow_op!(kind, |op| op.citation_keys())
+}
+
+pub fn runs_original_software(kind: &WorkflowNodeKind) -> bool {
+    with_workflow_op!(kind, |op| op.runs_original_software())
 }
 
 /// Render this op's methods-boilerplate sentence with its parameter
@@ -1520,6 +1649,8 @@ pub(super) fn validate_registry() -> WorkflowResult<()> {
         plan_add::AddTermOp.tag(),
         dipy_tractography::DipyTractographyOp::default().tag(),
         yeh_tractography::YehTractographyOp::default().tag(),
+        mpat_transitions::MpatTransitionsOp::default().tag(),
+        mpat_tractography::MpatTractographyOp::default().tag(),
     ] {
         if tag.is_empty() {
             return Err(WorkflowError::Evaluation(

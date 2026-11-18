@@ -119,4 +119,5 @@ workflow branches.
 
 - [GUI Guide](gui-guide.md) for viewer behavior and export
 - [Workflows](workflows.md) for graph-based usage
+- [MPAT Tractography](mpat.md) for solving bundles with MPAT and watching them build up live
 - [Command Line](cli.md) for render automation, saved-camera behavior, and headless caveats

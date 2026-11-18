@@ -7,7 +7,9 @@
 //!
 //! The non-endorsement admonition appears on every op page with at
 //! least one citation key, and again on the index — matching the plan's
-//! "disclaimer everywhere citations appear" requirement.
+//! "disclaimer everywhere citations appear" requirement. Ops that run
+//! the original software (MPAT) are the exception: they aren't
+//! re-implementations, so their pages cite the software without it.
 
 use trxviz_core::workflow::methods::{NON_ENDORSEMENT_NOTICE, OpCategory, OpDocInfo};
 use trxviz_core::workflow::port_labels::{input_port_label, output_port_label};
@@ -21,7 +23,9 @@ pub fn render_op_page(info: &OpDocInfo) -> String {
         info.category.label()
     ));
 
-    if !info.citation_keys.is_empty() {
+    // Ops that run the original software (MPAT) aren't re-implementations,
+    // so the notice about TRXViz ports doesn't apply to them.
+    if !info.citation_keys.is_empty() && !info.runs_original_software {
         push_non_endorsement_admonition(&mut s);
     }
 
@@ -47,10 +51,18 @@ pub fn render_op_page(info: &OpDocInfo) -> String {
 
     if !info.citation_keys.is_empty() {
         s.push_str("## Citations\n\n");
-        s.push_str(
-            "When you use this op in a published workflow, please credit the original \
-             authors whose methods TRXViz re-implements or ports:\n\n",
-        );
+        if info.runs_original_software {
+            s.push_str(
+                "This op runs the original software rather than a TRXViz \
+                 re-implementation. When you use it in a published workflow, please \
+                 cite:\n\n",
+            );
+        } else {
+            s.push_str(
+                "When you use this op in a published workflow, please credit the original \
+                 authors whose methods TRXViz re-implements or ports:\n\n",
+            );
+        }
         for key in info.citation_keys {
             s.push_str(&format!("- [@{key}]\n"));
         }
@@ -194,7 +206,7 @@ mod tests {
         // generated surface with citations. This test is the programmatic
         // guard against drift.
         for info in all_op_doc_info() {
-            if info.citation_keys.is_empty() {
+            if info.citation_keys.is_empty() || info.runs_original_software {
                 continue;
             }
             let page = render_op_page(&info);
@@ -237,6 +249,34 @@ mod tests {
                 "index missing heading for `{label}`"
             );
         }
+    }
+
+    #[test]
+    fn original_software_op_pages_cite_without_the_reimplementation_notice() {
+        let mut checked = 0;
+        for info in all_op_doc_info() {
+            if !info.runs_original_software {
+                continue;
+            }
+            let page = render_op_page(&info);
+            assert!(
+                !page.contains("NOT the authoritative"),
+                "op page `{}` runs the original software but carries the notice",
+                info.tag
+            );
+            for key in info.citation_keys {
+                assert!(
+                    page.contains(&format!("[@{key}]")),
+                    "op page `{}` missing [@{key}]",
+                    info.tag
+                );
+            }
+            checked += 1;
+        }
+        assert!(
+            checked >= 2,
+            "expected the MPAT ops to run original software"
+        );
     }
 
     #[test]

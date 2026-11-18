@@ -878,8 +878,10 @@ pub fn build_voxel_mask_boundary_mesh(
     // space, voxel-space outward normal, neighbor-direction delta to
     // probe). Vertex ordering is CCW when viewed from the outside.
     //
-    // A voxel at index (i,j,k) spans [i,i+1] × [j,j+1] × [k,k+1] in
-    // voxel space.
+    // `voxel_to_ras` maps a voxel index to the voxel's centre (NIfTI), so the
+    // voxel at (i,j,k) spans [i-0.5, i+0.5] × [j-0.5, j+0.5] × [k-0.5, k+0.5]
+    // in voxel space; `origin` below is its low corner, and the face corner
+    // offsets are relative to it.
     struct Face {
         normal_voxel: glam::Vec3,
         delta: (i64, i64, i64),
@@ -964,7 +966,7 @@ pub fn build_voxel_mask_boundary_mesh(
                 if mask[lin(i, j, k)] == 0 {
                     continue;
                 }
-                let origin = glam::Vec3::new(i as f32, j as f32, k as f32);
+                let origin = glam::Vec3::new(i as f32 - 0.5, j as f32 - 0.5, k as f32 - 0.5);
                 for face in &faces {
                     let nx_i = i as i64 + face.delta.0;
                     let ny_i = j as i64 + face.delta.1;
@@ -1341,8 +1343,9 @@ mod tests {
             bbox_min = bbox_min.min(p);
             bbox_max = bbox_max.max(p);
         }
-        assert_eq!(bbox_min, Vec3::new(1.0, 2.0, 3.0));
-        assert_eq!(bbox_max, Vec3::new(2.0, 3.0, 4.0));
+        // The affine maps the voxel index to the voxel's centre.
+        assert_eq!(bbox_min, Vec3::new(0.5, 1.5, 2.5));
+        assert_eq!(bbox_max, Vec3::new(1.5, 2.5, 3.5));
     }
 
     #[test]
@@ -1359,8 +1362,8 @@ mod tests {
 
     #[test]
     fn voxel_mask_boundary_mesh_respects_anisotropic_affine() {
-        // Anisotropic 1x1x3 mm voxel. The +Z face of voxel (0,0,0)
-        // should land 3 mm above the origin in world space.
+        // Anisotropic 1x1x3 mm voxel centred at the origin: its +Z face
+        // lands 1.5 mm above it.
         let dims = [2u32, 2u32, 2u32];
         let mut mask = vec![0u8; 8];
         mask[0] = 1;
@@ -1376,6 +1379,37 @@ mod tests {
             .iter()
             .map(|v| v.position[2])
             .fold(f32::NEG_INFINITY, f32::max);
-        assert!((max_z - 3.0).abs() < 1e-5, "got {}", max_z);
+        assert!((max_z - 1.5).abs() < 1e-5, "got {}", max_z);
+    }
+
+    #[test]
+    fn voxel_mask_boundary_mesh_is_centred_on_the_voxel_in_world_space() {
+        // LPS-oriented 1.7 mm grid like a qsiprep DWI: each voxel's cube must be
+        // centred on affine * (i, j, k), not shifted half a voxel.
+        let dims = [6u32, 6u32, 6u32];
+        let (i, j, k) = (2usize, 3usize, 4usize);
+        let mut mask = vec![0u8; 6 * 6 * 6];
+        mask[i + 6 * (j + 6 * k)] = 1;
+        let aff = glam::Mat4::from_cols_array(&[
+            -1.7, 0.0, 0.0, 0.0, // col 0
+            0.0, -1.7, 0.0, 0.0, // col 1
+            0.0, 0.0, 1.7, 0.0, // col 2
+            79.9, 80.75, -80.0, 1.0, // col 3
+        ]);
+        let mesh = build_voxel_mask_boundary_mesh(dims, aff, &mask, [0.0; 4]).unwrap();
+        let mut lo = Vec3::splat(f32::INFINITY);
+        let mut hi = Vec3::splat(f32::NEG_INFINITY);
+        for v in &mesh.vertices {
+            lo = lo.min(Vec3::from(v.position));
+            hi = hi.max(Vec3::from(v.position));
+        }
+        let centre = aff.transform_point3(Vec3::new(i as f32, j as f32, k as f32));
+        assert!(
+            ((lo + hi) * 0.5 - centre).abs().max_element() < 1e-4,
+            "{:?} vs {:?}",
+            (lo + hi) * 0.5,
+            centre
+        );
+        assert!(((hi - lo) - Vec3::splat(1.7)).abs().max_element() < 1e-4);
     }
 }

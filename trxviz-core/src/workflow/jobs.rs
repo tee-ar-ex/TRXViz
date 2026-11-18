@@ -25,6 +25,8 @@ pub fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
         WorkflowJobKind::YehTractography => "yeh tractography",
         WorkflowJobKind::PrepareHausdorffPlan => "Hausdorff plan",
         WorkflowJobKind::PreparePyafqPlan => "pyAFQ plan",
+        WorkflowJobKind::MpatTransitions => "MPAT transition probabilities",
+        WorkflowJobKind::MpatTractography => "MPAT tractography",
     }
 }
 
@@ -208,6 +210,20 @@ pub fn run_workflow_job(
                 summary,
             })
         }
+        WorkflowJobPayload::MpatTransitions(job) => {
+            let cancel_for_cb = cancel.clone();
+            let output = super::mpat_bridge::run_mpat_transitions(&job, &cancel, move |d, t| {
+                cancel_for_cb.report_progress(d, t);
+            })?;
+            Ok(WorkflowJobOutput::MpatTransitions(output))
+        }
+        WorkflowJobPayload::MpatTractography(job) => {
+            let cancel_for_cb = cancel.clone();
+            let output = super::mpat_bridge::run_mpat_tractography(&job, &cancel, move |d, t| {
+                cancel_for_cb.report_progress(d, t);
+            })?;
+            Ok(WorkflowJobOutput::MpatTractography(output))
+        }
         WorkflowJobPayload::BoundaryField { plan } => {
             let subset = materialize_flow_gpu(plan.flow);
             let selected = (0..subset.nb_streamlines as u32)
@@ -245,6 +261,14 @@ pub fn sync_node_state_from_run_record(
 }
 
 pub fn prime_expensive_record(record: &mut ExpensiveNodeRunRecord, fingerprint: u64) {
+    if record.current_fingerprint == Some(fingerprint)
+        && matches!(
+            record.status,
+            WorkflowExecutionStatus::Running | WorkflowExecutionStatus::Queued
+        )
+    {
+        return;
+    }
     record.current_fingerprint = Some(fingerprint);
     if record.last_success_fingerprint == Some(fingerprint) {
         record.status = WorkflowExecutionStatus::Ready;

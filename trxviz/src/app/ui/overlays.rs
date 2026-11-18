@@ -911,12 +911,13 @@ fn draw_voxel_accurate_overlay(
         return;
     }
     let aff = mask.voxel_to_ras;
-    // Bounding-box reject the whole mask before iterating.
+    // Bounding-box reject the whole mask before iterating. `voxel_to_ras` maps a
+    // voxel index to the voxel's centre, so voxel i spans [i - 0.5, i + 0.5].
     let mut bbox_min = glam::Vec3::splat(f32::INFINITY);
     let mut bbox_max = glam::Vec3::splat(f32::NEG_INFINITY);
-    for &dx in &[0.0f32, nx as f32] {
-        for &dy in &[0.0f32, ny as f32] {
-            for &dz in &[0.0f32, nz as f32] {
+    for &dx in &[-0.5f32, nx as f32 - 0.5] {
+        for &dy in &[-0.5f32, ny as f32 - 0.5] {
+            for &dz in &[-0.5f32, nz as f32 - 0.5] {
                 let p = aff.transform_point3(glam::Vec3::new(dx, dy, dz));
                 bbox_min = bbox_min.min(p);
                 bbox_max = bbox_max.max(p);
@@ -961,13 +962,13 @@ fn draw_voxel_accurate_overlay(
     let mut polygon_buf: Vec<egui::Pos2> = Vec::with_capacity(8);
 
     for [i, j, k] in on_voxels.iter() {
-        // Center value of n_v · v for the voxel center (i+0.5, j+0.5, k+0.5).
-        let center_v =
-            n_v.x * (*i as f32 + 0.5) + n_v.y * (*j as f32 + 0.5) + n_v.z * (*k as f32 + 0.5);
+        // n_v · v at the voxel's centre, which is its index.
+        let center_v = n_v.x * *i as f32 + n_v.y * *j as f32 + n_v.z * *k as f32;
         if (d_v - center_v).abs() > cube_half_extent + eps {
             continue;
         }
-        let voxel_origin = glam::Vec3::new(*i as f32, *j as f32, *k as f32);
+        // Low corner of the voxel's cube.
+        let voxel_origin = glam::Vec3::new(*i as f32 - 0.5, *j as f32 - 0.5, *k as f32 - 0.5);
         cube_slice_polygon_voxel_offsets(aff, voxel_origin, world_axis, slice_pos, &mut offset_buf);
         if offset_buf.len() < 3 {
             continue;
@@ -1078,9 +1079,9 @@ fn voxel_outline_edges<F>(
     // anatomical texture and parcellation contours show in the same
     // viewport.
     let center = glam::Vec3::new(
-        mask.dims[0] as f32 * 0.5,
-        mask.dims[1] as f32 * 0.5,
-        mask.dims[2] as f32 * 0.5,
+        (mask.dims[0] as f32 - 1.0) * 0.5,
+        (mask.dims[1] as f32 - 1.0) * 0.5,
+        (mask.dims[2] as f32 - 1.0) * 0.5,
     );
     let off_axis_sum = match normal_axis {
         0 => n_v.y * center.y + n_v.z * center.z,
@@ -1088,16 +1089,16 @@ fn voxel_outline_edges<F>(
         _ => n_v.x * center.x + n_v.y * center.y,
     };
     let slice_pos_v = (d_v - off_axis_sum) / n_normal;
+    // Voxel index i is the voxel's centre, so voxel i spans [i - 0.5, i + 0.5].
     let dim_normal = mask.dims[normal_axis] as f32;
-    if slice_pos_v < 0.0 || slice_pos_v > dim_normal {
+    if slice_pos_v < -0.5 || slice_pos_v > dim_normal - 0.5 {
         return;
     }
 
-    // Voxel layer the slice cuts through. `floor` puts a slice at the
-    // integer face into the lower voxel; clamp covers `slice_pos_v ==
-    // dims` (top boundary).
+    // Voxel layer the slice cuts through: the nearest voxel centre, as the
+    // parcellation contours pick it; clamp covers the outer faces.
     let dim_normal_i = mask.dims[normal_axis] as i32;
-    let layer = (slice_pos_v.floor() as i32).clamp(0, dim_normal_i - 1);
+    let layer = (slice_pos_v.round() as i32).clamp(0, dim_normal_i - 1);
 
     let in_plane: [usize; 2] = match normal_axis {
         0 => [1, 2],
@@ -1145,7 +1146,12 @@ fn voxel_outline_edges<F>(
                 if neighbor_on {
                     continue;
                 }
-                let mut p0 = [coords[0] as f32, coords[1] as f32, coords[2] as f32];
+                // The voxel's low corner; the edge runs along its face toward `dir`.
+                let mut p0 = [
+                    coords[0] as f32 - 0.5,
+                    coords[1] as f32 - 0.5,
+                    coords[2] as f32 - 0.5,
+                ];
                 p0[axis] += if dir > 0 { 1.0 } else { 0.0 };
                 p0[normal_axis] = slice_pos_v;
                 let mut p1 = p0;
@@ -1386,11 +1392,11 @@ mod tests {
 
     #[test]
     fn outline_axis_aligned_single_voxel_emits_four_edges() {
-        // Identity affine, single on-voxel at (1,1,1), axial slice at
-        // world z=1.5. Expect 4 edges (in-plane perimeter of the lone
-        // voxel).
+        // Identity affine, single on-voxel at (1,1,1), axial slice through
+        // its centre (world z=1). Expect 4 edges: the in-plane perimeter of
+        // the voxel, which spans 0.5..1.5 on each axis.
         let mask = mask_with(&[[1, 1, 1]], glam::Mat4::IDENTITY);
-        let (n_v, d_v) = slice_plane(glam::Mat4::IDENTITY, AXIAL_WORLD_AXIS, 1.5);
+        let (n_v, d_v) = slice_plane(glam::Mat4::IDENTITY, AXIAL_WORLD_AXIS, 1.0);
         let normal_axis = dominant_voxel_axis(n_v).unwrap();
         assert_eq!(normal_axis, 2);
 
@@ -1407,8 +1413,29 @@ mod tests {
         );
         assert_eq!(edges.len(), 4, "isolated voxel should emit 4 edges");
         for [a, b] in &edges {
-            assert!((a.z - 1.5).abs() < 1e-5);
-            assert!((b.z - 1.5).abs() < 1e-5);
+            for p in [a, b] {
+                assert!((p.z - 1.0).abs() < 1e-5);
+                assert!(
+                    (p.x - 0.5).abs() < 1e-5 || (p.x - 1.5).abs() < 1e-5,
+                    "{p:?}"
+                );
+                assert!(
+                    (p.y - 0.5).abs() < 1e-5 || (p.y - 1.5).abs() < 1e-5,
+                    "{p:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn outline_slice_snaps_to_the_nearest_voxel_centre() {
+        // Voxel 1 spans z 0.5..1.5: slices at 0.6 and 1.4 cut it, 1.6 does not.
+        let mask = mask_with(&[[1, 1, 1]], glam::Mat4::IDENTITY);
+        for (slice_z, want) in [(0.6, 4), (1.4, 4), (1.6, 0)] {
+            let (n_v, d_v) = slice_plane(glam::Mat4::IDENTITY, AXIAL_WORLD_AXIS, slice_z);
+            let mut n = 0;
+            voxel_outline_edges(&mask, glam::Mat4::IDENTITY, n_v, d_v, 2, |_, _| n += 1);
+            assert_eq!(n, want, "slice at z={slice_z}");
         }
     }
 
@@ -1421,7 +1448,7 @@ mod tests {
         let aff = glam::Mat4::from_rotation_y(std::f32::consts::FRAC_PI_6);
         let mask = mask_with(&[[1, 1, 1]], aff);
 
-        let center_world = aff.transform_point3(glam::Vec3::new(1.5, 1.5, 1.5));
+        let center_world = aff.transform_point3(glam::Vec3::new(1.0, 1.0, 1.0));
         let slice_pos = center_world.z;
 
         let (n_v, d_v) = slice_plane(aff, AXIAL_WORLD_AXIS, slice_pos);
@@ -1440,7 +1467,7 @@ mod tests {
         // the production formula: snap to the layer the slice plane
         // crosses at the volume center.
         let inv = aff.inverse();
-        let center = glam::Vec3::new(1.5, 1.5, 1.5);
+        let center = glam::Vec3::new(1.0, 1.0, 1.0); // (dims - 1) / 2
         let off_axis_sum = n_v.x * center.x + n_v.y * center.y;
         let slice_pos_v = (d_v - off_axis_sum) / n_v.z;
         for [a, b] in &edges {
@@ -1452,8 +1479,8 @@ mod tests {
                     v.z,
                     slice_pos_v
                 );
-                let x_ok = (v.x - 1.0).abs() < 1e-4 || (v.x - 2.0).abs() < 1e-4;
-                let y_ok = (v.y - 1.0).abs() < 1e-4 || (v.y - 2.0).abs() < 1e-4;
+                let x_ok = (v.x - 0.5).abs() < 1e-4 || (v.x - 1.5).abs() < 1e-4;
+                let y_ok = (v.y - 0.5).abs() < 1e-4 || (v.y - 1.5).abs() < 1e-4;
                 assert!(x_ok && y_ok, "endpoint voxel-coords out of bounds: {:?}", v);
             }
         }
@@ -1465,7 +1492,7 @@ mod tests {
         // and (1,0,0) must not be drawn. The perimeter of a 2×1 block
         // in the XY plane is 6 unit segments.
         let mask = mask_with(&[[0, 0, 0], [1, 0, 0]], glam::Mat4::IDENTITY);
-        let (n_v, d_v) = slice_plane(glam::Mat4::IDENTITY, AXIAL_WORLD_AXIS, 0.5);
+        let (n_v, d_v) = slice_plane(glam::Mat4::IDENTITY, AXIAL_WORLD_AXIS, 0.0);
         let normal_axis = dominant_voxel_axis(n_v).unwrap();
 
         let mut edges: Vec<[glam::Vec3; 2]> = Vec::new();

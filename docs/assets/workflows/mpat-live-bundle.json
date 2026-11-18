@@ -1,0 +1,700 @@
+{
+  "version": 1,
+  "document": {
+    "next_node_uuid": 26,
+    "assets": [
+      {
+        "Odx": {
+          "id": 0,
+          "path": "{stem}_desc-transitions_dwimap.odx"
+        }
+      },
+      {
+        "Volume": {
+          "id": 1,
+          "path": "{t1w}"
+        }
+      },
+      {
+        "Volume": {
+          "id": 2,
+          "path": "{stem}_bundle-{bundle}_desc-start_mask.nii.gz"
+        }
+      },
+      {
+        "Volume": {
+          "id": 3,
+          "path": "{stem}_bundle-{bundle}_desc-end_mask.nii.gz"
+        }
+      },
+      {
+        "Volume": {
+          "id": 4,
+          "path": "{stem}_bundle-{bundle}_desc-include_mask.nii.gz"
+        }
+      },
+      {
+        "Volume": {
+          "id": 5,
+          "path": "{stem}_bundle-{bundle}_desc-exclude_mask.nii.gz"
+        }
+      }
+    ],
+    "graph": {
+      "nodes": {
+        "1": {
+          "node": {
+            "uuid": 1,
+            "label": "Transitions ODX",
+            "op": {
+              "OdxSource": {
+                "source_id": 0
+              }
+            }
+          },
+          "pos": {
+            "x": 40.0,
+            "y": 40.0
+          }
+        },
+        "2": {
+          "node": {
+            "uuid": 2,
+            "label": "T1w",
+            "op": {
+              "VolumeSource": {
+                "source_id": 1
+              }
+            }
+          },
+          "pos": {
+            "x": 40.0,
+            "y": 200.0
+          }
+        },
+        "3": {
+          "node": {
+            "uuid": 3,
+            "label": "Start mask file",
+            "op": {
+              "VolumeSource": {
+                "source_id": 2
+              }
+            }
+          },
+          "pos": {
+            "x": 40.0,
+            "y": 340.0
+          }
+        },
+        "4": {
+          "node": {
+            "uuid": 4,
+            "label": "End mask file",
+            "op": {
+              "VolumeSource": {
+                "source_id": 3
+              }
+            }
+          },
+          "pos": {
+            "x": 40.0,
+            "y": 470.0
+          }
+        },
+        "5": {
+          "node": {
+            "uuid": 5,
+            "label": "Include mask file",
+            "op": {
+              "VolumeSource": {
+                "source_id": 4
+              }
+            }
+          },
+          "pos": {
+            "x": 40.0,
+            "y": 600.0
+          }
+        },
+        "18": {
+          "node": {
+            "uuid": 18,
+            "label": "Exclude mask file",
+            "op": {
+              "VolumeSource": {
+                "source_id": 5
+              }
+            }
+          },
+          "pos": {
+            "x": 40.0,
+            "y": 730.0
+          }
+        },
+        "6": {
+          "node": {
+            "uuid": 6,
+            "label": "Start mask",
+            "op": {
+              "RoiFromVolume": {
+                "threshold": 0.5
+              }
+            }
+          },
+          "pos": {
+            "x": 310.0,
+            "y": 340.0
+          }
+        },
+        "7": {
+          "node": {
+            "uuid": 7,
+            "label": "End mask",
+            "op": {
+              "RoiFromVolume": {
+                "threshold": 0.5
+              }
+            }
+          },
+          "pos": {
+            "x": 310.0,
+            "y": 470.0
+          }
+        },
+        "8": {
+          "node": {
+            "uuid": 8,
+            "label": "Include mask",
+            "op": {
+              "RoiFromVolume": {
+                "threshold": 0.5
+              }
+            }
+          },
+          "pos": {
+            "x": 310.0,
+            "y": 600.0
+          }
+        },
+        "19": {
+          "node": {
+            "uuid": 19,
+            "label": "Exclude mask",
+            "op": {
+              "RoiFromVolume": {
+                "threshold": 0.5
+              }
+            }
+          },
+          "pos": {
+            "x": 310.0,
+            "y": 730.0
+          }
+        },
+        "9": {
+          "node": {
+            "uuid": 9,
+            "label": "Bundle plan",
+            "op": {
+              "PrepareSimplePlan": {
+                "override_step": false,
+                "step_size_mm": 1.0,
+                "override_angle": false,
+                "max_angle_deg": 35.0,
+                "override_min_len": false,
+                "min_len_mm": 20.0,
+                "override_max_len": false,
+                "max_len_mm": 250.0,
+                "override_fixel_threshold": false,
+                "fixel_threshold": 0.08,
+                "override_smooth": false,
+                "smooth_fraction": 0.0,
+                "override_fixel_otsu": false,
+                "fixel_otsu": 0.1
+              }
+            }
+          },
+          "pos": {
+            "x": 310.0,
+            "y": 200.0
+          }
+        },
+        "10": {
+          "node": {
+            "uuid": 10,
+            "label": "Add start region",
+            "op": "AddEndRegion"
+          },
+          "pos": {
+            "x": 580.0,
+            "y": 320.0
+          }
+        },
+        "11": {
+          "node": {
+            "uuid": 11,
+            "label": "Add end region",
+            "op": "AddEndRegion"
+          },
+          "pos": {
+            "x": 800.0,
+            "y": 410.0
+          }
+        },
+        "12": {
+          "node": {
+            "uuid": 12,
+            "label": "Add include ROI",
+            "op": "AddRoi"
+          },
+          "pos": {
+            "x": 1020.0,
+            "y": 500.0
+          }
+        },
+        "20": {
+          "node": {
+            "uuid": 20,
+            "label": "Add exclude ROA",
+            "op": "AddRoa"
+          },
+          "pos": {
+            "x": 1240.0,
+            "y": 590.0
+          }
+        },
+        "13": {
+          "node": {
+            "uuid": 13,
+            "label": "MPAT Transition Probabilities",
+            "op": {
+              "MpatTransitions": {
+                "working_dir": "",
+                "python_path": "",
+                "preset": "Standard",
+                "angle_deg": 35.0,
+                "step_vox": 1.0,
+                "double_odf": true,
+                "fod_thresh": 0.05,
+                "fod_power": 1.0,
+                "stop_mass_tau": 0.0,
+                "curv_sigma_deg": 0.0,
+                "probe_radius_vox": 0.0,
+                "max_length_mm": 250.0,
+                "wm_threshold": 0.4
+              }
+            }
+          },
+          "pos": {
+            "x": 580.0,
+            "y": 40.0
+          }
+        },
+        "14": {
+          "node": {
+            "uuid": 14,
+            "label": "MPAT Tractography",
+            "op": {
+              "MpatTractography": {
+                "python_path": "",
+                "seal_26": false,
+                "midline_exclusion": true,
+                "solver_tol": 1e-06,
+                "solver_accel": "MinimalResidual",
+                "extract_streamlines": true,
+                "extract_arbor": true,
+                "n_streamlines": 400,
+                "n_arbor_branches": 6,
+                "step_vox": 0.35,
+                "min_length_mm": 15.0,
+                "max_length_mm": 250.0,
+                "midline_tol_mm": 0.0
+              }
+            }
+          },
+          "pos": {
+            "x": 1480.0,
+            "y": 180.0
+          }
+        },
+        "15": {
+          "node": {
+            "uuid": 15,
+            "label": "T1w slices",
+            "op": {
+              "VolumeDisplay": {
+                "colormap": "Grayscale",
+                "opacity": 1.0,
+                "window_center": 0.45,
+                "window_width": 0.9,
+                "render_3d_mode": "Off"
+              }
+            }
+          },
+          "pos": {
+            "x": 310.0,
+            "y": 80.0
+          }
+        },
+        "16": {
+          "node": {
+            "uuid": 16,
+            "label": "Live density glow",
+            "op": {
+              "VolumeDisplay": {
+                "colormap": "Hot",
+                "opacity": 1.0,
+                "window_center": 0.04,
+                "window_width": 0.08,
+                "render_3d_mode": "DirectVolume"
+              }
+            }
+          },
+          "pos": {
+            "x": 1820.0,
+            "y": 300.0
+          }
+        },
+        "17": {
+          "node": {
+            "uuid": 17,
+            "label": "Flux streamlines & arbor",
+            "op": {
+              "StreamlineDisplay": {
+                "enabled": false,
+                "render_style": "Tubes",
+                "tube_radius_mm": 0.45,
+                "tube_sides": 8,
+                "slab_half_width_mm": 5.0,
+                "opacity": 1.0
+              }
+            }
+          },
+          "pos": {
+            "x": 1820.0,
+            "y": 100.0
+          }
+        },
+        "21": {
+          "node": {
+            "uuid": 21,
+            "label": "ODF glyphs",
+            "op": {
+              "OdfGlyphRenderer": {
+                "scale": 3.25,
+                "subtract_iso": true,
+                "norm_within_voxel": false,
+                "opacity": 1.0,
+                "vertex_colormap": "Directional",
+                "detail": 3,
+                "visible": false
+              }
+            }
+          },
+          "pos": {
+            "x": 310,
+            "y": -120
+          }
+        },
+        "22": {
+          "node": {
+            "uuid": 22,
+            "label": "Start mask display",
+            "op": {
+              "VoxelMaskDisplay": {
+                "color": [
+                  0.3,
+                  0.85,
+                  0.35,
+                  1.0
+                ],
+                "opacity": 0.12,
+                "smooth_sigma": 1.0,
+                "min_component_volume_mm3": 0.0,
+                "style": "VoxelAccurate",
+                "slice_mode": "Filled"
+              }
+            }
+          },
+          "pos": {
+            "x": 580,
+            "y": 700
+          }
+        },
+        "23": {
+          "node": {
+            "uuid": 23,
+            "label": "End mask display",
+            "op": {
+              "VoxelMaskDisplay": {
+                "color": [
+                  0.3,
+                  0.55,
+                  0.95,
+                  1.0
+                ],
+                "opacity": 0.12,
+                "smooth_sigma": 1.0,
+                "min_component_volume_mm3": 0.0,
+                "style": "VoxelAccurate",
+                "slice_mode": "Filled"
+              }
+            }
+          },
+          "pos": {
+            "x": 580,
+            "y": 830
+          }
+        },
+        "24": {
+          "node": {
+            "uuid": 24,
+            "label": "Include mask display",
+            "op": {
+              "VoxelMaskDisplay": {
+                "color": [
+                  0.95,
+                  0.85,
+                  0.25,
+                  1.0
+                ],
+                "opacity": 0.12,
+                "smooth_sigma": 1.0,
+                "min_component_volume_mm3": 0.0,
+                "style": "VoxelAccurate",
+                "slice_mode": "Filled"
+              }
+            }
+          },
+          "pos": {
+            "x": 800,
+            "y": 700
+          }
+        }
+      },
+      "wires": [
+        {
+          "from": {
+            "node": 1,
+            "output": 1
+          },
+          "to": {
+            "node": 13,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 2,
+            "output": 0
+          },
+          "to": {
+            "node": 15,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 3,
+            "output": 0
+          },
+          "to": {
+            "node": 6,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 4,
+            "output": 0
+          },
+          "to": {
+            "node": 7,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 5,
+            "output": 0
+          },
+          "to": {
+            "node": 8,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 18,
+            "output": 0
+          },
+          "to": {
+            "node": 19,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 9,
+            "output": 0
+          },
+          "to": {
+            "node": 10,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 6,
+            "output": 0
+          },
+          "to": {
+            "node": 10,
+            "input": 1
+          }
+        },
+        {
+          "from": {
+            "node": 10,
+            "output": 0
+          },
+          "to": {
+            "node": 11,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 7,
+            "output": 0
+          },
+          "to": {
+            "node": 11,
+            "input": 1
+          }
+        },
+        {
+          "from": {
+            "node": 11,
+            "output": 0
+          },
+          "to": {
+            "node": 12,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 8,
+            "output": 0
+          },
+          "to": {
+            "node": 12,
+            "input": 1
+          }
+        },
+        {
+          "from": {
+            "node": 12,
+            "output": 0
+          },
+          "to": {
+            "node": 20,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 19,
+            "output": 0
+          },
+          "to": {
+            "node": 20,
+            "input": 1
+          }
+        },
+        {
+          "from": {
+            "node": 13,
+            "output": 0
+          },
+          "to": {
+            "node": 14,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 20,
+            "output": 0
+          },
+          "to": {
+            "node": 14,
+            "input": 2
+          }
+        },
+        {
+          "from": {
+            "node": 14,
+            "output": 2
+          },
+          "to": {
+            "node": 16,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 14,
+            "output": 0
+          },
+          "to": {
+            "node": 17,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 1,
+            "output": 1
+          },
+          "to": {
+            "node": 21,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 6,
+            "output": 0
+          },
+          "to": {
+            "node": 22,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 7,
+            "output": 0
+          },
+          "to": {
+            "node": 23,
+            "input": 0
+          }
+        },
+        {
+          "from": {
+            "node": 8,
+            "output": 0
+          },
+          "to": {
+            "node": 24,
+            "input": 0
+          }
+        }
+      ]
+    }
+  }
+}

@@ -37,6 +37,8 @@ pub(crate) fn workflow_job_kind_title(kind: WorkflowJobKind) -> &'static str {
         WorkflowJobKind::YehTractography => "yeh tractography",
         WorkflowJobKind::PrepareHausdorffPlan => "Hausdorff plan",
         WorkflowJobKind::PreparePyafqPlan => "pyAFQ plan",
+        WorkflowJobKind::MpatTransitions => "MPAT transitions",
+        WorkflowJobKind::MpatTractography => "MPAT tractography",
     }
 }
 
@@ -523,6 +525,30 @@ impl crate::app::TrxVizApp {
                         changed = true;
                     }
                 }
+                WorkflowJobMessage::LiveVolume {
+                    node_uuid,
+                    fingerprint,
+                    volume,
+                    summary,
+                } => {
+                    let is_current = self
+                        .workflow
+                        .execution_cache
+                        .node_runs
+                        .get(&node_uuid)
+                        .and_then(|r| r.current_fingerprint)
+                        == Some(fingerprint);
+                    if is_current {
+                        self.workflow.job_live_status.insert(node_uuid, summary);
+                        // Kept apart from the solved result so a cancelled or failed run
+                        // can't leave a half-converged frame (or its status) on the node.
+                        self.workflow
+                            .execution_cache
+                            .mpat_live_volumes
+                            .insert(node_uuid, (fingerprint, volume));
+                        changed = true;
+                    }
+                }
                 WorkflowJobMessage::Finished {
                     node_uuid,
                     fingerprint,
@@ -531,6 +557,12 @@ impl crate::app::TrxVizApp {
                     self.workflow.jobs_in_flight.remove(&node_uuid);
                     self.workflow.cancel_flags.remove(&node_uuid);
                     self.workflow.job_progress.remove(&node_uuid);
+                    self.workflow.job_live_status.remove(&node_uuid);
+                    // The run is over (solved, failed or cancelled): drop its live frame.
+                    self.workflow
+                        .execution_cache
+                        .mpat_live_volumes
+                        .remove(&node_uuid);
 
                     // Node removed from the document while the job ran —
                     // no record to attribute the result to.
@@ -753,6 +785,31 @@ impl crate::app::TrxVizApp {
                                     );
                                     summary
                                 }
+                                WorkflowJobOutput::MpatTransitions(output) => {
+                                    let summary = output.summary.clone();
+                                    self.workflow.execution_cache.mpat_transitions_cache.insert(
+                                        node_uuid,
+                                        trxviz_core::workflow::CachedMpatTransitions {
+                                            fingerprint,
+                                            output,
+                                        },
+                                    );
+                                    summary
+                                }
+                                WorkflowJobOutput::MpatTractography(output) => {
+                                    let summary = output.summary.clone();
+                                    self.workflow
+                                        .execution_cache
+                                        .mpat_tractography_cache
+                                        .insert(
+                                            node_uuid,
+                                            trxviz_core::workflow::CachedMpatTractography {
+                                                fingerprint,
+                                                output,
+                                            },
+                                        );
+                                    summary
+                                }
                             };
 
                             if fingerprint_current {
@@ -850,15 +907,25 @@ impl crate::app::TrxVizApp {
         // own `tx` isn't moved twice; `mpsc::Sender::clone` is cheap.
         let tx = self.workflow.job_tx.clone();
         let tx_for_progress = tx.clone();
-        let cancel =
-            trxviz_core::workflow::CancelFlag::with_progress_callback(move |done, total| {
+        let tx_for_live = tx.clone();
+        let cancel = trxviz_core::workflow::CancelFlag::with_callbacks(
+            move |done, total| {
                 let _ = tx_for_progress.send(WorkflowJobMessage::Progress {
                     node_uuid,
                     fingerprint,
                     done,
                     total,
                 });
-            });
+            },
+            move |volume, summary| {
+                let _ = tx_for_live.send(WorkflowJobMessage::LiveVolume {
+                    node_uuid,
+                    fingerprint,
+                    volume,
+                    summary,
+                });
+            },
+        );
         self.workflow.cancel_flags.insert(node_uuid, cancel.clone());
         std::thread::spawn(move || {
             let _ = tx.send(WorkflowJobMessage::Started {
@@ -1112,6 +1179,56 @@ impl crate::app::TrxVizApp {
                     fingerprint,
                     WorkflowJobKind::PreparePyafqPlan,
                     WorkflowJobPayload::PreparePyafqPlan(job),
+                );
+                queued_any = true;
+            }
+        }
+
+        for job in self
+            .workflow
+            .runtime
+            .scene_plan
+            .mpat_transitions_jobs
+            .clone()
+        {
+            let node_uuid = job.node_uuid;
+            let fingerprint = job.fingerprint;
+            if should_queue_expensive_job(
+                self.workflow.execution_cache.node_runs.get(&node_uuid),
+                fingerprint,
+                &self.workflow.jobs_in_flight,
+                node_uuid,
+            ) {
+                self.queue_workflow_job(
+                    node_uuid,
+                    fingerprint,
+                    WorkflowJobKind::MpatTransitions,
+                    WorkflowJobPayload::MpatTransitions(job),
+                );
+                queued_any = true;
+            }
+        }
+
+        for job in self
+            .workflow
+            .runtime
+            .scene_plan
+            .mpat_tractography_jobs
+            .clone()
+        {
+            let node_uuid = job.node_uuid;
+            let fingerprint = job.fingerprint;
+            if should_queue_expensive_job(
+                self.workflow.execution_cache.node_runs.get(&node_uuid),
+                fingerprint,
+                &self.workflow.jobs_in_flight,
+                node_uuid,
+            ) {
+                self.queue_workflow_job(
+                    node_uuid,
+                    fingerprint,
+                    WorkflowJobKind::MpatTractography,
+                    WorkflowJobPayload::MpatTractography(job),
                 );
                 queued_any = true;
             }
@@ -1638,7 +1755,9 @@ impl crate::app::TrxVizApp {
                         fr.resources_3d.set_fixels(&rs.device, &instances);
                         self.workflow.uploaded_fixel_3d_fingerprint = fp;
                     }
-                } else if let Some(odx) = self.scene.odx_scene.as_ref() {
+                } else if self.ui_mode == crate::app::state::UiMode::Simple
+                    && let Some(odx) = self.scene.odx_scene.as_ref()
+                {
                     let mut hasher = DefaultHasher::new();
                     (Arc::as_ptr(odx) as usize).hash(&mut hasher);
                     0x0df1_0003_u64.hash(&mut hasher);
@@ -1668,7 +1787,9 @@ impl crate::app::TrxVizApp {
                         fr.resources_2d.set_fixels(&rs.device, &instances);
                         self.workflow.uploaded_fixel_2d_fingerprint = fp;
                     }
-                } else if let Some(odx) = self.scene.odx_scene.as_ref() {
+                } else if self.ui_mode == crate::app::state::UiMode::Simple
+                    && let Some(odx) = self.scene.odx_scene.as_ref()
+                {
                     let mut hasher = DefaultHasher::new();
                     (Arc::as_ptr(odx) as usize).hash(&mut hasher);
                     0x0df1_0002_u64.hash(&mut hasher);
@@ -1841,8 +1962,13 @@ impl crate::app::TrxVizApp {
                     .uploaded_dpv_by_source
                     .insert(source_id, (node_uuid, dpv_name));
             }
+            let active_mem_keys: HashSet<usize> = mem_pending.keys().copied().collect();
             for (key, vol) in mem_pending {
                 ensure_uploaded(key, &vol, false);
+            }
+            if let Some(all) = renderer.callback_resources.get_mut::<AllSliceResources>() {
+                all.entries
+                    .retain(|(id, _)| *id < 1_000_000 || active_mem_keys.contains(id));
             }
 
             // Composite stacks each get their own
@@ -2311,8 +2437,12 @@ impl crate::app::TrxVizApp {
                         }
 
                         self.workflow.uploaded_odx_glyph_resource_key = None;
-                        self.workflow.uploaded_fixel_3d_fingerprint = 0;
-                        self.workflow.uploaded_fixel_2d_fingerprint = 0;
+                        // Non-zero so the per-frame fixel sync treats this load-time upload as
+                        // owned: a Fixel display node replaces it, Simple mode re-uploads it, and
+                        // in Advanced mode with no fixel node it is cleared instead of lingering
+                        // on screen with default styling that no node can edit.
+                        self.workflow.uploaded_fixel_3d_fingerprint = u64::MAX;
+                        self.workflow.uploaded_fixel_2d_fingerprint = u64::MAX;
                         self.scene.odx_scene = Some(scene.clone());
 
                         self.scene
@@ -2351,6 +2481,7 @@ impl crate::app::TrxVizApp {
         ensure_node_uuids(&mut self.workflow.document);
         self.rebuild_workflow_editor_from_document();
         self.workflow.pending_stage_camera_fit = true;
+        self.ui_mode = crate::app::state::UiMode::Advanced;
         self.workflow.project_path = Some(path.clone());
         self.status_msg = Some(format!("Opened workflow project {}", path.display()));
         self.error_msg = None;

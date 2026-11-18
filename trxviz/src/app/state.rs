@@ -836,6 +836,10 @@ pub struct WorkflowState {
     /// on Finished. The activity overlay reads this to render a
     /// progress bar next to the Cancel button.
     pub job_progress: HashMap<WorkflowNodeUuid, (u64, u64)>,
+    /// Latest live status line of each in-flight job that streams one (MPAT's
+    /// solver frames). Kept apart from the node's result summary so a running job
+    /// never shows the previous run's result as its status; removed on Finished.
+    pub job_live_status: HashMap<WorkflowNodeUuid, String>,
 }
 
 impl WorkflowState {
@@ -882,6 +886,7 @@ impl WorkflowState {
             jobs_in_flight: HashMap::new(),
             cancel_flags: HashMap::new(),
             job_progress: HashMap::new(),
+            job_live_status: HashMap::new(),
         }
     }
 }

@@ -9,15 +9,6 @@ use crate::renderer::camera::OrbitCamera;
 use crate::renderer::viewport::ViewportIndex;
 use crate::scene::{HeadlessScene, HeadlessWorkflowState};
 
-fn slice_world_position_3d(scene: &HeadlessScene, axis_index: usize) -> f32 {
-    if let Some(nf) = scene.nifti_files.first() {
-        nf.volume
-            .slice_world_position(axis_index, scene.slice_indices[axis_index])
-    } else {
-        scene.slice_world_offsets[axis_index]
-    }
-}
-
 #[cfg(feature = "png-export")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_scene3d_to_png(
@@ -183,7 +174,7 @@ pub(super) fn render_scene3d_to_png(
             fog_far,
         );
     }
-    if render_data.glyph_visible || render_data.odx_visible {
+    if render_data.glyph_visible || (render_data.odx_visible && render_data.odx_glyphs_visible) {
         resources.glyphs.update_uniforms(
             queue,
             viewport_3d,
@@ -417,7 +408,8 @@ pub(super) fn render_scene3d_to_png(
                 camera_dir,
             );
         }
-        if render_data.glyph_visible || render_data.odx_visible {
+        if render_data.glyph_visible || (render_data.odx_visible && render_data.odx_glyphs_visible)
+        {
             resources.glyphs.paint(render_pass, viewport_3d, false);
         }
         if render_data.odx_visible && render_data.odx_fixel_3d_visible {
@@ -431,9 +423,9 @@ pub(super) fn render_scene3d_to_png(
     });
     if has_2d_slice_volume {
         let slice_positions_3d = [
-            slice_world_position_3d(scene, 0),
-            slice_world_position_3d(scene, 1),
-            slice_world_position_3d(scene, 2),
+            scene.slice_world(0),
+            scene.slice_world(1),
+            scene.slice_world(2),
         ];
         for axis_index in 0..3 {
             if slice_visible[axis_index] {

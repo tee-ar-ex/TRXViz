@@ -286,23 +286,63 @@ impl From<AddNoEndOp> for WorkflowNodeKind {
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
-/// Pointwise OR union. Only well-defined when both masks share the same
-/// grid; otherwise we conservatively keep `a` and warn in the log.
-fn union_masks(a: &VoxelMask, b: &VoxelMask) -> VoxelMask {
-    if a.dims != b.dims || a.data.len() != b.data.len() {
-        log::warn!(
-            "union_masks: grid mismatch (a.dims={:?}, b.dims={:?}); keeping first mask",
-            a.dims,
-            b.dims
-        );
+/// Pointwise OR union across identical or differing grids (resampling `b` onto
+/// `a`'s grid via `voxel_to_ras` when grids differ), on `a`'s grid. A grid-less
+/// mask (no dims or data, e.g. `VoxelMask::default()`) is the identity: the other
+/// mask is returned as is, since there is no grid to resample it onto.
+pub(crate) fn union_masks(a: &VoxelMask, b: &VoxelMask) -> VoxelMask {
+    let a_empty = a.data.is_empty() || a.dims.contains(&0);
+    let b_empty = b.data.is_empty() || b.dims.contains(&0);
+    if a_empty {
+        return b.clone();
+    }
+    if b_empty {
         return a.clone();
     }
-    let data: Vec<u8> = a
-        .data
+    let same_affine = (a.voxel_to_ras - b.voxel_to_ras)
+        .to_cols_array()
         .iter()
-        .zip(b.data.iter())
-        .map(|(x, y)| if *x != 0 || *y != 0 { 1 } else { 0 })
-        .collect();
+        .all(|d| d.abs() < 1e-3);
+    if a.dims == b.dims && a.data.len() == b.data.len() && same_affine {
+        let data: Vec<u8> = a
+            .data
+            .iter()
+            .zip(b.data.iter())
+            .map(|(x, y)| if *x != 0 || *y != 0 { 1 } else { 0 })
+            .collect();
+        return VoxelMask {
+            dims: a.dims,
+            voxel_to_ras: a.voxel_to_ras,
+            data,
+            ..Default::default()
+        };
+    }
+
+    let [ax, ay, az] = [a.dims[0] as usize, a.dims[1] as usize, a.dims[2] as usize];
+    let [bx, by, bz] = [b.dims[0] as isize, b.dims[1] as isize, b.dims[2] as isize];
+    let a_to_b = b.voxel_to_ras.inverse() * a.voxel_to_ras;
+    let mut data = a.data.clone();
+    for k in 0..az {
+        for j in 0..ay {
+            for i in 0..ax {
+                let a_idx = i + ax * (j + ay * k);
+                if data[a_idx] != 0 {
+                    continue;
+                }
+                let pt_b = a_to_b.transform_point3(glam::Vec3::new(i as f32, j as f32, k as f32));
+                let bi = pt_b.x.round() as isize;
+                let bj = pt_b.y.round() as isize;
+                let bk = pt_b.z.round() as isize;
+                if bi >= 0 && bi < bx && bj >= 0 && bj < by && bk >= 0 && bk < bz {
+                    let b_idx = (bi as usize)
+                        + (bx as usize) * ((bj as usize) + (by as usize) * (bk as usize));
+                    if b.data.get(b_idx).copied().unwrap_or(0) != 0 {
+                        data[a_idx] = 1;
+                    }
+                }
+            }
+        }
+    }
     VoxelMask {
         dims: a.dims,
         voxel_to_ras: a.voxel_to_ras,

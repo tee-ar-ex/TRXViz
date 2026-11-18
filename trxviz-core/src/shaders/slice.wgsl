@@ -176,6 +176,8 @@ fn sample_trilinear(uv: vec3<f32>) -> f32 {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let intensity = textureSample(volume_texture, volume_sampler, in.tex_coord).r;
+    // Empty voxels stay transparent so an overlay (ROI mask, bundle map) drawn as its
+    // own slice pass doesn't paint its zero background over the volumes beneath it.
     if (intensity <= 1e-6) {
         discard;
     }

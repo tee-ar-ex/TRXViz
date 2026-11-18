@@ -92,6 +92,42 @@ impl Default for HeadlessScene {
     }
 }
 
+impl HeadlessScene {
+    /// World (RAS mm) position of viewport slice `axis_index` (0 axial, 1 coronal,
+    /// 2 sagittal): the first NIfTI's current slice when one is loaded, otherwise the
+    /// stored offset.
+    pub fn slice_world(&self, axis_index: usize) -> f32 {
+        match self.nifti_files.first() {
+            Some(nf) => nf
+                .volume
+                .slice_world_position(axis_index, self.slice_indices[axis_index]),
+            None => self.slice_world_offsets[axis_index],
+        }
+    }
+
+    /// Index of the slice nearest [`Self::slice_world`] on a volume with grid
+    /// (`voxel_to_ras`, `dims`). `slice_indices` are in the first NIfTI's voxel space,
+    /// so applying them to a volume on another grid (a 1.7 mm mask or ODX under a 1 mm
+    /// T1) samples a slice at the wrong height. Without a NIfTI, `slice_indices` already
+    /// come from the only grid in the scene and are used as-is.
+    pub fn slice_index_on_grid(
+        &self,
+        axis_index: usize,
+        voxel_to_ras: &glam::Mat4,
+        dims: [usize; 3],
+    ) -> usize {
+        if self.nifti_files.is_empty() {
+            return self.slice_indices[axis_index];
+        }
+        crate::data::nifti_data::nearest_slice_index(
+            voxel_to_ras,
+            dims,
+            axis_index,
+            self.slice_world(axis_index),
+        )
+    }
+}
+
 pub fn direct_streamline_import_warnings(path: &Path, options: &ConversionOptions) -> Vec<String> {
     match trx_rs::detect_format(path) {
         Ok(Format::Trk) => vec![

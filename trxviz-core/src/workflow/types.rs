@@ -733,6 +733,119 @@ pub struct WorkflowExecutionCache {
     /// drag — which made the editor visibly slow once a NIfTI was
     /// wired into any of those ops.
     pub volume_scalars_cache: HashMap<FileId, Arc<VolumeScalars>>,
+    /// `RoiFromVolume` output per node, keyed by (input volume, threshold). Reusing the
+    /// same `Arc<VoxelMask>` keeps downstream pointer-identity fingerprints (Voxel Mask
+    /// Display's mesh cache) stable, so a big ROI isn't re-meshed on every evaluation —
+    /// which job progress and live MPAT frames trigger several times a second.
+    pub roi_from_volume_cache: HashMap<WorkflowNodeUuid, (u64, Arc<VoxelMask>)>,
+    pub mpat_transitions_cache: HashMap<WorkflowNodeUuid, CachedMpatTransitions>,
+    pub mpat_tractography_cache: HashMap<WorkflowNodeUuid, CachedMpatTractography>,
+    /// Latest live density frame of an MPAT tractography run in progress, with the run's
+    /// fingerprint. Shown on the node's density port while that run is current; cleared when
+    /// the run finishes, fails or is cancelled. Never written into the solved result.
+    pub mpat_live_volumes: HashMap<WorkflowNodeUuid, (u64, Arc<VolumeScalars>)>,
+}
+
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum MpatPreset {
+    #[default]
+    Standard,
+    Ptt,
+}
+
+impl MpatPreset {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Ptt => "ptt",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Standard => "Standard (MITTENS v2 / Cieslak 2018)",
+            Self::Ptt => "PTT (Parallel Transport + Stopping Mass)",
+        }
+    }
+}
+
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum MpatSolverAccel {
+    #[default]
+    MinimalResidual,
+    Aitken,
+    None,
+}
+
+impl MpatSolverAccel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::MinimalResidual => "mr",
+            Self::Aitken => "aitken",
+            Self::None => "none",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::MinimalResidual => "Minimal Residual (MR)",
+            Self::Aitken => "Aitken Delta-Squared",
+            Self::None => "Unaccelerated Series",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MpatTransitionsHandle {
+    pub fingerprint: u64,
+    pub state_path: PathBuf,
+    pub working_dir: Option<PathBuf>,
+    pub dims: [u32; 3],
+    pub voxel_to_ras: glam::Mat4,
+    pub summary: String,
+}
+
+#[derive(Clone)]
+pub struct MpatTransitionsOutput {
+    pub handle: Arc<MpatTransitionsHandle>,
+    pub codi_double: Arc<VolumeScalars>,
+    pub codi_single: Arc<VolumeScalars>,
+    pub coasy: Arc<VolumeScalars>,
+    pub p_terminate_double: Arc<VolumeScalars>,
+    pub p_terminate_single: Arc<VolumeScalars>,
+    pub total_amplitude: Arc<VolumeScalars>,
+    pub kl_single: Arc<VolumeScalars>,
+    pub chain_dead: Arc<VolumeScalars>,
+    pub summary: String,
+}
+
+#[derive(Clone)]
+pub struct CachedMpatTransitions {
+    pub fingerprint: u64,
+    pub output: MpatTransitionsOutput,
+}
+
+#[derive(Clone)]
+pub struct MpatTractographyOutput {
+    pub flow: StreamlineFlow,
+    pub afd: Arc<VolumeScalars>,
+    pub density: Arc<VolumeScalars>,
+    pub tdimm: Arc<VolumeScalars>,
+    pub qharmonic: Arc<VolumeScalars>,
+    pub coherence: Arc<VolumeScalars>,
+    pub keff: Arc<VolumeScalars>,
+    pub endpoints: Arc<VolumeScalars>,
+    pub summary: String,
+}
+
+#[derive(Clone)]
+pub struct CachedMpatTractography {
+    pub fingerprint: u64,
+    pub output: MpatTractographyOutput,
 }
 
 #[derive(Clone)]
@@ -854,6 +967,8 @@ pub struct SceneFramePlan {
     // registry) rather than a bespoke field.
     pub hausdorff_plan_jobs: Vec<HausdorffPlanJob>,
     pub pyafq_plan_jobs: Vec<PyafqPlanJob>,
+    pub mpat_transitions_jobs: Vec<MpatTransitionsJob>,
+    pub mpat_tractography_jobs: Vec<MpatTractographyJob>,
 }
 
 #[derive(
@@ -1041,6 +1156,8 @@ impl Default for SceneFramePlan {
             yeh_tractography_plans: Vec::new(),
             hausdorff_plan_jobs: Vec::new(),
             pyafq_plan_jobs: Vec::new(),
+            mpat_transitions_jobs: Vec::new(),
+            mpat_tractography_jobs: Vec::new(),
         }
     }
 }
@@ -1283,6 +1400,8 @@ fn volume_scalars_handle(s: &VolumeScalars) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     s.dims.hash(&mut h);
+    s.metadata.map_name.hash(&mut h);
+    s.metadata.series_index.hash(&mut h);
     for v in s.voxel_to_ras.to_cols_array() {
         v.to_bits().hash(&mut h);
     }
@@ -1474,6 +1593,7 @@ pub(crate) enum WorkflowValue {
     OdxCatalog(crate::data::odx_data::OdxCatalog),
     VoxelMask(Arc<VoxelMask>),
     TrackingPlan(Arc<TrackingPlan>),
+    MpatTransitions(Arc<MpatTransitionsHandle>),
 }
 
 /// A voxel-space binary mask. Replaces the earlier point-cloud `SeedRoi`; now
@@ -1861,6 +1981,8 @@ pub enum WorkflowJobKind {
     YehTractography,
     PrepareHausdorffPlan,
     PreparePyafqPlan,
+    MpatTransitions,
+    MpatTractography,
 }
 
 #[derive(Clone)]
@@ -1887,6 +2009,8 @@ pub enum WorkflowJobPayload {
     },
     PrepareHausdorffPlan(HausdorffPlanJob),
     PreparePyafqPlan(PyafqPlanJob),
+    MpatTransitions(MpatTransitionsJob),
+    MpatTractography(MpatTractographyJob),
 }
 
 #[derive(Clone)]
@@ -1926,6 +2050,54 @@ pub enum WorkflowJobOutput {
         prob_map: Option<Arc<VolumeScalars>>,
         summary: String,
     },
+    MpatTransitions(MpatTransitionsOutput),
+    MpatTractography(MpatTractographyOutput),
+}
+
+#[derive(Clone)]
+pub struct MpatTransitionsJob {
+    pub node_uuid: WorkflowNodeUuid,
+    pub fingerprint: u64,
+    pub label: String,
+    pub working_dir: String,
+    pub python_path: String,
+    pub odx_path: Option<PathBuf>,
+    pub transient_mask: Option<Arc<VoxelMask>>,
+    pub absorb_mask: Option<Arc<VoxelMask>>,
+    pub preset: MpatPreset,
+    pub angle_deg: f32,
+    pub step_vox: f32,
+    pub double_odf: bool,
+    pub fod_thresh: f32,
+    pub fod_power: f32,
+    pub stop_mass_tau: f32,
+    pub curv_sigma_deg: f32,
+    pub probe_radius_vox: f32,
+    pub max_length_mm: f32,
+    pub wm_threshold: f32,
+}
+
+#[derive(Clone)]
+pub struct MpatTractographyJob {
+    pub node_uuid: WorkflowNodeUuid,
+    pub fingerprint: u64,
+    pub label: String,
+    pub python_path: String,
+    pub transitions: Arc<MpatTransitionsHandle>,
+    pub seed_mask: Option<Arc<VoxelMask>>,
+    pub tracking_plan: Option<Arc<TrackingPlan>>,
+    pub seal_26: bool,
+    pub midline_exclusion: bool,
+    pub midline_tol_mm: f32,
+    pub solver_tol: f32,
+    pub solver_accel: MpatSolverAccel,
+    pub extract_streamlines: bool,
+    pub extract_arbor: bool,
+    pub n_streamlines: u32,
+    pub n_arbor_branches: u32,
+    pub step_vox: f32,
+    pub min_length_mm: f32,
+    pub max_length_mm: f32,
 }
 
 /// All inputs needed to run a Hausdorff plan build off-thread. Cloned by the
@@ -1969,6 +2141,12 @@ pub enum WorkflowJobMessage {
         done: u64,
         total: u64,
     },
+    LiveVolume {
+        node_uuid: WorkflowNodeUuid,
+        fingerprint: u64,
+        volume: Arc<VolumeScalars>,
+        summary: String,
+    },
     Finished {
         node_uuid: WorkflowNodeUuid,
         fingerprint: u64,
@@ -1995,6 +2173,7 @@ pub enum PortKind {
     OdxCatalog,
     VoxelMask,
     TrackingPlan,
+    MpatTransitions,
 }
 
 pub struct SeededWorkflowBranch {

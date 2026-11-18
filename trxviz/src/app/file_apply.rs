@@ -663,6 +663,11 @@ impl super::TrxVizApp {
                 fr.resources_2d.set_fixels(&rs.device, &fixel_instances);
             }
         }
+        // Mark the load-time upload as owned (non-zero) so the per-frame fixel sync can
+        // replace it with a Fixel display node's, or clear it in Advanced mode when no node
+        // draws fixels; with 0 it would stay on screen with uneditable default styling.
+        self.workflow.uploaded_fixel_3d_fingerprint = u64::MAX;
+        self.workflow.uploaded_fixel_2d_fingerprint = u64::MAX;
 
         self.scene.odx_scene = Some(scene.clone());
         {
