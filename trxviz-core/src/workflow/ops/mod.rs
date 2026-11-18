@@ -1392,6 +1392,10 @@ pub fn citation_keys(kind: &WorkflowNodeKind) -> &'static [&'static str] {
     with_workflow_op!(kind, |op| op.citation_keys())
 }
 
+pub fn runs_original_software(kind: &WorkflowNodeKind) -> bool {
+    with_workflow_op!(kind, |op| op.runs_original_software())
+}
+
 /// Render this op's methods-boilerplate sentence with its parameter
 /// values interpolated. Returns `None` if the op contributes no
 /// methods prose (sources, display nodes, pure routing). Materializes

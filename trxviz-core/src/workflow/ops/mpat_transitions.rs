@@ -174,10 +174,18 @@ impl WorkflowOp for MpatTransitionsOp {
         )
     }
 
+    fn citation_keys(&self) -> &'static [&'static str] {
+        &["mpat"]
+    }
+
+    fn runs_original_software(&self) -> bool {
+        true
+    }
+
     fn boilerplate(&self) -> Option<Cow<'_, str>> {
         Some(Cow::Owned(format!(
             "Analytic voxel-to-voxel transition probabilities and the 26-direction-class \
-             absorbing Markov chain were constructed with MITTENS and MPAT using a \
+             absorbing Markov chain were constructed with MITTENS and MPAT [@mpat] using a \
              {angle:.0}° turning cone, {step:.2}-voxel step size, {mode} look-ahead, \
              FOD threshold {thresh:.2}, FOD exponent {power:.2}, stopping mass τ={tau:.4}, \
              and curvature prior σ={curv:.1}°.",

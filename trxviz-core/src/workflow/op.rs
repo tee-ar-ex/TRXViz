@@ -67,6 +67,17 @@ pub trait WorkflowOp: std::fmt::Debug {
         &[]
     }
 
+    /// True when the op runs the original software package itself
+    /// (MPAT, through its Python bridge) rather than a TRXViz
+    /// re-implementation or port. Its citations then credit that
+    /// software directly, and the non-endorsement notice about
+    /// re-implementations does not apply to it. A methods section
+    /// whose ops all run original software credits those packages
+    /// instead of TRXViz.
+    fn runs_original_software(&self) -> bool {
+        false
+    }
+
     /// One-sentence methods description with this op's parameter
     /// values interpolated, written in past tense and suitable for a
     /// paper's Methods section. Cite with Pandoc `[@key]` syntax, and

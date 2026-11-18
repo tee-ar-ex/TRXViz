@@ -195,7 +195,9 @@ MPAT_PYTHON=/path/to/envs/mpat/bin/python \
 ```
 
 `trxviz-cli methods --project out/mpat/sub-01_LeftArcuate_workflow.json` writes a methods
-paragraph describing the settings used.
+paragraph describing the settings used (`methods.md`). It cites the MPAT paper,
+[Kruper, Cieslak & Rokem (2026)](https://www.biorxiv.org/content/10.64898/2026.11.12.766276v1),
+and writes the matching BibTeX entry to `references.bib`.
 
 !!! note "QSIRecon"
     QSIRecon's MPAT workflow is in review

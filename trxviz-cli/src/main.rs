@@ -247,9 +247,13 @@ fn run_methods(args: MethodsArgs) -> anyhow::Result<()> {
     if !args.quiet {
         // Print the banner on stderr so stdout stays empty for
         // scripting (the markdown file itself is the real output).
-        eprintln!("── TRXViz: not the authoritative implementation ──");
-        eprintln!("{NON_ENDORSEMENT_NOTICE}");
-        eprintln!();
+        // Workflows whose methods all run the original software (MPAT)
+        // carry no notice, so there is no banner to repeat.
+        if report.credits_trxviz {
+            eprintln!("── TRXViz: not the authoritative implementation ──");
+            eprintln!("{NON_ENDORSEMENT_NOTICE}");
+            eprintln!();
+        }
         eprintln!(
             "Wrote methods prose to {} and filtered bibliography to {} ({} citation keys).",
             args.out.display(),

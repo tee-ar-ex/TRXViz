@@ -216,9 +216,17 @@ impl WorkflowOp for MpatTractographyOp {
         )
     }
 
+    fn citation_keys(&self) -> &'static [&'static str] {
+        &["mpat"]
+    }
+
+    fn runs_original_software(&self) -> bool {
+        true
+    }
+
     fn boilerplate(&self) -> Option<Cow<'_, str>> {
         let mut text = format!(
-            "Bundle-conditioned Markov chain absorbing tractography (MPAT) was solved to \
+            "Bundle-conditioned Markov chain absorbing tractography (MPAT) [@mpat] was solved to \
              tolerance {tol:.1e} ({accel} acceleration).",
             tol = self.solver_tol,
             accel = self.solver_accel.label(),
