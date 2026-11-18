@@ -203,6 +203,19 @@ impl WorkflowOp for MpatTractographyOp {
         OpCategory::Tractography
     }
 
+    fn describe(&self) -> Cow<'static, str> {
+        Cow::Borrowed(
+            "Solves one bundle on the chain from MPAT Transition Probabilities, using the \
+             start, end, include and exclude regions of a tracking plan. While the solver \
+             runs, the Visitation Density output shows the latest density frame, so the \
+             bundle can be watched building up. Outputs the AFD, density, TDI, harmonic \
+             coordinate, coherence, branching and endpoint maps, plus flux streamlines and a \
+             branch arbor. Midline exclusion (on by default) keeps a one-sided bundle in its \
+             hemisphere and is needed for the exclude masks MPAT writes. See the \
+             [MPAT guide](../../mpat.md).",
+        )
+    }
+
     fn boilerplate(&self) -> Option<Cow<'_, str>> {
         let mut text = format!(
             "Bundle-conditioned Markov chain absorbing tractography (MPAT) was solved to \

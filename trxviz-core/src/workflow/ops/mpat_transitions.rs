@@ -161,6 +161,19 @@ impl WorkflowOp for MpatTransitionsOp {
         OpCategory::Tractography
     }
 
+    fn describe(&self) -> Cow<'static, str> {
+        Cow::Borrowed(
+            "Builds MPAT's absorbing Markov chain (voxel-to-26-neighbour transition \
+             probabilities) by running `mpat.trxviz_bridge` in a Python environment with \
+             MPAT installed. Reads either a transitions ODX written by \
+             `mpat --save-transitions odx`, which loads in seconds, or a plain fODF ODX, which \
+             also needs tissue maps (a pyAFQ output folder, MPAT's `desc-mpat_dseg`, or a \
+             wired Transient WM Mask). The chain is cached as `mpat_transitions_<hash>.npz` \
+             and reused while the inputs and settings stay the same. See the \
+             [MPAT guide](../../mpat.md).",
+        )
+    }
+
     fn boilerplate(&self) -> Option<Cow<'_, str>> {
         Some(Cow::Owned(format!(
             "Analytic voxel-to-voxel transition probabilities and the 26-direction-class \
@@ -286,7 +299,8 @@ impl WorkflowOp for MpatTransitionsOp {
             .mpat_transitions_cache
             .get(&ctx.node.uuid)
         else {
-            ctx.node_state.summary = "Transitions not built yet — click Build Transitions.".into();
+            ctx.node_state.summary =
+                "Transitions not built yet — click Build MPAT Transitions.".into();
             return Ok(empty_outputs(true));
         };
 

@@ -721,6 +721,13 @@ pub fn all_op_doc_info() -> Vec<OpDocInfo> {
             direction_getter: dipy.direction_getter,
         },
     ));
+    let mpat_transitions = MpatTransitionsOp::default();
+    v.push(describe(&mpat_transitions, mpat_transitions.clone().into()));
+    let mpat_tractography = MpatTractographyOp::default();
+    v.push(describe(
+        &mpat_tractography,
+        mpat_tractography.clone().into(),
+    ));
     let yeh = YehTractographyOp::default();
     v.push(describe(
         &yeh,

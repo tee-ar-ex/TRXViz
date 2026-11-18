@@ -59,6 +59,7 @@ nav:
   - Getting Started: getting-started.md
   - GUI Guide: gui-guide.md
   - Workflows: workflows.md
+  - MPAT Tractography: mpat.md
   - Command Line: cli.md
   - Architecture: architecture.md
   - Troubleshooting: troubleshooting.md
