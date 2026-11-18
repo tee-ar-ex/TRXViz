@@ -3850,7 +3850,7 @@ dependencies = [
 
 [[package]]
 name = "trxviz"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "eframe",
@@ -3874,7 +3874,7 @@ dependencies = [
 
 [[package]]
 name = "trxviz-cli"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3884,7 +3884,7 @@ dependencies = [
 
 [[package]]
 name = "trxviz-core"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3913,7 +3913,7 @@ dependencies = [
 
 [[package]]
 name = "trxviz-docgen"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "trxviz-core",

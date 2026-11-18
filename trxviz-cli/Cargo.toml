@@ -1,6 +1,6 @@
 [package]
 name = "trxviz-cli"
-version = "0.1.0"
+version = "0.7.0"
 edition = "2024"
 description = "Headless command-line rendering for TRXViz workflows and scenes."
 readme = "README.md"

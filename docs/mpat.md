@@ -16,7 +16,8 @@ MPAT installed in a Python environment you choose.
 
 ## What you need
 
-- TRXViz ([Getting Started](getting-started.md)).
+- TRXViz 0.7.0 or newer ([Getting Started](getting-started.md)). Earlier releases don't have
+  the MPAT nodes. `trxviz-cli --version` prints the version you have.
 - A Python environment with MPAT installed, following
   [MPAT's installation page](https://github.com/rokemlab/MPAT/blob/main/docs/source/install.md).
 - One participant's preprocessed DWI (with its `.bval` and `.bvec`) and a T1w image registered to

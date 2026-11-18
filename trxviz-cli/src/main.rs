@@ -12,6 +12,7 @@ use trxviz_core::workflow::methods::{NON_ENDORSEMENT_NOTICE, generate_methods_re
 
 #[derive(Parser)]
 #[command(name = "trxviz-cli")]
+#[command(version)]
 #[command(about = "Headless rendering for TRXViz workflows and scenes")]
 struct Cli {
     #[command(subcommand)]
@@ -304,6 +305,16 @@ mod tests {
     fn parse_vec3_rejects_invalid_values() {
         assert!(parse_vec3("1,2").is_err());
         assert!(parse_vec3("1,2,nope").is_err());
+    }
+
+    #[test]
+    fn version_flag_reports_the_crate_version() {
+        let err = match Cli::try_parse_from(["trxviz-cli", "--version"]) {
+            Ok(_) => panic!("--version should exit with the version, not parse"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
+        assert!(err.to_string().contains(env!("CARGO_PKG_VERSION")));
     }
 
     #[test]
